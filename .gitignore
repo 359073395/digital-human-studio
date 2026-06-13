@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+release/
+build/
+coverage/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local app data and generated media
+data/
+workspace/
+exports/
+tmp/
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs
+logs/
+*.log
+
+# Brainstorming visual companion sessions
+.superpowers/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
