@@ -64,6 +64,7 @@ Behavior:
    - task content language,
    - selected output preset.
 3. Call OpenAI image generation or image edit with `gpt-image-2`.
+   - For the raw multipart image-edit request, upload the product reference as `image[]`.
 4. Save the generated presenter image as a task media asset.
 5. Submit one HeyGen image-based video render per selected output preset using the generated image.
 6. Save HeyGen video outputs and provider subtitle files like the existing avatar render path.

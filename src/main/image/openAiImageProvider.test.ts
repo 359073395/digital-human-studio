@@ -112,6 +112,8 @@ describe("OpenAiImageProvider", () => {
     });
     expect(formData.get("model")).toBe("gpt-image-2");
     expect(formData.get("size")).toBe("1024x1536");
+    expect(formData.getAll("image[]")).toHaveLength(1);
+    expect(formData.get("image")).toBeNull();
     expect(String(formData.get("prompt"))).toContain("年轻印尼女主播");
     expect(String(formData.get("prompt"))).toContain("手拿商品靠近镜头展示");
     expect(String(formData.get("prompt"))).not.toContain(TEST_API_KEY);

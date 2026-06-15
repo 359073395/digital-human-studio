@@ -73,7 +73,7 @@ export class OpenAiImageProvider implements ImageProvider {
     formData.append("prompt", promptPreview);
     formData.append("size", imageSizeForPreset(input.preset));
     formData.append(
-      "image",
+      "image[]",
       createImageBlob(input.productImagePath),
       path.basename(input.productImagePath)
     );
