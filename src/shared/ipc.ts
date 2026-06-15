@@ -31,6 +31,7 @@ export interface DigitalHumanStudioAPI {
   updateTask: (input: UpdateTaskInput) => Promise<VideoTask>;
   generateScript: (taskId: string) => Promise<VideoTask>;
   transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
+  renderHeyGenAvatar: (taskId: string) => Promise<VideoTask>;
   runMockWorkflow: (taskId: string) => Promise<VideoTask>;
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
   openTaskExports: (taskId: string) => Promise<void>;
@@ -49,6 +50,7 @@ export const IPC_CHANNELS = {
   updateTask: "tasks:update",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
+  renderHeyGenAvatar: "avatar:render-heygen",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
   openTaskExports: "workflow:open-exports",

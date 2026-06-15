@@ -8,6 +8,8 @@ import {
   type RetryWorkflowStepInput,
   type UpdateTaskInput
 } from "../shared/ipc";
+import { AvatarWorkflowService } from "./avatar/avatarWorkflowService";
+import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
 import { createAppPaths, ensureAppPaths, getTaskMediaDirectory } from "./storage/appPaths";
 import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
@@ -70,6 +72,7 @@ interface MainRepositories {
   serviceConfigurationRepository: ServiceConfigurationRepository;
   mockWorkflowRunner: MockWorkflowRunner;
   scriptWorkflowService: ScriptWorkflowService;
+  avatarWorkflowService: AvatarWorkflowService;
   appPaths: ReturnType<typeof createAppPaths>;
 }
 
@@ -95,6 +98,11 @@ function createRepositories(): MainRepositories {
     appPaths,
     new OpenAiCompatibleScriptProvider(serviceConfigurationRepository, credentialStore)
   );
+  const avatarWorkflowService = new AvatarWorkflowService(
+    taskRepository,
+    appPaths,
+    new HeyGenAvatarProvider(serviceConfigurationRepository, credentialStore)
+  );
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   taskRepository.ensureSeedTask();
   return {
@@ -102,6 +110,7 @@ function createRepositories(): MainRepositories {
     serviceConfigurationRepository,
     mockWorkflowRunner,
     scriptWorkflowService,
+    avatarWorkflowService,
     appPaths
   };
 }
@@ -109,6 +118,7 @@ function createRepositories(): MainRepositories {
 function registerIpcHandlers(repositories: MainRepositories): void {
   const {
     appPaths,
+    avatarWorkflowService,
     mockWorkflowRunner,
     scriptWorkflowService,
     serviceConfigurationRepository,
@@ -146,6 +156,10 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.transcribeSource, (_event, taskId: string) =>
     scriptWorkflowService.transcribeSource(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.renderHeyGenAvatar, (_event, taskId: string) =>
+    avatarWorkflowService.renderHeyGenAvatar(taskId)
   );
 
   ipcMain.handle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>

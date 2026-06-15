@@ -13,6 +13,9 @@ export interface ProviderDefinition {
 export interface ServiceConfigurationSettings {
   baseUrl?: string;
   modelName?: string;
+  avatarId?: string;
+  voiceId?: string;
+  resolution?: "720p" | "1080p" | "4k";
   enabled?: boolean;
 }
 
@@ -79,7 +82,7 @@ export function getProviderDefinition(providerId: ProviderId): ProviderDefinitio
 export function defaultServiceSettings(providerId: ProviderId): ServiceConfigurationSettings {
   switch (providerId) {
     case "heygen":
-      return { baseUrl: "https://api.heygen.com", enabled: true };
+      return { baseUrl: "https://api.heygen.com", resolution: "720p", enabled: true };
     case "llm":
       return { baseUrl: "https://api.openai.com/v1", modelName: "gpt-4.1-mini", enabled: true };
     case "asr":

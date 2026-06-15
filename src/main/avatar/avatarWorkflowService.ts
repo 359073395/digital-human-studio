@@ -1,0 +1,98 @@
+import fs from "node:fs";
+import path from "node:path";
+import { OUTPUT_PRESETS, type OutputPreset, type VideoTask } from "../../shared/domain";
+import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
+import { TaskRepository } from "../storage/taskRepository";
+import type { AvatarProvider, AvatarRenderResult } from "./avatarProvider";
+
+export class AvatarWorkflowService {
+  constructor(
+    private readonly taskRepository: TaskRepository,
+    private readonly paths: AppPaths,
+    private readonly avatarProvider: AvatarProvider
+  ) {}
+
+  async renderHeyGenAvatar(taskId: string): Promise<VideoTask> {
+    const task = this.requireTask(taskId);
+    this.taskRepository.updateStepStatus(taskId, "avatar", "running");
+
+    try {
+      for (const presetId of task.selectedOutputPresets) {
+        const preset = requireOutputPreset(presetId);
+        const currentTask = this.requireTask(taskId);
+        this.taskRepository.updateOutputVariant(taskId, preset.id, { status: "rendering" });
+
+        const result = await this.avatarProvider.renderAvatar({
+          task: currentTask,
+          preset
+        });
+        await this.persistAvatarResult(taskId, preset, result);
+        this.taskRepository.updateOutputVariant(taskId, preset.id, { status: "waiting" });
+      }
+
+      return this.taskRepository.updateStepStatus(taskId, "avatar", "complete");
+    } catch (error) {
+      this.markSelectedVariantsFailed(taskId);
+      return this.taskRepository.updateStepStatus(
+        taskId,
+        "avatar",
+        "retry-ready",
+        error instanceof Error ? error.message : "HeyGen 数字人生成失败。"
+      );
+    }
+  }
+
+  private async persistAvatarResult(
+    taskId: string,
+    preset: OutputPreset,
+    result: AvatarRenderResult
+  ): Promise<void> {
+    const avatarPath = `avatar/avatar-${preset.id}.mp4`;
+    await downloadFile(result.videoUrl, absoluteTaskPath(this.paths, taskId, avatarPath));
+    this.taskRepository.addMediaAsset(taskId, "avatar-video", avatarPath);
+
+    if (result.captionUrl) {
+      const captionPath = `subtitles/provider-subtitles-${preset.id}.srt`;
+      await downloadFile(result.captionUrl, absoluteTaskPath(this.paths, taskId, captionPath));
+      this.taskRepository.addMediaAsset(taskId, "subtitle-file", captionPath);
+    }
+  }
+
+  private markSelectedVariantsFailed(taskId: string): void {
+    const task = this.requireTask(taskId);
+    for (const presetId of task.selectedOutputPresets) {
+      this.taskRepository.updateOutputVariant(taskId, presetId, { status: "failed" });
+    }
+  }
+
+  private requireTask(taskId: string): VideoTask {
+    const task = this.taskRepository.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found.`);
+    }
+    return task;
+  }
+}
+
+async function downloadFile(url: string, absolutePath: string): Promise<void> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`文件下载失败 (${response.status})。`);
+  }
+
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, Buffer.from(await response.arrayBuffer()));
+}
+
+function absoluteTaskPath(paths: AppPaths, taskId: string, relativePath: string): string {
+  return path.join(getTaskDirectory(paths, taskId), ...relativePath.split("/"));
+}
+
+function requireOutputPreset(presetId: VideoTask["selectedOutputPresets"][number]): OutputPreset {
+  const preset = OUTPUT_PRESETS.find((candidate) => candidate.id === presetId);
+  if (!preset) {
+    throw new Error(`Unknown output preset: ${presetId}`);
+  }
+
+  return preset;
+}

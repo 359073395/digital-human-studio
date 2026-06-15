@@ -81,12 +81,36 @@ describe("ServiceConfigurationRepository", () => {
     expect(credentialFile).not.toContain('"secret-api-key"');
   });
 
+  it("saves HeyGen avatar defaults as non-secret settings", async () => {
+    await repository.saveConfiguration({
+      providerId: "heygen",
+      settings: {
+        baseUrl: "https://api.heygen.test",
+        avatarId: "avatar-123",
+        voiceId: "voice-456",
+        resolution: "1080p",
+        enabled: true
+      },
+      apiKey: "heygen-secret"
+    });
+
+    const configuration = repository.getConfiguration("heygen");
+    const sqliteBytes = fs.readFileSync(createAppPaths(tempDir).databasePath, "utf8");
+
+    expect(configuration.settings).toMatchObject({
+      avatarId: "avatar-123",
+      voiceId: "voice-456",
+      resolution: "1080p"
+    });
+    expect(sqliteBytes).not.toContain("heygen-secret");
+  });
+
   it("reports local health check state", async () => {
     expect(repository.testConfiguration("heygen").ok).toBe(false);
 
     await repository.saveConfiguration({
       providerId: "heygen",
-      settings: { baseUrl: "https://api.heygen.com", enabled: true },
+      settings: { baseUrl: "https://api.heygen.com", avatarId: "avatar-123", enabled: true },
       apiKey: "heygen-key"
     });
 

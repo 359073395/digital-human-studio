@@ -271,6 +271,36 @@ export function App() {
     }
   }
 
+  async function renderHeyGenAvatar() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在生成 HeyGen 数字人视频...");
+
+    try {
+      await window.digitalHumanStudio.updateTask({
+        taskId: selectedTask.id,
+        sourceScript: selectedTask.sourceScript,
+        contentLanguage: selectedTask.contentLanguage,
+        selectedOutputPresets: selectedTask.selectedOutputPresets
+      });
+      const task = await window.digitalHumanStudio.renderHeyGenAvatar(selectedTask.id);
+      const avatarStep = task.steps.find((step) => step.id === "avatar");
+      setActionMessage(
+        avatarStep?.status === "complete"
+          ? "HeyGen 数字人视频已生成"
+          : avatarStep?.errorMessage || "HeyGen 数字人生成未完成"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "HeyGen 数字人生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
   async function retryWorkflowStep(stepId: GenerationStepId) {
     if (!window.digitalHumanStudio) {
       return;
@@ -337,6 +367,9 @@ export function App() {
       settings: {
         baseUrl: draft.baseUrl,
         modelName: draft.modelName,
+        avatarId: draft.avatarId,
+        voiceId: draft.voiceId,
+        resolution: draft.resolution,
         enabled: draft.enabled
       },
       apiKey: draft.apiKey || undefined
@@ -567,6 +600,14 @@ export function App() {
               type="button"
               className="primary"
               disabled={isWorkflowRunning}
+              onClick={() => void renderHeyGenAvatar()}
+            >
+              <Play size={17} />
+              生成 HeyGen 数字人
+            </button>
+            <button
+              type="button"
+              disabled={isWorkflowRunning}
               onClick={() => void runMockWorkflow()}
             >
               <Play size={17} />
@@ -676,6 +717,9 @@ export function App() {
                 const draft = settingsDraft[configuration.providerId] ?? {
                   baseUrl: "",
                   modelName: "",
+                  avatarId: "",
+                  voiceId: "",
+                  resolution: "720p",
                   apiKey: "",
                   enabled: true
                 };
@@ -703,21 +747,73 @@ export function App() {
                         }
                       />
                     </label>
-                    <label>
-                      模型名
-                      <input
-                        type="text"
-                        value={draft.modelName}
-                        placeholder="可选"
-                        onChange={(event) =>
-                          setSettingsDraft((current) =>
-                            updateDraft(current, configuration.providerId, {
-                              modelName: event.target.value
-                            })
-                          )
-                        }
-                      />
-                    </label>
+                    {configuration.providerId !== "heygen" ? (
+                      <label>
+                        模型名
+                        <input
+                          type="text"
+                          value={draft.modelName}
+                          placeholder="可选"
+                          onChange={(event) =>
+                            setSettingsDraft((current) =>
+                              updateDraft(current, configuration.providerId, {
+                                modelName: event.target.value
+                              })
+                            )
+                          }
+                        />
+                      </label>
+                    ) : null}
+                    {configuration.providerId === "heygen" ? (
+                      <>
+                        <label>
+                          Avatar ID
+                          <input
+                            type="text"
+                            value={draft.avatarId ?? ""}
+                            placeholder="HeyGen 预设 Avatar ID"
+                            onChange={(event) =>
+                              setSettingsDraft((current) =>
+                                updateDraft(current, configuration.providerId, {
+                                  avatarId: event.target.value
+                                })
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          Voice ID
+                          <input
+                            type="text"
+                            value={draft.voiceId ?? ""}
+                            placeholder="可选，留空使用 Avatar 默认语音"
+                            onChange={(event) =>
+                              setSettingsDraft((current) =>
+                                updateDraft(current, configuration.providerId, {
+                                  voiceId: event.target.value
+                                })
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          分辨率
+                          <select
+                            value={draft.resolution ?? "720p"}
+                            onChange={(event) =>
+                              setSettingsDraft((current) =>
+                                updateDraft(current, configuration.providerId, {
+                                  resolution: event.target.value as SettingsDraft["resolution"]
+                                })
+                              )
+                            }
+                          >
+                            <option value="720p">720p</option>
+                            <option value="1080p">1080p</option>
+                          </select>
+                        </label>
+                      </>
+                    ) : null}
                     <label>
                       API Key
                       <input
@@ -859,6 +955,7 @@ function formatTaskMeta(task: VideoTaskSummary): string {
 interface SettingsDraft extends ServiceConfigurationSettings {
   apiKey: string;
   enabled: boolean;
+  resolution: NonNullable<ServiceConfigurationSettings["resolution"]>;
 }
 
 function createSettingsDraft(
@@ -870,6 +967,9 @@ function createSettingsDraft(
       {
         baseUrl: configuration.settings.baseUrl ?? "",
         modelName: configuration.settings.modelName ?? "",
+        avatarId: configuration.settings.avatarId ?? "",
+        voiceId: configuration.settings.voiceId ?? "",
+        resolution: configuration.settings.resolution ?? "720p",
         enabled: configuration.settings.enabled ?? true,
         apiKey: ""
       }
@@ -885,7 +985,15 @@ function updateDraft(
   return {
     ...current,
     [providerId]: {
-      ...(current[providerId] ?? { baseUrl: "", modelName: "", enabled: true, apiKey: "" }),
+      ...(current[providerId] ?? {
+        baseUrl: "",
+        modelName: "",
+        avatarId: "",
+        voiceId: "",
+        resolution: "720p",
+        enabled: true,
+        apiKey: ""
+      }),
       ...patch
     }
   };

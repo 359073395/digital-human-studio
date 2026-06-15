@@ -96,6 +96,14 @@ export class ServiceConfigurationRepository {
       };
     }
 
+    if (providerId === "heygen" && !configuration.settings.avatarId?.trim()) {
+      return {
+        providerId,
+        ok: false,
+        message: "HeyGen Avatar ID 尚未配置"
+      };
+    }
+
     return {
       providerId,
       ok: true,
@@ -105,9 +113,39 @@ export class ServiceConfigurationRepository {
 }
 
 function sanitizeSettings(settings: ServiceConfigurationSettings): ServiceConfigurationSettings {
-  return {
-    baseUrl: settings.baseUrl?.trim(),
-    modelName: settings.modelName?.trim(),
-    enabled: settings.enabled
-  };
+  const sanitized: ServiceConfigurationSettings = {};
+
+  if (settings.baseUrl !== undefined) {
+    sanitized.baseUrl = settings.baseUrl.trim();
+  }
+
+  if (settings.modelName !== undefined) {
+    sanitized.modelName = settings.modelName.trim();
+  }
+
+  if (settings.avatarId !== undefined) {
+    sanitized.avatarId = settings.avatarId.trim();
+  }
+
+  if (settings.voiceId !== undefined) {
+    sanitized.voiceId = settings.voiceId.trim();
+  }
+
+  if (settings.resolution !== undefined) {
+    sanitized.resolution = sanitizeResolution(settings.resolution);
+  }
+
+  if (settings.enabled !== undefined) {
+    sanitized.enabled = settings.enabled;
+  }
+
+  return sanitized;
+}
+
+function sanitizeResolution(
+  resolution: ServiceConfigurationSettings["resolution"]
+): ServiceConfigurationSettings["resolution"] {
+  return resolution === "720p" || resolution === "1080p" || resolution === "4k"
+    ? resolution
+    : undefined;
 }
