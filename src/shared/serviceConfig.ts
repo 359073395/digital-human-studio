@@ -56,22 +56,22 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
   {
     id: "llm",
     kind: "language-model",
-    label: "大模型",
-    description: "文案结构分析与原创脚本生成",
+    label: "大模型（OpenAI 兼容）",
+    description: "文案结构分析与原创脚本生成，支持 OpenAI 兼容中转",
     requiresCredential: true
   },
   {
     id: "image",
     kind: "image-generation",
-    label: "OpenAI 图片",
-    description: "人物商品图生成与商品图编辑",
+    label: "图片生成（OpenAI 兼容）",
+    description: "人物商品图生成与商品图编辑，支持 OpenAI 兼容中转",
     requiresCredential: true
   },
   {
     id: "asr",
     kind: "speech-to-text",
-    label: "ASR 转写",
-    description: "源音视频转写和字幕兜底",
+    label: "ASR 转写（OpenAI 兼容）",
+    description: "源音视频转写和字幕兜底，支持 OpenAI 兼容中转",
     requiresCredential: true
   },
   {

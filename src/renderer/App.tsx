@@ -928,7 +928,7 @@ export function App() {
                           <input
                             type="text"
                             value={draft.avatarId ?? ""}
-                            placeholder="HeyGen 预设 Avatar ID"
+                            placeholder="当前 HeyGen 账号可用的 Avatar ID"
                             onChange={(event) =>
                               setSettingsDraft((current) =>
                                 updateDraft(current, configuration.providerId, {
@@ -943,7 +943,7 @@ export function App() {
                           <input
                             type="text"
                             value={draft.voiceId ?? ""}
-                            placeholder="可选，留空使用 Avatar 默认语音"
+                            placeholder="当前 HeyGen 账号可用的 Voice ID，可留空"
                             onChange={(event) =>
                               setSettingsDraft((current) =>
                                 updateDraft(current, configuration.providerId, {
@@ -972,12 +972,14 @@ export function App() {
                       </>
                     ) : null}
                     <label>
-                      API Key
+                      API Key（填新值会替换）
                       <input
                         type="password"
                         value={draft.apiKey}
                         placeholder={
-                          configuration.credentialConfigured ? "已保存，留空不修改" : "输入后保存"
+                          configuration.credentialConfigured
+                            ? "已保存；输入新 Key 后保存会替换"
+                            : "输入后保存"
                         }
                         onChange={(event) =>
                           setSettingsDraft((current) =>
