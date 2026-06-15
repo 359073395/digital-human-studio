@@ -290,7 +290,7 @@ This order keeps a working vertical slice alive while replacing mocks with real 
 - Exact Electron scaffolding tool and packaging plugin.
 - SQLite Node binding resolved for the MVP in `docs/adr/0006-use-node-sqlite-for-mvp-storage.md`.
 - Exact FFmpeg binary source and compliance packaging method.
-- Exact ASR provider for source transcription and subtitle fallback.
+- OpenAI audio transcriptions are the first ASR provider for subtitle fallback.
 - Exact optional TTS provider for external audio generation.
 
 These should be decided during implementation after checking current official package docs and compatibility with the chosen Electron runtime.

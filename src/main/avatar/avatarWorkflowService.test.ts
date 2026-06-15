@@ -8,6 +8,11 @@ import { createAppPaths, getTaskDirectory } from "../storage/appPaths";
 import type { AppPaths } from "../storage/appPaths";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "../storage/database";
 import { TaskRepository } from "../storage/taskRepository";
+import type {
+  SubtitleFallbackInput,
+  SubtitleFallbackProvider,
+  SubtitleFallbackResult
+} from "../subtitles/subtitleFallbackProvider";
 import type { AvatarProvider, AvatarRenderInput, AvatarRenderResult } from "./avatarProvider";
 import { AvatarWorkflowService } from "./avatarWorkflowService";
 
@@ -25,9 +30,39 @@ class SuccessfulAvatarProvider implements AvatarProvider {
   }
 }
 
+class CaptionlessAvatarProvider implements AvatarProvider {
+  readonly renders: AvatarRenderInput[] = [];
+
+  async renderAvatar(input: AvatarRenderInput): Promise<AvatarRenderResult> {
+    this.renders.push(input);
+    return {
+      presetId: input.preset.id,
+      providerVideoId: `provider-${input.preset.id}`,
+      videoUrl: `https://cdn.example.test/${input.preset.id}.mp4`
+    };
+  }
+}
+
 class FailingAvatarProvider implements AvatarProvider {
   async renderAvatar(): Promise<AvatarRenderResult> {
     throw new Error("HeyGen quota exhausted.");
+  }
+}
+
+class SuccessfulSubtitleFallbackProvider implements SubtitleFallbackProvider {
+  readonly inputs: SubtitleFallbackInput[] = [];
+
+  async createSubtitleFile(input: SubtitleFallbackInput): Promise<SubtitleFallbackResult> {
+    this.inputs.push(input);
+    return {
+      srt: `1\n00:00:00,000 --> 00:00:02,000\nASR subtitle for ${input.preset.id}`
+    };
+  }
+}
+
+class FailingSubtitleFallbackProvider implements SubtitleFallbackProvider {
+  async createSubtitleFile(): Promise<SubtitleFallbackResult> {
+    throw new Error("ASR quota exhausted.");
   }
 }
 
@@ -78,6 +113,7 @@ describe("AvatarWorkflowService", () => {
       "landscape-16-9"
     ]);
     expect(updated.steps.find((step) => step.id === "avatar")?.status).toBe("complete");
+    expect(updated.steps.find((step) => step.id === "subtitles")?.status).toBe("complete");
     expect(updated.outputVariants.every((variant) => variant.status === "waiting")).toBe(true);
     expect(updated.mediaAssets.filter((asset) => asset.kind === "avatar-video")).toHaveLength(2);
     expect(updated.mediaAssets.filter((asset) => asset.kind === "subtitle-file")).toHaveLength(2);
@@ -87,6 +123,100 @@ describe("AvatarWorkflowService", () => {
     expect(
       fs.existsSync(path.join(taskDirectory, "subtitles", "provider-subtitles-landscape-16-9.srt"))
     ).toBe(true);
+  });
+
+  it("runs ASR fallback when HeyGen does not return provider subtitles", async () => {
+    const avatarProvider = new CaptionlessAvatarProvider();
+    const subtitleProvider = new SuccessfulSubtitleFallbackProvider();
+    const service = new AvatarWorkflowService(
+      repository,
+      appPaths,
+      avatarProvider,
+      subtitleProvider
+    );
+    const task = repository.createTask({
+      title: "Captionless avatar",
+      sourceScript: "Source script."
+    });
+    repository.updateFinalScript(task.id, "Final script for fallback subtitles.");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("video-bytes"))
+    );
+
+    const updated = await service.renderHeyGenAvatar(task.id);
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+
+    expect(subtitleProvider.inputs.map((input) => input.preset.id)).toEqual(["portrait-9-16"]);
+    expect(updated.steps.find((step) => step.id === "avatar")?.status).toBe("complete");
+    expect(updated.steps.find((step) => step.id === "subtitles")?.status).toBe("complete");
+    expect(updated.mediaAssets.filter((asset) => asset.kind === "subtitle-file")).toHaveLength(1);
+    expect(
+      fs.readFileSync(path.join(taskDirectory, "subtitles", "asr-subtitles-portrait-9-16.srt"), {
+        encoding: "utf8"
+      })
+    ).toContain("ASR subtitle for portrait-9-16");
+  });
+
+  it("runs ASR fallback when provider subtitle download fails", async () => {
+    const avatarProvider = new SuccessfulAvatarProvider();
+    const subtitleProvider = new SuccessfulSubtitleFallbackProvider();
+    const service = new AvatarWorkflowService(
+      repository,
+      appPaths,
+      avatarProvider,
+      subtitleProvider
+    );
+    const task = repository.createTask({
+      title: "Broken provider subtitle",
+      sourceScript: "Source script."
+    });
+    repository.updateFinalScript(task.id, "Final script for fallback subtitles.");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith(".srt")) {
+          return new Response("missing", { status: 404 });
+        }
+        return new Response("video-bytes");
+      })
+    );
+
+    const updated = await service.renderHeyGenAvatar(task.id);
+
+    expect(subtitleProvider.inputs.map((input) => input.preset.id)).toEqual(["portrait-9-16"]);
+    expect(updated.steps.find((step) => step.id === "avatar")?.status).toBe("complete");
+    expect(updated.steps.find((step) => step.id === "subtitles")?.status).toBe("complete");
+    expect(updated.mediaAssets.some((asset) => asset.relativePath.includes("asr-subtitles"))).toBe(
+      true
+    );
+  });
+
+  it("keeps avatar output complete when ASR fallback fails", async () => {
+    const service = new AvatarWorkflowService(
+      repository,
+      appPaths,
+      new CaptionlessAvatarProvider(),
+      new FailingSubtitleFallbackProvider()
+    );
+    const task = repository.createTask({
+      title: "ASR failure",
+      sourceScript: "Source script."
+    });
+    repository.updateFinalScript(task.id, "Final script for fallback subtitles.");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("video-bytes"))
+    );
+
+    const updated = await service.renderHeyGenAvatar(task.id);
+
+    expect(updated.steps.find((step) => step.id === "avatar")?.status).toBe("complete");
+    expect(updated.steps.find((step) => step.id === "subtitles")?.status).toBe("retry-ready");
+    expect(updated.steps.find((step) => step.id === "subtitles")?.errorMessage).toBe(
+      "ASR quota exhausted."
+    );
+    expect(updated.outputVariants.every((variant) => variant.status === "waiting")).toBe(true);
   });
 
   it("marks avatar step retry-ready and selected variants failed on provider errors", async () => {

@@ -20,6 +20,7 @@ import { OpenAiCompatibleScriptProvider } from "./script/openAiCompatibleScriptP
 import { SafeStorageCipher } from "./storage/safeStorageCipher";
 import { ScriptWorkflowService } from "./script/scriptWorkflowService";
 import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
+import { OpenAiAsrSubtitleProvider } from "./subtitles/openAiAsrSubtitleProvider";
 import { TaskRepository } from "./storage/taskRepository";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 
@@ -105,7 +106,8 @@ function createRepositories(): MainRepositories {
   const avatarWorkflowService = new AvatarWorkflowService(
     taskRepository,
     appPaths,
-    new HeyGenAvatarProvider(serviceConfigurationRepository, credentialStore)
+    new HeyGenAvatarProvider(serviceConfigurationRepository, credentialStore),
+    new OpenAiAsrSubtitleProvider(serviceConfigurationRepository, credentialStore)
   );
   const presenterImageWorkflowService = new PresenterImageWorkflowService(
     taskRepository,

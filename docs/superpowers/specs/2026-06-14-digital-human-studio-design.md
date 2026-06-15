@@ -165,7 +165,7 @@ Post-production assets use editable defaults.
 Subtitles:
 
 - Prefer provider-supplied subtitle timing.
-- Use ASR fallback when provider timing is unavailable.
+- Use OpenAI audio transcriptions as the first ASR fallback when provider timing is unavailable.
 - Do not use estimated timing for final output.
 
 BGM:

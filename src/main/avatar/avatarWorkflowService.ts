@@ -3,18 +3,26 @@ import path from "node:path";
 import { OUTPUT_PRESETS, type OutputPreset, type VideoTask } from "../../shared/domain";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
+import type { SubtitleFallbackProvider } from "../subtitles/subtitleFallbackProvider";
 import type { AvatarProvider, AvatarRenderResult } from "./avatarProvider";
+
+interface SubtitleFallbackWorkItem {
+  preset: OutputPreset;
+  avatarVideoPath: string;
+}
 
 export class AvatarWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
-    private readonly avatarProvider: AvatarProvider
+    private readonly avatarProvider: AvatarProvider,
+    private readonly subtitleFallbackProvider?: SubtitleFallbackProvider
   ) {}
 
   async renderHeyGenAvatar(taskId: string): Promise<VideoTask> {
     const task = this.requireTask(taskId);
     this.taskRepository.updateStepStatus(taskId, "avatar", "running");
+    const subtitleFallbacks: SubtitleFallbackWorkItem[] = [];
 
     try {
       for (const presetId of task.selectedOutputPresets) {
@@ -27,11 +35,15 @@ export class AvatarWorkflowService {
           preset,
           imagePath: findGeneratedPresenterImagePath(this.paths, taskId, currentTask, preset)
         });
-        await this.persistAvatarResult(taskId, preset, result);
+        const persisted = await this.persistAvatarResult(taskId, preset, result);
+        if (!persisted.subtitleSaved) {
+          subtitleFallbacks.push({
+            preset,
+            avatarVideoPath: persisted.avatarVideoPath
+          });
+        }
         this.taskRepository.updateOutputVariant(taskId, preset.id, { status: "waiting" });
       }
-
-      return this.taskRepository.updateStepStatus(taskId, "avatar", "complete");
     } catch (error) {
       this.markSelectedVariantsFailed(taskId);
       return this.taskRepository.updateStepStatus(
@@ -41,21 +53,71 @@ export class AvatarWorkflowService {
         error instanceof Error ? error.message : "HeyGen 数字人生成失败。"
       );
     }
+
+    this.taskRepository.updateStepStatus(taskId, "avatar", "complete");
+
+    if (subtitleFallbacks.length === 0) {
+      return this.taskRepository.updateStepStatus(taskId, "subtitles", "complete");
+    }
+
+    return this.createFallbackSubtitles(taskId, subtitleFallbacks);
   }
 
   private async persistAvatarResult(
     taskId: string,
     preset: OutputPreset,
     result: AvatarRenderResult
-  ): Promise<void> {
+  ): Promise<{ avatarVideoPath: string; subtitleSaved: boolean }> {
     const avatarPath = `avatar/avatar-${preset.id}.mp4`;
-    await downloadFile(result.videoUrl, absoluteTaskPath(this.paths, taskId, avatarPath));
+    const absoluteAvatarPath = absoluteTaskPath(this.paths, taskId, avatarPath);
+    await downloadFile(result.videoUrl, absoluteAvatarPath);
     this.taskRepository.addMediaAsset(taskId, "avatar-video", avatarPath);
 
     if (result.captionUrl) {
       const captionPath = `subtitles/provider-subtitles-${preset.id}.srt`;
-      await downloadFile(result.captionUrl, absoluteTaskPath(this.paths, taskId, captionPath));
-      this.taskRepository.addMediaAsset(taskId, "subtitle-file", captionPath);
+      try {
+        await downloadFile(result.captionUrl, absoluteTaskPath(this.paths, taskId, captionPath));
+        this.taskRepository.addMediaAsset(taskId, "subtitle-file", captionPath);
+        return { avatarVideoPath: absoluteAvatarPath, subtitleSaved: true };
+      } catch {
+        return { avatarVideoPath: absoluteAvatarPath, subtitleSaved: false };
+      }
+    }
+
+    return { avatarVideoPath: absoluteAvatarPath, subtitleSaved: false };
+  }
+
+  private async createFallbackSubtitles(
+    taskId: string,
+    fallbackItems: SubtitleFallbackWorkItem[]
+  ): Promise<VideoTask> {
+    this.taskRepository.updateStepStatus(taskId, "subtitles", "running");
+
+    try {
+      if (!this.subtitleFallbackProvider) {
+        throw new Error("HeyGen 未返回字幕，ASR 兜底尚未接入。");
+      }
+
+      for (const item of fallbackItems) {
+        const currentTask = this.requireTask(taskId);
+        const result = await this.subtitleFallbackProvider.createSubtitleFile({
+          task: currentTask,
+          preset: item.preset,
+          avatarVideoPath: item.avatarVideoPath
+        });
+        const captionPath = `subtitles/asr-subtitles-${item.preset.id}.srt`;
+        writeTaskFile(this.paths, taskId, captionPath, result.srt);
+        this.taskRepository.addMediaAsset(taskId, "subtitle-file", captionPath);
+      }
+
+      return this.taskRepository.updateStepStatus(taskId, "subtitles", "complete");
+    } catch (error) {
+      return this.taskRepository.updateStepStatus(
+        taskId,
+        "subtitles",
+        "retry-ready",
+        error instanceof Error ? error.message : "ASR 字幕兜底失败。"
+      );
     }
   }
 
@@ -87,6 +149,17 @@ async function downloadFile(url: string, absolutePath: string): Promise<void> {
 
 function absoluteTaskPath(paths: AppPaths, taskId: string, relativePath: string): string {
   return path.join(getTaskDirectory(paths, taskId), ...relativePath.split("/"));
+}
+
+function writeTaskFile(
+  paths: AppPaths,
+  taskId: string,
+  relativePath: string,
+  content: string
+): void {
+  const absolutePath = absoluteTaskPath(paths, taskId, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, content, "utf8");
 }
 
 function requireOutputPreset(presetId: VideoTask["selectedOutputPresets"][number]): OutputPreset {

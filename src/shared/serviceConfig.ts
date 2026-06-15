@@ -100,7 +100,7 @@ export function defaultServiceSettings(providerId: ProviderId): ServiceConfigura
     case "image":
       return { baseUrl: "https://api.openai.com/v1", modelName: "gpt-image-2", enabled: true };
     case "asr":
-      return { baseUrl: "", modelName: "", enabled: true };
+      return { baseUrl: "https://api.openai.com/v1", modelName: "whisper-1", enabled: true };
     case "tts":
       return { baseUrl: "", modelName: "", enabled: false };
   }

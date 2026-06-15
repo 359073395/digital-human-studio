@@ -63,6 +63,9 @@ describe("ServiceConfigurationRepository", () => {
       configurations.find((configuration) => configuration.providerId === "image")?.settings
         .modelName
     ).toBe("gpt-image-2");
+    expect(
+      configurations.find((configuration) => configuration.providerId === "asr")?.settings.modelName
+    ).toBe("whisper-1");
   });
 
   it("saves non-secret settings in SQLite and secret values outside SQLite", async () => {
