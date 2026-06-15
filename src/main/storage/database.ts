@@ -51,6 +51,17 @@ const MIGRATIONS = [
         FOREIGN KEY (task_id) REFERENCES video_tasks(id) ON DELETE CASCADE
       );
     `
+  },
+  {
+    id: 2,
+    name: "create-service-configurations",
+    sql: `
+      CREATE TABLE IF NOT EXISTS service_configurations (
+        provider_id TEXT PRIMARY KEY,
+        settings_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `
   }
 ] as const;
 

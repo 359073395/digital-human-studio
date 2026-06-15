@@ -1,8 +1,12 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
+import type { ProviderId, SaveServiceConfigurationInput } from "../shared/serviceConfig";
 import { IPC_CHANNELS, type AppInfo, type CreateTaskInput } from "../shared/ipc";
 import { createAppPaths, ensureAppPaths } from "./storage/appPaths";
+import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
+import { SafeStorageCipher } from "./storage/safeStorageCipher";
+import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
 import { TaskRepository } from "./storage/taskRepository";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -52,7 +56,12 @@ function createMainWindow(): void {
   }
 }
 
-function createTaskRepository(): TaskRepository {
+interface MainRepositories {
+  taskRepository: TaskRepository;
+  serviceConfigurationRepository: ServiceConfigurationRepository;
+}
+
+function createRepositories(): MainRepositories {
   const appDataDir = process.env.DHS_APP_DATA_DIR || app.getPath("userData");
   const appPaths = createAppPaths(appDataDir);
   ensureAppPaths(appPaths);
@@ -60,12 +69,22 @@ function createTaskRepository(): TaskRepository {
   taskDatabase = openTaskDatabase(appPaths.databasePath);
   runMigrations(taskDatabase);
 
-  const repository = new TaskRepository(taskDatabase, appPaths);
-  repository.ensureSeedTask();
-  return repository;
+  const credentialStore = new CredentialStore(
+    createCredentialFilePath(appDataDir),
+    new SafeStorageCipher()
+  );
+  const taskRepository = new TaskRepository(taskDatabase, appPaths);
+  const serviceConfigurationRepository = new ServiceConfigurationRepository(
+    taskDatabase,
+    credentialStore
+  );
+  taskRepository.ensureSeedTask();
+  return { taskRepository, serviceConfigurationRepository };
 }
 
-function registerIpcHandlers(taskRepository: TaskRepository): void {
+function registerIpcHandlers(repositories: MainRepositories): void {
+  const { serviceConfigurationRepository, taskRepository } = repositories;
+
   ipcMain.handle(IPC_CHANNELS.getAppInfo, (): AppInfo => {
     return {
       name: app.getName(),
@@ -86,11 +105,29 @@ function registerIpcHandlers(taskRepository: TaskRepository): void {
   ipcMain.handle(IPC_CHANNELS.createTask, (_event, input?: CreateTaskInput) =>
     taskRepository.createTask(input)
   );
+
+  ipcMain.handle(IPC_CHANNELS.listServiceConfigurations, () =>
+    serviceConfigurationRepository.listConfigurations()
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.saveServiceConfiguration,
+    (_event, input: SaveServiceConfigurationInput) =>
+      serviceConfigurationRepository.saveConfiguration(input)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.clearServiceCredential, (_event, providerId: ProviderId) =>
+    serviceConfigurationRepository.clearCredential(providerId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.testServiceConfiguration, (_event, providerId: ProviderId) =>
+    serviceConfigurationRepository.testConfiguration(providerId)
+  );
 }
 
 app.whenReady().then(() => {
-  const taskRepository = createTaskRepository();
-  registerIpcHandlers(taskRepository);
+  const repositories = createRepositories();
+  registerIpcHandlers(repositories);
   createMainWindow();
 
   app.on("activate", () => {

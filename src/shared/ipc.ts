@@ -1,4 +1,10 @@
 import type { VideoTask, VideoTaskSummary } from "./domain";
+import type {
+  ProviderId,
+  SaveServiceConfigurationInput,
+  ServiceConfiguration,
+  ServiceConnectionCheck
+} from "./serviceConfig";
 
 export type AppEnvironment = "development" | "production";
 
@@ -15,6 +21,10 @@ export interface DigitalHumanStudioAPI {
   listTasks: () => Promise<VideoTaskSummary[]>;
   getTask: (taskId: string) => Promise<VideoTask | null>;
   createTask: (input?: CreateTaskInput) => Promise<VideoTask>;
+  listServiceConfigurations: () => Promise<ServiceConfiguration[]>;
+  saveServiceConfiguration: (input: SaveServiceConfigurationInput) => Promise<ServiceConfiguration>;
+  clearServiceCredential: (providerId: ProviderId) => Promise<ServiceConfiguration>;
+  testServiceConfiguration: (providerId: ProviderId) => Promise<ServiceConnectionCheck>;
 }
 
 export const IPC_CHANNELS = {
@@ -22,7 +32,11 @@ export const IPC_CHANNELS = {
   openSettings: "app:open-settings",
   listTasks: "tasks:list",
   getTask: "tasks:get",
-  createTask: "tasks:create"
+  createTask: "tasks:create",
+  listServiceConfigurations: "service-configurations:list",
+  saveServiceConfiguration: "service-configurations:save",
+  clearServiceCredential: "service-configurations:clear-credential",
+  testServiceConfiguration: "service-configurations:test"
 } as const;
 
 export interface CreateTaskInput {

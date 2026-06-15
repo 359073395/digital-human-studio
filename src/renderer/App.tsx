@@ -13,6 +13,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { VideoTask, VideoTaskSummary } from "../shared/domain";
+import type {
+  ProviderId,
+  SaveServiceConfigurationInput,
+  ServiceConfiguration,
+  ServiceConfigurationSettings
+} from "../shared/serviceConfig";
 import { countCompleteSteps, isRetryable, type WorkbenchStep } from "../shared/workbench";
 
 const now = new Date().toISOString();
@@ -64,6 +70,9 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState(fallbackTask.id);
   const [selectedTask, setSelectedTask] = useState<VideoTask>(fallbackTask);
   const [taskError, setTaskError] = useState("");
+  const [serviceConfigurations, setServiceConfigurations] = useState<ServiceConfiguration[]>([]);
+  const [settingsDraft, setSettingsDraft] = useState<Record<string, SettingsDraft>>({});
+  const [settingsMessage, setSettingsMessage] = useState("");
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
 
@@ -144,6 +153,61 @@ export function App() {
     setSelectedTask(task);
   }
 
+  async function openSettingsModal() {
+    setSettingsOpen(true);
+    await loadServiceConfigurations();
+  }
+
+  async function loadServiceConfigurations() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    const configurations = await window.digitalHumanStudio.listServiceConfigurations();
+    setServiceConfigurations(configurations);
+    setSettingsDraft(createSettingsDraft(configurations));
+  }
+
+  async function saveServiceConfiguration(providerId: ProviderId) {
+    const draft = settingsDraft[providerId];
+    if (!window.digitalHumanStudio || !draft) {
+      return;
+    }
+
+    const input: SaveServiceConfigurationInput = {
+      providerId,
+      settings: {
+        baseUrl: draft.baseUrl,
+        modelName: draft.modelName,
+        enabled: draft.enabled
+      },
+      apiKey: draft.apiKey || undefined
+    };
+    await window.digitalHumanStudio.saveServiceConfiguration(input);
+    setSettingsMessage("配置已保存到本机");
+    await loadServiceConfigurations();
+  }
+
+  async function clearServiceCredential(providerId: ProviderId) {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    await window.digitalHumanStudio.clearServiceCredential(providerId);
+    setSettingsMessage("凭据已清除");
+    await loadServiceConfigurations();
+  }
+
+  async function testServiceConfiguration(providerId: ProviderId) {
+    if (!window.digitalHumanStudio) {
+      setSettingsMessage("本地预览模式无法检查服务配置");
+      return;
+    }
+
+    const result = await window.digitalHumanStudio.testServiceConfiguration(providerId);
+    setSettingsMessage(result.message);
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -152,7 +216,7 @@ export function App() {
           <p>{appVersion || "Digital Human Studio"}</p>
         </div>
         <div className="topbar-actions">
-          <button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}>
+          <button className="icon-button" title="设置" onClick={() => void openSettingsModal()}>
             <Settings size={18} />
           </button>
         </div>
@@ -352,7 +416,13 @@ export function App() {
 
       {settingsOpen ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
-          <section className="settings-modal" role="dialog" aria-modal="true" aria-label="设置">
+          <section
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="设置"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="pane-heading">
               <span>服务配置</span>
               <button
@@ -363,18 +433,110 @@ export function App() {
                 <Settings size={16} />
               </button>
             </div>
-            <label>
-              HeyGen API Key
-              <input type="password" placeholder="保存在本机安全存储" />
-            </label>
-            <label>
-              大模型 Base URL
-              <input type="text" placeholder="https://api.openai.com/v1" />
-            </label>
-            <label>
-              模型名
-              <input type="text" placeholder="gpt-4.1-mini" />
-            </label>
+            <p className="settings-note">API Key 只保存在本机安全存储里，不写入任务数据库。</p>
+            <div className="provider-list">
+              {serviceConfigurations.map((configuration) => {
+                const draft = settingsDraft[configuration.providerId] ?? {
+                  baseUrl: "",
+                  modelName: "",
+                  apiKey: "",
+                  enabled: true
+                };
+
+                return (
+                  <section className="provider-card" key={configuration.providerId}>
+                    <div className="provider-heading">
+                      <strong>{configuration.label}</strong>
+                      <span>
+                        {configuration.credentialConfigured ? "已配置凭据" : "未配置凭据"}
+                      </span>
+                    </div>
+                    <label>
+                      Base URL
+                      <input
+                        type="text"
+                        value={draft.baseUrl}
+                        placeholder="服务地址"
+                        onChange={(event) =>
+                          setSettingsDraft((current) =>
+                            updateDraft(current, configuration.providerId, {
+                              baseUrl: event.target.value
+                            })
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      模型名
+                      <input
+                        type="text"
+                        value={draft.modelName}
+                        placeholder="可选"
+                        onChange={(event) =>
+                          setSettingsDraft((current) =>
+                            updateDraft(current, configuration.providerId, {
+                              modelName: event.target.value
+                            })
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      API Key
+                      <input
+                        type="password"
+                        value={draft.apiKey}
+                        placeholder={
+                          configuration.credentialConfigured ? "已保存，留空不修改" : "输入后保存"
+                        }
+                        onChange={(event) =>
+                          setSettingsDraft((current) =>
+                            updateDraft(current, configuration.providerId, {
+                              apiKey: event.target.value
+                            })
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={draft.enabled}
+                        onChange={(event) =>
+                          setSettingsDraft((current) =>
+                            updateDraft(current, configuration.providerId, {
+                              enabled: event.target.checked
+                            })
+                          )
+                        }
+                      />
+                      启用
+                    </label>
+                    <div className="provider-actions">
+                      <button
+                        type="button"
+                        onClick={() => void saveServiceConfiguration(configuration.providerId)}
+                      >
+                        保存
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void testServiceConfiguration(configuration.providerId)}
+                      >
+                        检查
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void clearServiceCredential(configuration.providerId)}
+                      >
+                        清除凭据
+                      </button>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
           </section>
         </div>
       ) : null}
@@ -400,4 +562,39 @@ function formatTaskMeta(task: VideoTaskSummary): string {
     .join(" + ");
 
   return `${presets || "未选比例"} · ${task.activeStepLabel}`;
+}
+
+interface SettingsDraft extends ServiceConfigurationSettings {
+  apiKey: string;
+  enabled: boolean;
+}
+
+function createSettingsDraft(
+  configurations: ServiceConfiguration[]
+): Record<ProviderId, SettingsDraft> {
+  return Object.fromEntries(
+    configurations.map((configuration) => [
+      configuration.providerId,
+      {
+        baseUrl: configuration.settings.baseUrl ?? "",
+        modelName: configuration.settings.modelName ?? "",
+        enabled: configuration.settings.enabled ?? true,
+        apiKey: ""
+      }
+    ])
+  ) as Record<ProviderId, SettingsDraft>;
+}
+
+function updateDraft(
+  current: Record<string, SettingsDraft>,
+  providerId: ProviderId,
+  patch: Partial<SettingsDraft>
+): Record<string, SettingsDraft> {
+  return {
+    ...current,
+    [providerId]: {
+      ...(current[providerId] ?? { baseUrl: "", modelName: "", enabled: true, apiKey: "" }),
+      ...patch
+    }
+  };
 }
