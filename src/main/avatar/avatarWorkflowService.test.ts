@@ -103,4 +103,42 @@ describe("AvatarWorkflowService", () => {
     expect(avatarStep?.errorMessage).toBe("HeyGen quota exhausted.");
     expect(updated.outputVariants.every((variant) => variant.status === "failed")).toBe(true);
   });
+
+  it("passes generated presenter images to the avatar provider in image presenter mode", async () => {
+    const provider = new SuccessfulAvatarProvider();
+    const service = new AvatarWorkflowService(repository, appPaths, provider);
+    const task = repository.createTask({
+      title: "Image presenter",
+      sourceScript: "Source script."
+    });
+    const generatedRelativePath = "avatar/generated-presenter-portrait-9-16.png";
+    const generatedAbsolutePath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      ...generatedRelativePath.split("/")
+    );
+    fs.mkdirSync(path.dirname(generatedAbsolutePath), { recursive: true });
+    fs.writeFileSync(generatedAbsolutePath, Buffer.from("presenter-image"));
+    const withAsset = repository.addMediaAsset(
+      task.id,
+      "generated-presenter-image",
+      generatedRelativePath
+    );
+    const generatedAsset = withAsset.mediaAssets.find(
+      (asset) => asset.relativePath === generatedRelativePath
+    );
+    repository.updateTask({
+      taskId: task.id,
+      avatarMode: "image-presenter",
+      generatedPresenterImageAssetId: generatedAsset?.id
+    });
+    repository.updateFinalScript(task.id, "Final script for image presenter.");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("video-bytes"))
+    );
+
+    await service.renderHeyGenAvatar(task.id);
+
+    expect(provider.renders[0]?.imagePath).toBe(generatedAbsolutePath);
+  });
 });

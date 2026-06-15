@@ -24,6 +24,8 @@ const IPC_CHANNELS = {
   updateTask: "tasks:update",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
+  uploadProductImage: "source:upload-product-image",
+  generatePresenterImages: "image:generate-presenter-images",
   renderHeyGenAvatar: "avatar:render-heygen",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
@@ -48,6 +50,10 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.generateScript, taskId) as Promise<VideoTask>,
   transcribeSource: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.transcribeSource, taskId) as Promise<SourceTranscriptionResult>,
+  uploadProductImage: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadProductImage, taskId) as Promise<VideoTask>,
+  generatePresenterImages: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.generatePresenterImages, taskId) as Promise<VideoTask>,
   renderHeyGenAvatar: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.renderHeyGenAvatar, taskId) as Promise<VideoTask>,
   runMockWorkflow: (taskId: string) =>

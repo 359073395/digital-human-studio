@@ -37,6 +37,9 @@ describe("TaskRepository", () => {
     expect(task.selectedOutputPresets).toEqual(["portrait-9-16"]);
     expect(task.similarityRisk).toBe("unknown");
     expect(task.scriptGenerationNotes).toBe("");
+    expect(task.avatarMode).toBe("preset-avatar");
+    expect(task.avatarDescriptionPrompt).toBe("");
+    expect(task.motionPrompt).toBe("");
     expect(task.steps).toHaveLength(6);
     expect(task.outputVariants).toHaveLength(1);
 
@@ -82,11 +85,17 @@ describe("TaskRepository", () => {
     const withLandscape = repository.updateTask({
       taskId: task.id,
       contentLanguage: "id-ID",
+      avatarMode: "image-presenter",
+      avatarDescriptionPrompt: "年轻印尼女主播，手拿商品。",
+      motionPrompt: "轻微点头，手拿商品靠近镜头。",
       selectedOutputPresets: ["portrait-9-16", "landscape-16-9"],
       sourceScript: "Updated source"
     });
 
     expect(withLandscape.contentLanguage).toBe("id-ID");
+    expect(withLandscape.avatarMode).toBe("image-presenter");
+    expect(withLandscape.avatarDescriptionPrompt).toBe("年轻印尼女主播，手拿商品。");
+    expect(withLandscape.motionPrompt).toBe("轻微点头，手拿商品靠近镜头。");
     expect(withLandscape.sourceScript).toBe("Updated source");
     expect(withLandscape.outputVariants.map((variant) => variant.presetId)).toEqual([
       "portrait-9-16",

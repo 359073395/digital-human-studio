@@ -24,7 +24,8 @@ export class AvatarWorkflowService {
 
         const result = await this.avatarProvider.renderAvatar({
           task: currentTask,
-          preset
+          preset,
+          imagePath: findGeneratedPresenterImagePath(this.paths, taskId, currentTask, preset)
         });
         await this.persistAvatarResult(taskId, preset, result);
         this.taskRepository.updateOutputVariant(taskId, preset.id, { status: "waiting" });
@@ -95,4 +96,28 @@ function requireOutputPreset(presetId: VideoTask["selectedOutputPresets"][number
   }
 
   return preset;
+}
+
+function findGeneratedPresenterImagePath(
+  paths: AppPaths,
+  taskId: string,
+  task: VideoTask,
+  preset: OutputPreset
+): string | undefined {
+  if (task.avatarMode !== "image-presenter") {
+    return undefined;
+  }
+
+  const matchingAsset =
+    task.mediaAssets.find(
+      (asset) =>
+        asset.kind === "generated-presenter-image" &&
+        asset.relativePath.includes(`generated-presenter-${preset.id}.`)
+    ) ?? task.mediaAssets.find((asset) => asset.id === task.generatedPresenterImageAssetId);
+
+  if (!matchingAsset) {
+    throw new Error("请先生成人物商品图。");
+  }
+
+  return absoluteTaskPath(paths, taskId, matchingAsset.relativePath);
 }

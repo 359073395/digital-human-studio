@@ -3,6 +3,7 @@ import type { OutputPreset, OutputPresetId, VideoTask } from "../../shared/domai
 export interface AvatarRenderInput {
   task: VideoTask;
   preset: OutputPreset;
+  imagePath?: string;
 }
 
 export interface AvatarRenderResult {

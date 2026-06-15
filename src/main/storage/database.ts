@@ -70,6 +70,17 @@ const MIGRATIONS = [
       ALTER TABLE video_tasks ADD COLUMN similarity_risk TEXT NOT NULL DEFAULT 'unknown';
       ALTER TABLE video_tasks ADD COLUMN script_generation_notes TEXT NOT NULL DEFAULT '';
     `
+  },
+  {
+    id: 4,
+    name: "add-avatar-prompt-and-image-presenter-fields",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN avatar_mode TEXT NOT NULL DEFAULT 'preset-avatar';
+      ALTER TABLE video_tasks ADD COLUMN avatar_description_prompt TEXT NOT NULL DEFAULT '';
+      ALTER TABLE video_tasks ADD COLUMN motion_prompt TEXT NOT NULL DEFAULT '';
+      ALTER TABLE video_tasks ADD COLUMN product_image_asset_id TEXT;
+      ALTER TABLE video_tasks ADD COLUMN generated_presenter_image_asset_id TEXT;
+    `
   }
 ] as const;
 

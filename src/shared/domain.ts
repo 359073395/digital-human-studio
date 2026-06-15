@@ -2,6 +2,8 @@ export type ContentLanguage = "zh-CN" | "en-US" | "id-ID";
 
 export type SimilarityRisk = "unknown" | "low" | "medium" | "high";
 
+export type AvatarMode = "preset-avatar" | "image-presenter";
+
 export type StepStatus = "waiting" | "running" | "complete" | "failed" | "retry-ready";
 
 export type GenerationStepId =
@@ -20,6 +22,8 @@ export type MediaAssetKind =
   | "source-audio"
   | "source-video"
   | "source-transcript"
+  | "product-image"
+  | "generated-presenter-image"
   | "avatar-video"
   | "subtitle-file"
   | "background-music"
@@ -85,6 +89,11 @@ export interface VideoTask {
   similarityRisk: SimilarityRisk;
   scriptGenerationNotes: string;
   contentLanguage: ContentLanguage;
+  avatarMode: AvatarMode;
+  avatarDescriptionPrompt: string;
+  motionPrompt: string;
+  productImageAssetId?: string;
+  generatedPresenterImageAssetId?: string;
   selectedOutputPresets: OutputPresetId[];
   steps: GenerationStep[];
   outputVariants: OutputVariant[];

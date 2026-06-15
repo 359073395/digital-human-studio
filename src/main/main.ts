@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
+import type { OpenDialogOptions } from "electron";
 import type { ProviderId, SaveServiceConfigurationInput } from "../shared/serviceConfig";
 import {
   IPC_CHANNELS,
@@ -10,6 +11,8 @@ import {
 } from "../shared/ipc";
 import { AvatarWorkflowService } from "./avatar/avatarWorkflowService";
 import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
+import { OpenAiImageProvider } from "./image/openAiImageProvider";
+import { PresenterImageWorkflowService } from "./image/presenterImageWorkflowService";
 import { createAppPaths, ensureAppPaths, getTaskMediaDirectory } from "./storage/appPaths";
 import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
@@ -73,6 +76,7 @@ interface MainRepositories {
   mockWorkflowRunner: MockWorkflowRunner;
   scriptWorkflowService: ScriptWorkflowService;
   avatarWorkflowService: AvatarWorkflowService;
+  presenterImageWorkflowService: PresenterImageWorkflowService;
   appPaths: ReturnType<typeof createAppPaths>;
 }
 
@@ -103,6 +107,11 @@ function createRepositories(): MainRepositories {
     appPaths,
     new HeyGenAvatarProvider(serviceConfigurationRepository, credentialStore)
   );
+  const presenterImageWorkflowService = new PresenterImageWorkflowService(
+    taskRepository,
+    appPaths,
+    new OpenAiImageProvider(serviceConfigurationRepository, credentialStore)
+  );
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   taskRepository.ensureSeedTask();
   return {
@@ -111,6 +120,7 @@ function createRepositories(): MainRepositories {
     mockWorkflowRunner,
     scriptWorkflowService,
     avatarWorkflowService,
+    presenterImageWorkflowService,
     appPaths
   };
 }
@@ -120,6 +130,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     appPaths,
     avatarWorkflowService,
     mockWorkflowRunner,
+    presenterImageWorkflowService,
     scriptWorkflowService,
     serviceConfigurationRepository,
     taskRepository
@@ -156,6 +167,36 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.transcribeSource, (_event, taskId: string) =>
     scriptWorkflowService.transcribeSource(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.uploadProductImage, async (_event, taskId: string) => {
+    const productImageDialogOptions: OpenDialogOptions = {
+      title: "选择商品图片",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "图片",
+          extensions: ["png", "jpg", "jpeg", "webp"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, productImageDialogOptions)
+      : await dialog.showOpenDialog(productImageDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return presenterImageWorkflowService.importProductImage(taskId, result.filePaths[0]);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.generatePresenterImages, (_event, taskId: string) =>
+    presenterImageWorkflowService.generatePresenterImages(taskId)
   );
 
   ipcMain.handle(IPC_CHANNELS.renderHeyGenAvatar, (_event, taskId: string) =>

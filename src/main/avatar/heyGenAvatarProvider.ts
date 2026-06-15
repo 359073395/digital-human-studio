@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { OutputPreset, VideoTask } from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { defaultServiceSettings } from "../../shared/serviceConfig";
@@ -26,6 +28,11 @@ interface HeyGenAvatarProviderOptions {
 interface HeyGenCreateVideoData {
   video_id?: string;
   videoId?: string;
+}
+
+interface HeyGenAssetUploadData {
+  asset_id?: string;
+  assetId?: string;
 }
 
 interface HeyGenVideoStatusData {
@@ -80,7 +87,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
 
     const avatarId = configuration.settings.avatarId?.trim();
-    if (!avatarId) {
+    if (input.task.avatarMode === "preset-avatar" && !avatarId) {
       throw new AvatarProviderUnavailableError("HeyGen Avatar ID 尚未配置。");
     }
 
@@ -94,7 +101,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       baseUrl,
       configuration,
       input,
-      avatarId
+      avatarId: avatarId || undefined
     });
 
     return this.pollVideo({
@@ -110,9 +117,13 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     baseUrl: string;
     configuration: ServiceConfiguration;
     input: AvatarRenderInput;
-    avatarId: string;
+    avatarId?: string;
   }): Promise<string> {
     const script = selectScript(input.input.task);
+    const heyGenImageAssetId =
+      input.input.task.avatarMode === "image-presenter"
+        ? await this.uploadImageAsset(input.apiKey, input.baseUrl, input.input.imagePath)
+        : undefined;
     const response = await requestJson<HeyGenEnvelope<HeyGenCreateVideoData>>(
       this.fetchImpl,
       `${normalizeBaseUrl(input.baseUrl)}/v3/videos`,
@@ -124,7 +135,13 @@ export class HeyGenAvatarProvider implements AvatarProvider {
           "x-api-key": input.apiKey
         },
         body: JSON.stringify(
-          buildCreateVideoBody(input.input, input.configuration, input.avatarId, script)
+          buildCreateVideoBody({
+            input: input.input,
+            configuration: input.configuration,
+            avatarId: input.avatarId,
+            script,
+            heyGenImageAssetId
+          })
         )
       }
     );
@@ -135,6 +152,37 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
 
     return providerVideoId;
+  }
+
+  private async uploadImageAsset(
+    apiKey: string,
+    baseUrl: string,
+    imagePath: string | undefined
+  ): Promise<string> {
+    if (!imagePath) {
+      throw new Error("请先生成人物商品图。");
+    }
+
+    const formData = new FormData();
+    formData.append("file", createImageBlob(imagePath), path.basename(imagePath));
+    const response = await requestJson<HeyGenEnvelope<HeyGenAssetUploadData>>(
+      this.fetchImpl,
+      `${normalizeBaseUrl(baseUrl)}/v3/assets`,
+      {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey
+        },
+        body: formData
+      }
+    );
+
+    const assetId = response.data?.asset_id ?? response.data?.assetId;
+    if (!assetId) {
+      throw new Error("HeyGen 图片上传响应缺少 asset_id。");
+    }
+
+    return assetId;
   }
 
   private async pollVideo(input: {
@@ -187,28 +235,45 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 }
 
-function buildCreateVideoBody(
-  input: AvatarRenderInput,
-  configuration: ServiceConfiguration,
-  avatarId: string,
-  script: string
-) {
-  return {
-    type: "avatar",
-    avatar_id: avatarId,
-    voice_id: configuration.settings.voiceId || undefined,
-    script,
-    title: `${input.task.title} - ${input.preset.label}`,
-    aspect_ratio: input.preset.aspectRatio,
-    resolution: configuration.settings.resolution ?? "720p",
+function buildCreateVideoBody(options: {
+  input: AvatarRenderInput;
+  configuration: ServiceConfiguration;
+  avatarId?: string;
+  script: string;
+  heyGenImageAssetId?: string;
+}) {
+  const baseBody = {
+    voice_id: options.configuration.settings.voiceId || undefined,
+    script: options.script,
+    title: `${options.input.task.title} - ${options.input.preset.label}`,
+    aspect_ratio: options.input.preset.aspectRatio,
+    resolution: options.configuration.settings.resolution ?? "720p",
     output_format: "mp4",
+    motion_prompt: options.input.task.motionPrompt || undefined,
     caption: {
       file_format: "srt",
       style: "default"
     },
     voice_settings: {
-      locale: input.task.contentLanguage
+      locale: options.input.task.contentLanguage
     }
+  };
+
+  if (options.input.task.avatarMode === "image-presenter") {
+    return {
+      ...baseBody,
+      type: "image",
+      image: {
+        type: "asset_id",
+        asset_id: options.heyGenImageAssetId
+      }
+    };
+  }
+
+  return {
+    ...baseBody,
+    type: "avatar",
+    avatar_id: options.avatarId
   };
 }
 
@@ -249,6 +314,21 @@ async function requestJson<T>(fetchImpl: typeof fetch, url: string, init: Reques
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
+}
+
+function createImageBlob(imagePath: string): Blob {
+  return new Blob([fs.readFileSync(imagePath)], { type: contentTypeFromPath(imagePath) });
+}
+
+function contentTypeFromPath(imagePath: string): string {
+  const extension = path.extname(imagePath).toLowerCase();
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "image/jpeg";
+  }
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+  return "image/png";
 }
 
 async function delay(ms: number): Promise<void> {

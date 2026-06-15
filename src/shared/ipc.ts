@@ -1,6 +1,8 @@
 import type {
+  AvatarMode,
   ContentLanguage,
   GenerationStepId,
+  MediaAsset,
   OutputPresetId,
   VideoTask,
   VideoTaskSummary
@@ -31,6 +33,8 @@ export interface DigitalHumanStudioAPI {
   updateTask: (input: UpdateTaskInput) => Promise<VideoTask>;
   generateScript: (taskId: string) => Promise<VideoTask>;
   transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
+  uploadProductImage: (taskId: string) => Promise<VideoTask>;
+  generatePresenterImages: (taskId: string) => Promise<VideoTask>;
   renderHeyGenAvatar: (taskId: string) => Promise<VideoTask>;
   runMockWorkflow: (taskId: string) => Promise<VideoTask>;
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
@@ -50,6 +54,8 @@ export const IPC_CHANNELS = {
   updateTask: "tasks:update",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
+  uploadProductImage: "source:upload-product-image",
+  generatePresenterImages: "image:generate-presenter-images",
   renderHeyGenAvatar: "avatar:render-heygen",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
@@ -70,6 +76,11 @@ export interface UpdateTaskInput {
   title?: string;
   sourceScript?: string;
   contentLanguage?: ContentLanguage;
+  avatarMode?: AvatarMode;
+  avatarDescriptionPrompt?: string;
+  motionPrompt?: string;
+  productImageAssetId?: MediaAsset["id"] | null;
+  generatedPresenterImageAssetId?: MediaAsset["id"] | null;
   selectedOutputPresets?: OutputPresetId[];
 }
 

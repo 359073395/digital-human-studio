@@ -1,6 +1,11 @@
-export type ProviderId = "heygen" | "llm" | "asr" | "tts";
+export type ProviderId = "heygen" | "llm" | "image" | "asr" | "tts";
 
-export type ProviderKind = "avatar" | "language-model" | "speech-to-text" | "text-to-speech";
+export type ProviderKind =
+  | "avatar"
+  | "language-model"
+  | "image-generation"
+  | "speech-to-text"
+  | "text-to-speech";
 
 export interface ProviderDefinition {
   id: ProviderId;
@@ -56,6 +61,13 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
     requiresCredential: true
   },
   {
+    id: "image",
+    kind: "image-generation",
+    label: "OpenAI 图片",
+    description: "人物商品图生成与商品图编辑",
+    requiresCredential: true
+  },
+  {
     id: "asr",
     kind: "speech-to-text",
     label: "ASR 转写",
@@ -85,6 +97,8 @@ export function defaultServiceSettings(providerId: ProviderId): ServiceConfigura
       return { baseUrl: "https://api.heygen.com", resolution: "720p", enabled: true };
     case "llm":
       return { baseUrl: "https://api.openai.com/v1", modelName: "gpt-4.1-mini", enabled: true };
+    case "image":
+      return { baseUrl: "https://api.openai.com/v1", modelName: "gpt-image-2", enabled: true };
     case "asr":
       return { baseUrl: "", modelName: "", enabled: true };
     case "tts":

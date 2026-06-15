@@ -52,12 +52,17 @@ describe("ServiceConfigurationRepository", () => {
     expect(configurations.map((configuration) => configuration.providerId)).toEqual([
       "heygen",
       "llm",
+      "image",
       "asr",
       "tts"
     ]);
     expect(
       configurations.find((configuration) => configuration.providerId === "llm")?.settings.modelName
     ).toBe("gpt-4.1-mini");
+    expect(
+      configurations.find((configuration) => configuration.providerId === "image")?.settings
+        .modelName
+    ).toBe("gpt-image-2");
   });
 
   it("saves non-secret settings in SQLite and secret values outside SQLite", async () => {

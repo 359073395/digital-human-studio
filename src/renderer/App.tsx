@@ -38,6 +38,9 @@ const fallbackTask: VideoTask = {
   similarityRisk: "low",
   scriptGenerationNotes: "本地预览 mock 脚本。",
   contentLanguage: "zh-CN",
+  avatarMode: "preset-avatar",
+  avatarDescriptionPrompt: "",
+  motionPrompt: "",
   selectedOutputPresets: ["portrait-9-16"],
   publishingPackage: {
     title: "",
@@ -88,6 +91,12 @@ export function App() {
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
   const primaryVariant = selectedTask.outputVariants[0];
   const visibleAssets = selectedTask.mediaAssets.slice(-6).reverse();
+  const productImageAsset = selectedTask.mediaAssets.find(
+    (asset) => asset.id === selectedTask.productImageAssetId
+  );
+  const generatedPresenterAsset = selectedTask.mediaAssets.find(
+    (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
+  );
 
   useEffect(() => {
     if (!window.digitalHumanStudio) {
@@ -171,7 +180,16 @@ export function App() {
 
   async function updateCurrentTask(
     patch: Partial<
-      Pick<VideoTask, "title" | "sourceScript" | "contentLanguage" | "selectedOutputPresets">
+      Pick<
+        VideoTask,
+        | "title"
+        | "sourceScript"
+        | "contentLanguage"
+        | "avatarMode"
+        | "avatarDescriptionPrompt"
+        | "motionPrompt"
+        | "selectedOutputPresets"
+      >
     >
   ) {
     if (!window.digitalHumanStudio) {
@@ -212,6 +230,9 @@ export function App() {
         taskId: selectedTask.id,
         sourceScript: selectedTask.sourceScript,
         contentLanguage: selectedTask.contentLanguage,
+        avatarMode: selectedTask.avatarMode,
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
       const task = await window.digitalHumanStudio.generateScript(selectedTask.id);
@@ -259,6 +280,9 @@ export function App() {
         taskId: selectedTask.id,
         sourceScript: selectedTask.sourceScript,
         contentLanguage: selectedTask.contentLanguage,
+        avatarMode: selectedTask.avatarMode,
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
       const task = await window.digitalHumanStudio.runMockWorkflow(selectedTask.id);
@@ -284,6 +308,9 @@ export function App() {
         taskId: selectedTask.id,
         sourceScript: selectedTask.sourceScript,
         contentLanguage: selectedTask.contentLanguage,
+        avatarMode: selectedTask.avatarMode,
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
       const task = await window.digitalHumanStudio.renderHeyGenAvatar(selectedTask.id);
@@ -296,6 +323,58 @@ export function App() {
       await refreshTaskState(task.id, task);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "HeyGen 数字人生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function uploadProductImage() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择商品图片...");
+
+    try {
+      const task = await window.digitalHumanStudio.uploadProductImage(selectedTask.id);
+      setActionMessage(
+        task.productImageAssetId ? "商品图片已导入" : "未选择商品图片，任务保持不变"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "商品图片导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function generatePresenterImages() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在生成人物商品图...");
+
+    try {
+      await window.digitalHumanStudio.updateTask({
+        taskId: selectedTask.id,
+        avatarMode: "image-presenter",
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
+        selectedOutputPresets: selectedTask.selectedOutputPresets
+      });
+      const task = await window.digitalHumanStudio.generatePresenterImages(selectedTask.id);
+      const avatarStep = task.steps.find((step) => step.id === "avatar");
+      setActionMessage(
+        avatarStep?.status === "retry-ready"
+          ? avatarStep.errorMessage || "人物商品图生成失败"
+          : "人物商品图已生成"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "人物商品图生成失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -511,6 +590,20 @@ export function App() {
             <section className="compact-block">
               <h3>数字人</h3>
               <label>
+                模式
+                <select
+                  value={selectedTask.avatarMode}
+                  onChange={(event) =>
+                    void updateCurrentTask({
+                      avatarMode: event.target.value as VideoTask["avatarMode"]
+                    })
+                  }
+                >
+                  <option value="preset-avatar">HeyGen 预设数字人</option>
+                  <option value="image-presenter">AI 商品图数字人</option>
+                </select>
+              </label>
+              <label>
                 Avatar
                 <select defaultValue="business-host">
                   <option value="business-host">商务主持人</option>
@@ -540,6 +633,70 @@ export function App() {
                     </option>
                   ))}
                 </select>
+              </label>
+              {selectedTask.avatarMode === "image-presenter" ? (
+                <>
+                  <label>
+                    数字人描述提示词
+                    <textarea
+                      className="compact-textarea"
+                      value={selectedTask.avatarDescriptionPrompt}
+                      aria-label="数字人描述提示词"
+                      onBlur={() =>
+                        void updateCurrentTask({
+                          avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt
+                        })
+                      }
+                      onChange={(event) =>
+                        setSelectedTask((current) => ({
+                          ...current,
+                          avatarDescriptionPrompt: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="asset-chip">
+                    <span>商品图</span>
+                    <strong>{productImageAsset?.relativePath ?? "未上传"}</strong>
+                  </div>
+                  <div className="asset-chip">
+                    <span>人物商品图</span>
+                    <strong>{generatedPresenterAsset?.relativePath ?? "未生成"}</strong>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void uploadProductImage()}
+                    >
+                      <Upload size={16} />
+                      上传商品图
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void generatePresenterImages()}
+                    >
+                      <WandSparkles size={16} />
+                      生成人物商品图
+                    </button>
+                  </div>
+                </>
+              ) : null}
+              <label>
+                动作提示词
+                <textarea
+                  className="compact-textarea"
+                  value={selectedTask.motionPrompt}
+                  aria-label="动作提示词"
+                  onBlur={() => void updateCurrentTask({ motionPrompt: selectedTask.motionPrompt })}
+                  onChange={(event) =>
+                    setSelectedTask((current) => ({
+                      ...current,
+                      motionPrompt: event.target.value
+                    }))
+                  }
+                />
               </label>
             </section>
 
@@ -933,6 +1090,8 @@ function assetKindLabel(kind: VideoTask["mediaAssets"][number]["kind"]): string 
     "source-audio": "源音频",
     "source-video": "源视频",
     "source-transcript": "源转写",
+    "product-image": "商品图",
+    "generated-presenter-image": "人物商品图",
     "avatar-video": "数字人视频",
     "subtitle-file": "字幕",
     "background-music": "BGM",

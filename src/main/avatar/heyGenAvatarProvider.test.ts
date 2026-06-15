@@ -1,5 +1,8 @@
 // @vitest-environment node
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { OUTPUT_PRESETS, type VideoTask } from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
@@ -17,6 +20,9 @@ function createTask(): VideoTask {
     similarityRisk: "low",
     scriptGenerationNotes: "",
     contentLanguage: "id-ID",
+    avatarMode: "preset-avatar",
+    avatarDescriptionPrompt: "",
+    motionPrompt: "",
     selectedOutputPresets: ["portrait-9-16"],
     steps: [],
     outputVariants: [],
@@ -29,6 +35,15 @@ function createTask(): VideoTask {
     },
     createdAt: "2026-06-15T00:00:00.000Z",
     updatedAt: "2026-06-15T00:00:00.000Z"
+  };
+}
+
+function createImagePresenterTask(): VideoTask {
+  return {
+    ...createTask(),
+    avatarMode: "image-presenter",
+    avatarDescriptionPrompt: "年轻印尼女主播，手拿商品。",
+    motionPrompt: "手拿商品靠近镜头展示，轻微点头。"
   };
 }
 
@@ -122,6 +137,59 @@ describe("HeyGenAvatarProvider", () => {
       thumbnailUrl: "https://cdn.heygen.test/thumb.jpg",
       durationSeconds: 12
     });
+  });
+
+  it("uploads a generated presenter image and creates an image-based HeyGen render", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dhs-heygen-image-"));
+    const imagePath = path.join(tempDir, "presenter.png");
+    fs.writeFileSync(imagePath, Buffer.from("fake-image"));
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith("/v3/assets") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { asset_id: "asset-image-123" } }));
+      }
+
+      if (String(url).endsWith("/v3/videos") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { video_id: "video-image-123" } }));
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            status: "completed",
+            video_url: "https://cdn.heygen.test/image-video.mp4"
+          }
+        })
+      );
+    });
+
+    try {
+      const result = await createProvider({
+        fetchImpl: fetchMock,
+        configuration: createConfiguration({ avatarId: "" })
+      }).renderAvatar({
+        task: createImagePresenterTask(),
+        preset: OUTPUT_PRESETS[0],
+        imagePath
+      });
+      const [assetUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const [createUrl, createInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+      const createBody = JSON.parse(String(createInit.body)) as Record<string, unknown>;
+
+      expect(assetUrl).toBe("https://api.heygen.test/v3/assets");
+      expect(createUrl).toBe("https://api.heygen.test/v3/videos");
+      expect(createBody).toMatchObject({
+        type: "image",
+        script: "Final script for the avatar.",
+        motion_prompt: "手拿商品靠近镜头展示，轻微点头。"
+      });
+      expect(createBody.image).toMatchObject({
+        type: "asset_id",
+        asset_id: "asset-image-123"
+      });
+      expect(result.videoUrl).toBe("https://cdn.heygen.test/image-video.mp4");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("is unavailable when HeyGen is disabled, missing credentials, or missing avatar ID", async () => {

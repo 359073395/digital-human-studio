@@ -5,6 +5,7 @@ import {
   defaultOutputPresetIds,
   isContentLanguage,
   isOutputPresetId,
+  type AvatarMode,
   type ContentLanguage,
   type GenerationStep,
   type GenerationStepId,
@@ -29,6 +30,11 @@ interface TaskRow {
   similarity_risk: SimilarityRisk;
   script_generation_notes: string;
   content_language: ContentLanguage;
+  avatar_mode: AvatarMode;
+  avatar_description_prompt: string;
+  motion_prompt: string;
+  product_image_asset_id: string | null;
+  generated_presenter_image_asset_id: string | null;
   selected_output_presets: string;
   publishing_package: string;
   created_at: string;
@@ -114,6 +120,9 @@ export class TaskRepository {
     const similarityRisk: SimilarityRisk = "unknown";
     const scriptGenerationNotes = "";
     const contentLanguage: ContentLanguage = "zh-CN";
+    const avatarMode: AvatarMode = "preset-avatar";
+    const avatarDescriptionPrompt = "";
+    const motionPrompt = "";
     const selectedOutputPresets = defaultOutputPresetIds();
     const publishingPackage = DEFAULT_PUBLISHING_PACKAGE;
 
@@ -128,11 +137,16 @@ export class TaskRepository {
             similarity_risk,
             script_generation_notes,
             content_language,
+            avatar_mode,
+            avatar_description_prompt,
+            motion_prompt,
+            product_image_asset_id,
+            generated_presenter_image_asset_id,
             selected_output_presets,
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -142,6 +156,11 @@ export class TaskRepository {
           similarityRisk,
           scriptGenerationNotes,
           contentLanguage,
+          avatarMode,
+          avatarDescriptionPrompt,
+          motionPrompt,
+          null,
+          null,
           JSON.stringify(selectedOutputPresets),
           JSON.stringify(publishingPackage),
           now,
@@ -202,6 +221,21 @@ export class TaskRepository {
     const contentLanguage = normalizeContentLanguage(
       input.contentLanguage ?? existing.contentLanguage
     );
+    const avatarMode = normalizeAvatarMode(input.avatarMode ?? existing.avatarMode);
+    const avatarDescriptionPrompt =
+      input.avatarDescriptionPrompt === undefined
+        ? existing.avatarDescriptionPrompt
+        : input.avatarDescriptionPrompt.trim();
+    const motionPrompt =
+      input.motionPrompt === undefined ? existing.motionPrompt : input.motionPrompt.trim();
+    const productImageAssetId =
+      input.productImageAssetId === undefined
+        ? existing.productImageAssetId
+        : input.productImageAssetId;
+    const generatedPresenterImageAssetId =
+      input.generatedPresenterImageAssetId === undefined
+        ? existing.generatedPresenterImageAssetId
+        : input.generatedPresenterImageAssetId;
     const selectedOutputPresets = normalizeOutputPresetIds(
       input.selectedOutputPresets ?? existing.selectedOutputPresets
     );
@@ -213,6 +247,11 @@ export class TaskRepository {
            SET title = ?,
                source_script = ?,
                content_language = ?,
+               avatar_mode = ?,
+               avatar_description_prompt = ?,
+               motion_prompt = ?,
+               product_image_asset_id = ?,
+               generated_presenter_image_asset_id = ?,
                selected_output_presets = ?,
                updated_at = ?
            WHERE id = ?`
@@ -221,6 +260,11 @@ export class TaskRepository {
           title,
           sourceScript,
           contentLanguage,
+          avatarMode,
+          avatarDescriptionPrompt,
+          motionPrompt,
+          productImageAssetId ?? null,
+          generatedPresenterImageAssetId ?? null,
           JSON.stringify(selectedOutputPresets),
           now,
           input.taskId
@@ -462,6 +506,11 @@ export class TaskRepository {
       similarityRisk: row.similarity_risk,
       scriptGenerationNotes: row.script_generation_notes,
       contentLanguage: normalizeContentLanguage(row.content_language),
+      avatarMode: normalizeAvatarMode(row.avatar_mode),
+      avatarDescriptionPrompt: row.avatar_description_prompt,
+      motionPrompt: row.motion_prompt,
+      productImageAssetId: row.product_image_asset_id ?? undefined,
+      generatedPresenterImageAssetId: row.generated_presenter_image_asset_id ?? undefined,
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
       publishingPackage: parsePublishingPackage(row.publishing_package),
       steps: this.listSteps(row.id),
@@ -574,4 +623,8 @@ function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
 
 function normalizeContentLanguage(value: string): ContentLanguage {
   return isContentLanguage(value) ? value : "zh-CN";
+}
+
+function normalizeAvatarMode(value: string): AvatarMode {
+  return value === "image-presenter" ? "image-presenter" : "preset-avatar";
 }
