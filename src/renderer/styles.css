@@ -186,12 +186,23 @@ button:hover {
   background: #8ea0b8;
 }
 
-.task-dot.当前 {
+.task-dot.running {
   background: #3366cc;
 }
 
-.task-dot.失败 {
+.task-dot.failed,
+.task-dot.retry-ready {
   background: #c43c39;
+}
+
+.task-dot.complete {
+  background: #2f7d68;
+}
+
+.task-error {
+  margin: 12px 0 0;
+  color: #c43c39;
+  font-size: 13px;
 }
 
 .flow-tabs {

@@ -288,7 +288,7 @@ This order keeps a working vertical slice alive while replacing mocks with real 
 ## Open Implementation Decisions
 
 - Exact Electron scaffolding tool and packaging plugin.
-- Exact SQLite Node binding.
+- SQLite Node binding resolved for the MVP in `docs/adr/0006-use-node-sqlite-for-mvp-storage.md`.
 - Exact FFmpeg binary source and compliance packaging method.
 - Exact ASR provider for source transcription and subtitle fallback.
 - Exact optional TTS provider for external audio generation.

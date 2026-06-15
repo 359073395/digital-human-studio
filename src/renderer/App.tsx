@@ -12,36 +12,60 @@ import {
   WandSparkles
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { VideoTask, VideoTaskSummary } from "../shared/domain";
 import { countCompleteSteps, isRetryable, type WorkbenchStep } from "../shared/workbench";
 
-type TaskTone = "当前" | "历史" | "失败";
+const now = new Date().toISOString();
 
-interface TaskListItem {
-  id: string;
-  name: string;
-  meta: string;
-  tone: TaskTone;
-}
+const fallbackTask: VideoTask = {
+  id: "preview-task",
+  title: "护肤品口播样片",
+  sourceScript: "如果你的内容一直有播放，却始终带不动成交，问题可能不在流量。",
+  finalScript: "播放量不差却没有订单时，先别急着加预算。真正要改的，往往是前三秒给用户的购买理由。",
+  contentLanguage: "zh-CN",
+  selectedOutputPresets: ["portrait-9-16"],
+  publishingPackage: {
+    title: "",
+    description: "",
+    tags: [],
+    notes: ""
+  },
+  steps: [
+    { id: "source", label: "源文案", status: "complete", updatedAt: now },
+    { id: "script", label: "原创脚本", status: "complete", updatedAt: now },
+    { id: "avatar", label: "数字人", status: "running", updatedAt: now },
+    { id: "subtitles", label: "字幕", status: "waiting", updatedAt: now },
+    { id: "post-production", label: "合成", status: "waiting", updatedAt: now },
+    { id: "export", label: "导出", status: "waiting", updatedAt: now }
+  ],
+  outputVariants: [],
+  mediaAssets: [],
+  createdAt: now,
+  updatedAt: now
+};
 
-const tasks: TaskListItem[] = [
-  { id: "task-001", name: "护肤品口播样片", meta: "竖屏 + 横屏", tone: "当前" },
-  { id: "task-002", name: "课程引流脚本", meta: "竖屏", tone: "历史" },
-  { id: "task-003", name: "电商直播预热", meta: "数字人失败", tone: "失败" }
-];
-
-const steps: WorkbenchStep[] = [
-  { id: "source", label: "源文案", status: "complete" },
-  { id: "script", label: "原创脚本", status: "complete" },
-  { id: "avatar", label: "数字人", status: "running" },
-  { id: "subtitle", label: "字幕", status: "waiting" },
-  { id: "render", label: "合成", status: "waiting" },
-  { id: "export", label: "导出", status: "waiting" }
+const fallbackTasks: VideoTaskSummary[] = [
+  {
+    id: fallbackTask.id,
+    title: fallbackTask.title,
+    contentLanguage: fallbackTask.contentLanguage,
+    selectedOutputPresets: fallbackTask.selectedOutputPresets,
+    activeStepLabel: "数字人",
+    status: "running",
+    createdAt: fallbackTask.createdAt,
+    updatedAt: fallbackTask.updatedAt
+  }
 ];
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appVersion, setAppVersion] = useState("Digital Human Studio 本地预览");
-  const completeCount = useMemo(() => countCompleteSteps(steps), []);
+  const [taskSummaries, setTaskSummaries] = useState<VideoTaskSummary[]>(fallbackTasks);
+  const [selectedTaskId, setSelectedTaskId] = useState(fallbackTask.id);
+  const [selectedTask, setSelectedTask] = useState<VideoTask>(fallbackTask);
+  const [taskError, setTaskError] = useState("");
+  const steps = selectedTask.steps;
+  const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
 
   useEffect(() => {
     if (!window.digitalHumanStudio) {
@@ -53,6 +77,72 @@ export function App() {
       .then((info) => setAppVersion(`${info.name} ${info.version}`))
       .catch(() => setAppVersion("Digital Human Studio"));
   }, []);
+
+  useEffect(() => {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    let ignore = false;
+
+    async function loadTasks() {
+      try {
+        const summaries = await window.digitalHumanStudio?.listTasks();
+        if (!summaries || ignore) {
+          return;
+        }
+
+        setTaskSummaries(summaries);
+        const nextSelectedId = summaries[0]?.id;
+        if (!nextSelectedId) {
+          return;
+        }
+
+        setSelectedTaskId(nextSelectedId);
+        const task = await window.digitalHumanStudio?.getTask(nextSelectedId);
+        if (task && !ignore) {
+          setSelectedTask(task);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setTaskError(error instanceof Error ? error.message : "任务加载失败");
+        }
+      }
+    }
+
+    void loadTasks();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  async function selectTask(taskId: string) {
+    setSelectedTaskId(taskId);
+
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    const task = await window.digitalHumanStudio.getTask(taskId);
+    if (task) {
+      setSelectedTask(task);
+    }
+  }
+
+  async function createTask() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    const task = await window.digitalHumanStudio.createTask({
+      title: "新建视频任务"
+    });
+    const summaries = await window.digitalHumanStudio.listTasks();
+    setTaskSummaries(summaries);
+    setSelectedTaskId(task.id);
+    setSelectedTask(task);
+  }
 
   return (
     <div className="app-shell">
@@ -72,26 +162,32 @@ export function App() {
         <aside className="task-pane">
           <div className="pane-heading">
             <span>任务列表</span>
-            <button className="icon-button small" title="新建任务">
+            <button
+              className="icon-button small"
+              title="新建任务"
+              onClick={() => void createTask()}
+            >
               <Plus size={16} />
             </button>
           </div>
 
           <div className="task-list">
-            {tasks.map((task) => (
+            {taskSummaries.map((task) => (
               <button
                 key={task.id}
-                className={`task-row ${task.tone === "当前" ? "active" : ""}`}
+                className={`task-row ${task.id === selectedTaskId ? "active" : ""}`}
                 type="button"
+                onClick={() => void selectTask(task.id)}
               >
-                <span className={`task-dot ${task.tone}`} />
+                <span className={`task-dot ${task.status}`} />
                 <span>
-                  <strong>{task.name}</strong>
-                  <small>{task.meta}</small>
+                  <strong>{task.title}</strong>
+                  <small>{formatTaskMeta(task)}</small>
                 </span>
               </button>
             ))}
           </div>
+          {taskError ? <p className="task-error">{taskError}</p> : null}
         </aside>
 
         <section className="editor-pane">
@@ -109,10 +205,7 @@ export function App() {
                 <Upload size={16} />
                 <h2>源文案 / 转写</h2>
               </div>
-              <textarea
-                defaultValue={"如果你的内容一直有播放，却始终带不动成交，问题可能不在流量。"}
-                aria-label="源文案"
-              />
+              <textarea value={selectedTask.sourceScript} readOnly aria-label="源文案" />
               <div className="button-row">
                 <button type="button">
                   <Upload size={16} />
@@ -131,9 +224,8 @@ export function App() {
                 <h2>原创脚本</h2>
               </div>
               <textarea
-                defaultValue={
-                  "播放量不差却没有订单时，先别急着加预算。真正要改的，往往是前三秒给用户的购买理由。"
-                }
+                value={selectedTask.finalScript || "等待生成原创脚本"}
+                readOnly
                 aria-label="原创脚本"
               />
               <div className="risk-row">
@@ -165,12 +257,20 @@ export function App() {
             <section className="compact-block">
               <h3>输出预设</h3>
               <label className="checkbox-row">
-                <input type="checkbox" defaultChecked />
+                <input
+                  type="checkbox"
+                  checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
+                  readOnly
+                />
                 <Smartphone size={16} />
                 竖屏 9:16
               </label>
               <label className="checkbox-row">
-                <input type="checkbox" />
+                <input
+                  type="checkbox"
+                  checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
+                  readOnly
+                />
                 <Monitor size={16} />
                 横屏 16:9
               </label>
@@ -292,4 +392,12 @@ function statusLabel(status: WorkbenchStep["status"]): string {
   };
 
   return labels[status];
+}
+
+function formatTaskMeta(task: VideoTaskSummary): string {
+  const presets = task.selectedOutputPresets
+    .map((preset) => (preset === "portrait-9-16" ? "竖屏" : "横屏"))
+    .join(" + ");
+
+  return `${presets || "未选比例"} · ${task.activeStepLabel}`;
 }

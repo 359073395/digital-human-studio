@@ -1,4 +1,6 @@
-export type StepStatus = "waiting" | "running" | "complete" | "failed" | "retry-ready";
+import type { StepStatus } from "./domain";
+
+export type { StepStatus } from "./domain";
 
 export interface WorkbenchStep {
   id: string;
