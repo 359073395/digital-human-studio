@@ -1,4 +1,10 @@
-import type { VideoTask, VideoTaskSummary } from "./domain";
+import type {
+  ContentLanguage,
+  GenerationStepId,
+  OutputPresetId,
+  VideoTask,
+  VideoTaskSummary
+} from "./domain";
 import type {
   ProviderId,
   SaveServiceConfigurationInput,
@@ -21,6 +27,10 @@ export interface DigitalHumanStudioAPI {
   listTasks: () => Promise<VideoTaskSummary[]>;
   getTask: (taskId: string) => Promise<VideoTask | null>;
   createTask: (input?: CreateTaskInput) => Promise<VideoTask>;
+  updateTask: (input: UpdateTaskInput) => Promise<VideoTask>;
+  runMockWorkflow: (taskId: string) => Promise<VideoTask>;
+  retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
+  openTaskExports: (taskId: string) => Promise<void>;
   listServiceConfigurations: () => Promise<ServiceConfiguration[]>;
   saveServiceConfiguration: (input: SaveServiceConfigurationInput) => Promise<ServiceConfiguration>;
   clearServiceCredential: (providerId: ProviderId) => Promise<ServiceConfiguration>;
@@ -33,6 +43,10 @@ export const IPC_CHANNELS = {
   listTasks: "tasks:list",
   getTask: "tasks:get",
   createTask: "tasks:create",
+  updateTask: "tasks:update",
+  runMockWorkflow: "workflow:mock-run",
+  retryMockWorkflowStep: "workflow:mock-retry-step",
+  openTaskExports: "workflow:open-exports",
   listServiceConfigurations: "service-configurations:list",
   saveServiceConfiguration: "service-configurations:save",
   clearServiceCredential: "service-configurations:clear-credential",
@@ -42,4 +56,17 @@ export const IPC_CHANNELS = {
 export interface CreateTaskInput {
   title?: string;
   sourceScript?: string;
+}
+
+export interface UpdateTaskInput {
+  taskId: string;
+  title?: string;
+  sourceScript?: string;
+  contentLanguage?: ContentLanguage;
+  selectedOutputPresets?: OutputPresetId[];
+}
+
+export interface RetryWorkflowStepInput {
+  taskId: string;
+  stepId: GenerationStepId;
 }

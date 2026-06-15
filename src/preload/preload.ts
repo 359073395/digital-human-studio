@@ -6,7 +6,13 @@ import type {
   ServiceConfiguration,
   ServiceConnectionCheck
 } from "../shared/serviceConfig";
-import type { AppInfo, CreateTaskInput, DigitalHumanStudioAPI } from "../shared/ipc";
+import type {
+  AppInfo,
+  CreateTaskInput,
+  DigitalHumanStudioAPI,
+  RetryWorkflowStepInput,
+  UpdateTaskInput
+} from "../shared/ipc";
 
 const IPC_CHANNELS = {
   getAppInfo: "app:get-info",
@@ -14,6 +20,10 @@ const IPC_CHANNELS = {
   listTasks: "tasks:list",
   getTask: "tasks:get",
   createTask: "tasks:create",
+  updateTask: "tasks:update",
+  runMockWorkflow: "workflow:mock-run",
+  retryMockWorkflowStep: "workflow:mock-retry-step",
+  openTaskExports: "workflow:open-exports",
   listServiceConfigurations: "service-configurations:list",
   saveServiceConfiguration: "service-configurations:save",
   clearServiceCredential: "service-configurations:clear-credential",
@@ -28,6 +38,14 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.getTask, taskId) as Promise<VideoTask | null>,
   createTask: (input?: CreateTaskInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.createTask, input) as Promise<VideoTask>,
+  updateTask: (input: UpdateTaskInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.updateTask, input) as Promise<VideoTask>,
+  runMockWorkflow: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.runMockWorkflow, taskId) as Promise<VideoTask>,
+  retryMockWorkflowStep: (input: RetryWorkflowStepInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.retryMockWorkflowStep, input) as Promise<VideoTask>,
+  openTaskExports: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.openTaskExports, taskId) as Promise<void>,
   listServiceConfigurations: () =>
     ipcRenderer.invoke(IPC_CHANNELS.listServiceConfigurations) as Promise<ServiceConfiguration[]>,
   saveServiceConfiguration: (input: SaveServiceConfigurationInput) =>

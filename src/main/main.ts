@@ -1,13 +1,20 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
 import type { ProviderId, SaveServiceConfigurationInput } from "../shared/serviceConfig";
-import { IPC_CHANNELS, type AppInfo, type CreateTaskInput } from "../shared/ipc";
-import { createAppPaths, ensureAppPaths } from "./storage/appPaths";
+import {
+  IPC_CHANNELS,
+  type AppInfo,
+  type CreateTaskInput,
+  type RetryWorkflowStepInput,
+  type UpdateTaskInput
+} from "../shared/ipc";
+import { createAppPaths, ensureAppPaths, getTaskMediaDirectory } from "./storage/appPaths";
 import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
 import { SafeStorageCipher } from "./storage/safeStorageCipher";
 import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
 import { TaskRepository } from "./storage/taskRepository";
+import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -59,6 +66,8 @@ function createMainWindow(): void {
 interface MainRepositories {
   taskRepository: TaskRepository;
   serviceConfigurationRepository: ServiceConfigurationRepository;
+  mockWorkflowRunner: MockWorkflowRunner;
+  appPaths: ReturnType<typeof createAppPaths>;
 }
 
 function createRepositories(): MainRepositories {
@@ -78,12 +87,14 @@ function createRepositories(): MainRepositories {
     taskDatabase,
     credentialStore
   );
+  const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   taskRepository.ensureSeedTask();
-  return { taskRepository, serviceConfigurationRepository };
+  return { taskRepository, serviceConfigurationRepository, mockWorkflowRunner, appPaths };
 }
 
 function registerIpcHandlers(repositories: MainRepositories): void {
-  const { serviceConfigurationRepository, taskRepository } = repositories;
+  const { appPaths, mockWorkflowRunner, serviceConfigurationRepository, taskRepository } =
+    repositories;
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, (): AppInfo => {
     return {
@@ -105,6 +116,23 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   ipcMain.handle(IPC_CHANNELS.createTask, (_event, input?: CreateTaskInput) =>
     taskRepository.createTask(input)
   );
+
+  ipcMain.handle(IPC_CHANNELS.updateTask, (_event, input: UpdateTaskInput) =>
+    taskRepository.updateTask(input)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>
+    mockWorkflowRunner.runTask(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.retryMockWorkflowStep, (_event, input: RetryWorkflowStepInput) =>
+    mockWorkflowRunner.retryStep(input.taskId, input.stepId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.openTaskExports, async (_event, taskId: string) => {
+    const exportsDirectory = getTaskMediaDirectory(appPaths, taskId, "exports");
+    await shell.openPath(exportsDirectory);
+  });
 
   ipcMain.handle(IPC_CHANNELS.listServiceConfigurations, () =>
     serviceConfigurationRepository.listConfigurations()

@@ -36,6 +36,11 @@ button:hover {
   border-color: #8ca4c3;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .app-shell {
   display: grid;
   grid-template-rows: 68px minmax(0, 1fr);
@@ -239,7 +244,8 @@ button:hover {
 .field-block,
 .compact-block,
 .status-block,
-.export-block {
+.export-block,
+.artifact-block {
   border: 1px solid #dce3ee;
   border-radius: 8px;
   background: #ffffff;
@@ -247,7 +253,8 @@ button:hover {
 
 .field-block,
 .compact-block,
-.status-block {
+.status-block,
+.artifact-block {
   padding: 12px;
 }
 
@@ -322,6 +329,13 @@ label {
   justify-content: flex-end;
 }
 
+.action-message {
+  margin-right: auto;
+  color: #46576d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .primary-actions .primary {
   border-color: #2957b8;
   background: #2957b8;
@@ -330,8 +344,9 @@ label {
 
 .preview-pane {
   display: grid;
-  grid-template-rows: 280px auto auto;
+  grid-template-rows: 250px auto auto minmax(120px, 1fr);
   gap: 12px;
+  overflow: auto;
 }
 
 .preview-box {
@@ -353,8 +368,17 @@ label {
 }
 
 .avatar-placeholder {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
   color: #dce7f7;
   font-size: 13px;
+  text-align: center;
+}
+
+.avatar-placeholder strong,
+.avatar-placeholder span {
+  display: block;
 }
 
 .step-row {
@@ -395,6 +419,41 @@ label {
 .export-block strong,
 .export-block span {
   display: block;
+}
+
+.asset-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.asset-list p {
+  margin: 0;
+  color: #66758b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.asset-row {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.asset-row strong {
+  color: #1d2a3d;
+  font-size: 12px;
+}
+
+.asset-row span {
+  overflow: hidden;
+  color: #66758b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-backdrop {

@@ -3,6 +3,7 @@ import {
   DEFAULT_GENERATION_STEPS,
   DEFAULT_PUBLISHING_PACKAGE,
   defaultOutputPresetIds,
+  isOutputPresetId,
   type ContentLanguage,
   type GenerationStep,
   type GenerationStepId,
@@ -14,7 +15,7 @@ import {
   type VideoTask,
   type VideoTaskSummary
 } from "../../shared/domain";
-import type { CreateTaskInput } from "../../shared/ipc";
+import type { CreateTaskInput, UpdateTaskInput } from "../../shared/ipc";
 import { ensureTaskMediaDirectories, type AppPaths } from "./appPaths";
 import { runInTransaction, type TaskDatabase } from "./database";
 
@@ -178,6 +179,187 @@ export class TaskRepository {
     return task;
   }
 
+  updateTask(input: UpdateTaskInput): VideoTask {
+    const existing = this.getTask(input.taskId);
+    if (!existing) {
+      throw new Error(`Task ${input.taskId} was not found.`);
+    }
+
+    const now = new Date().toISOString();
+    const title = input.title?.trim() || existing.title;
+    const sourceScript =
+      input.sourceScript === undefined ? existing.sourceScript : input.sourceScript.trim();
+    const contentLanguage = input.contentLanguage ?? existing.contentLanguage;
+    const selectedOutputPresets = normalizeOutputPresetIds(
+      input.selectedOutputPresets ?? existing.selectedOutputPresets
+    );
+
+    runInTransaction(this.database, () => {
+      this.database
+        .prepare(
+          `UPDATE video_tasks
+           SET title = ?,
+               source_script = ?,
+               content_language = ?,
+               selected_output_presets = ?,
+               updated_at = ?
+           WHERE id = ?`
+        )
+        .run(
+          title,
+          sourceScript,
+          contentLanguage,
+          JSON.stringify(selectedOutputPresets),
+          now,
+          input.taskId
+        );
+
+      this.syncOutputVariants(input.taskId, selectedOutputPresets, now);
+    });
+
+    const task = this.getTask(input.taskId);
+    if (!task) {
+      throw new Error(`Task ${input.taskId} was not found after update.`);
+    }
+    return task;
+  }
+
+  updateFinalScript(taskId: string, finalScript: string): VideoTask {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare("UPDATE video_tasks SET final_script = ?, updated_at = ? WHERE id = ?")
+      .run(finalScript, now, taskId);
+
+    if (result.changes === 0) {
+      throw new Error(`Task ${taskId} was not found.`);
+    }
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after final script update.`);
+    }
+    return task;
+  }
+
+  updatePublishingPackage(taskId: string, publishingPackage: PublishingPackage): VideoTask {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare("UPDATE video_tasks SET publishing_package = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(publishingPackage), now, taskId);
+
+    if (result.changes === 0) {
+      throw new Error(`Task ${taskId} was not found.`);
+    }
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after publishing package update.`);
+    }
+    return task;
+  }
+
+  updateOutputVariant(
+    taskId: string,
+    presetId: OutputPresetId,
+    patch: {
+      status?: OutputVariant["status"];
+      finishedVideoPath?: string;
+      coverImagePath?: string;
+    }
+  ): VideoTask {
+    const now = new Date().toISOString();
+    const existing = this.database
+      .prepare("SELECT id FROM output_variants WHERE task_id = ? AND preset_id = ?")
+      .get(taskId, presetId) as { id: string } | undefined;
+
+    runInTransaction(this.database, () => {
+      if (!existing) {
+        this.database
+          .prepare(
+            `INSERT INTO output_variants (
+              id,
+              task_id,
+              preset_id,
+              status,
+              finished_video_path,
+              cover_image_path,
+              created_at,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            crypto.randomUUID(),
+            taskId,
+            presetId,
+            patch.status ?? "waiting",
+            patch.finishedVideoPath ?? null,
+            patch.coverImagePath ?? null,
+            now,
+            now
+          );
+      } else {
+        this.database
+          .prepare(
+            `UPDATE output_variants
+             SET status = COALESCE(?, status),
+                 finished_video_path = COALESCE(?, finished_video_path),
+                 cover_image_path = COALESCE(?, cover_image_path),
+                 updated_at = ?
+             WHERE task_id = ? AND preset_id = ?`
+          )
+          .run(
+            patch.status ?? null,
+            patch.finishedVideoPath ?? null,
+            patch.coverImagePath ?? null,
+            now,
+            taskId,
+            presetId
+          );
+      }
+
+      this.database.prepare("UPDATE video_tasks SET updated_at = ? WHERE id = ?").run(now, taskId);
+    });
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after variant update.`);
+    }
+    return task;
+  }
+
+  addMediaAsset(taskId: string, kind: MediaAsset["kind"], relativePath: string): VideoTask {
+    const existing = this.database
+      .prepare("SELECT id FROM media_assets WHERE task_id = ? AND kind = ? AND relative_path = ?")
+      .get(taskId, kind, relativePath) as { id: string } | undefined;
+
+    if (!existing) {
+      const now = new Date().toISOString();
+      runInTransaction(this.database, () => {
+        this.database
+          .prepare(
+            `INSERT INTO media_assets (
+              id,
+              task_id,
+              kind,
+              relative_path,
+              created_at
+            ) VALUES (?, ?, ?, ?, ?)`
+          )
+          .run(crypto.randomUUID(), taskId, kind, relativePath, now);
+
+        this.database
+          .prepare("UPDATE video_tasks SET updated_at = ? WHERE id = ?")
+          .run(now, taskId);
+      });
+    }
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after media asset insert.`);
+    }
+    return task;
+  }
+
   updateStepStatus(
     taskId: string,
     stepId: GenerationStepId,
@@ -289,6 +471,47 @@ export class TaskRepository {
       createdAt: row.created_at
     }));
   }
+
+  private syncOutputVariants(
+    taskId: string,
+    selectedOutputPresets: OutputPresetId[],
+    now: string
+  ): void {
+    const placeholders = selectedOutputPresets.map(() => "?").join(",");
+
+    if (selectedOutputPresets.length > 0) {
+      this.database
+        .prepare(
+          `DELETE FROM output_variants
+           WHERE task_id = ?
+             AND preset_id NOT IN (${placeholders})`
+        )
+        .run(taskId, ...selectedOutputPresets);
+    }
+
+    for (const presetId of selectedOutputPresets) {
+      const existing = this.database
+        .prepare("SELECT id FROM output_variants WHERE task_id = ? AND preset_id = ?")
+        .get(taskId, presetId) as { id: string } | undefined;
+
+      if (!existing) {
+        this.database
+          .prepare(
+            `INSERT INTO output_variants (
+              id,
+              task_id,
+              preset_id,
+              status,
+              finished_video_path,
+              cover_image_path,
+              created_at,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(crypto.randomUUID(), taskId, presetId, "waiting", null, null, now, now);
+      }
+    }
+  }
 }
 
 function parseOutputPresetIds(value: string): OutputPresetId[] {
@@ -297,4 +520,9 @@ function parseOutputPresetIds(value: string): OutputPresetId[] {
 
 function parsePublishingPackage(value: string): PublishingPackage {
   return JSON.parse(value) as PublishingPackage;
+}
+
+function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
+  const unique = Array.from(new Set(value.filter(isOutputPresetId)));
+  return unique.length > 0 ? unique : defaultOutputPresetIds();
 }

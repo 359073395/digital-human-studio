@@ -12,7 +12,13 @@ import {
   WandSparkles
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { VideoTask, VideoTaskSummary } from "../shared/domain";
+import {
+  OUTPUT_PRESETS,
+  type GenerationStepId,
+  type OutputPresetId,
+  type VideoTask,
+  type VideoTaskSummary
+} from "../shared/domain";
 import type {
   ProviderId,
   SaveServiceConfigurationInput,
@@ -73,8 +79,12 @@ export function App() {
   const [serviceConfigurations, setServiceConfigurations] = useState<ServiceConfiguration[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, SettingsDraft>>({});
   const [settingsMessage, setSettingsMessage] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
+  const primaryVariant = selectedTask.outputVariants[0];
+  const visibleAssets = selectedTask.mediaAssets.slice(-6).reverse();
 
   useEffect(() => {
     if (!window.digitalHumanStudio) {
@@ -126,6 +136,23 @@ export function App() {
     };
   }, []);
 
+  async function refreshTaskState(taskId: string, nextTask?: VideoTask) {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    const [summaries, loadedTask] = await Promise.all([
+      window.digitalHumanStudio.listTasks(),
+      nextTask ? Promise.resolve(nextTask) : window.digitalHumanStudio.getTask(taskId)
+    ]);
+
+    setTaskSummaries(summaries);
+    setSelectedTaskId(taskId);
+    if (loadedTask) {
+      setSelectedTask(loadedTask);
+    }
+  }
+
   async function selectTask(taskId: string) {
     setSelectedTaskId(taskId);
 
@@ -137,6 +164,22 @@ export function App() {
     if (task) {
       setSelectedTask(task);
     }
+  }
+
+  async function updateCurrentTask(
+    patch: Partial<
+      Pick<VideoTask, "title" | "sourceScript" | "contentLanguage" | "selectedOutputPresets">
+    >
+  ) {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    const task = await window.digitalHumanStudio.updateTask({
+      taskId: selectedTask.id,
+      ...patch
+    });
+    await refreshTaskState(task.id, task);
   }
 
   async function createTask() {
@@ -151,6 +194,103 @@ export function App() {
     setTaskSummaries(summaries);
     setSelectedTaskId(task.id);
     setSelectedTask(task);
+  }
+
+  async function generateMockScript() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在生成 mock 脚本...");
+
+    try {
+      await window.digitalHumanStudio.updateTask({
+        taskId: selectedTask.id,
+        sourceScript: selectedTask.sourceScript,
+        contentLanguage: selectedTask.contentLanguage,
+        selectedOutputPresets: selectedTask.selectedOutputPresets
+      });
+      await window.digitalHumanStudio.retryMockWorkflowStep({
+        taskId: selectedTask.id,
+        stepId: "source"
+      });
+      const task = await window.digitalHumanStudio.retryMockWorkflowStep({
+        taskId: selectedTask.id,
+        stepId: "script"
+      });
+      setActionMessage("mock 脚本已生成");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "mock 脚本生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function runMockWorkflow() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在运行 mock 全流程...");
+
+    try {
+      await window.digitalHumanStudio.updateTask({
+        taskId: selectedTask.id,
+        sourceScript: selectedTask.sourceScript,
+        contentLanguage: selectedTask.contentLanguage,
+        selectedOutputPresets: selectedTask.selectedOutputPresets
+      });
+      const task = await window.digitalHumanStudio.runMockWorkflow(selectedTask.id);
+      setActionMessage("mock 全流程已完成，发布资料包已生成");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "mock 全流程运行失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function retryWorkflowStep(stepId: GenerationStepId) {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage(`正在重试：${stepLabel(stepId)}...`);
+
+    try {
+      const task = await window.digitalHumanStudio.retryMockWorkflowStep({
+        taskId: selectedTask.id,
+        stepId
+      });
+      setActionMessage(`${stepLabel(stepId)}已重试`);
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "单步重试失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function toggleOutputPreset(presetId: OutputPresetId, checked: boolean) {
+    const nextPresets = checked
+      ? Array.from(new Set([...selectedTask.selectedOutputPresets, presetId]))
+      : selectedTask.selectedOutputPresets.filter((candidate) => candidate !== presetId);
+
+    await updateCurrentTask({
+      selectedOutputPresets: nextPresets.length > 0 ? nextPresets : ["portrait-9-16"]
+    });
+  }
+
+  async function openTaskExports() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    await window.digitalHumanStudio.openTaskExports(selectedTask.id);
   }
 
   async function openSettingsModal() {
@@ -269,7 +409,17 @@ export function App() {
                 <Upload size={16} />
                 <h2>源文案 / 转写</h2>
               </div>
-              <textarea value={selectedTask.sourceScript} readOnly aria-label="源文案" />
+              <textarea
+                value={selectedTask.sourceScript}
+                aria-label="源文案"
+                onBlur={() => void updateCurrentTask({ sourceScript: selectedTask.sourceScript })}
+                onChange={(event) =>
+                  setSelectedTask((current) => ({
+                    ...current,
+                    sourceScript: event.target.value
+                  }))
+                }
+              />
               <div className="button-row">
                 <button type="button">
                   <Upload size={16} />
@@ -316,6 +466,20 @@ export function App() {
                   <option value="external">外部音频</option>
                 </select>
               </label>
+              <label>
+                生成语言
+                <select
+                  value={selectedTask.contentLanguage}
+                  onChange={(event) =>
+                    void updateCurrentTask({
+                      contentLanguage: event.target.value as VideoTask["contentLanguage"]
+                    })
+                  }
+                >
+                  <option value="zh-CN">中文</option>
+                  <option value="en-US">English</option>
+                </select>
+              </label>
             </section>
 
             <section className="compact-block">
@@ -324,7 +488,9 @@ export function App() {
                 <input
                   type="checkbox"
                   checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
-                  readOnly
+                  onChange={(event) =>
+                    void toggleOutputPreset("portrait-9-16", event.target.checked)
+                  }
                 />
                 <Smartphone size={16} />
                 竖屏 9:16
@@ -333,7 +499,9 @@ export function App() {
                 <input
                   type="checkbox"
                   checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
-                  readOnly
+                  onChange={(event) =>
+                    void toggleOutputPreset("landscape-16-9", event.target.checked)
+                  }
                 />
                 <Monitor size={16} />
                 横屏 16:9
@@ -358,15 +526,25 @@ export function App() {
           </div>
 
           <div className="primary-actions">
-            <button type="button">
+            {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
+            <button
+              type="button"
+              disabled={isWorkflowRunning}
+              onClick={() => void generateMockScript()}
+            >
               <WandSparkles size={17} />
               生成脚本
             </button>
-            <button type="button" className="primary">
+            <button
+              type="button"
+              className="primary"
+              disabled={isWorkflowRunning}
+              onClick={() => void runMockWorkflow()}
+            >
               <Play size={17} />
-              生成数字人
+              运行 Mock 全流程
             </button>
-            <button type="button">
+            <button type="button" onClick={() => void openTaskExports()}>
               <FolderOpen size={17} />
               打开导出
             </button>
@@ -376,7 +554,14 @@ export function App() {
         <aside className="preview-pane">
           <div className="preview-box">
             <div className="phone-frame">
-              <div className="avatar-placeholder">视频预览</div>
+              <div className="avatar-placeholder">
+                <strong>
+                  {primaryVariant ? presetLabel(primaryVariant.presetId) : "视频预览"}
+                </strong>
+                <span>
+                  {primaryVariant ? variantStatusLabel(primaryVariant.status) : "等待生成"}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -393,7 +578,12 @@ export function App() {
                   <span className={`status-light ${step.status}`} />
                   <span>{step.label}</span>
                   {isRetryable(step.status) ? (
-                    <button className="icon-button tiny" title="重试">
+                    <button
+                      className="icon-button tiny"
+                      title="重试"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void retryWorkflowStep(step.id)}
+                    >
                       <RefreshCcw size={14} />
                     </button>
                   ) : (
@@ -407,9 +597,28 @@ export function App() {
           <section className="export-block">
             <div>
               <strong>发布资料包</strong>
-              <span>等待合成完成</span>
+              <span>{selectedTask.publishingPackage.title || "等待合成完成"}</span>
             </div>
             <AlertCircle size={18} />
+          </section>
+
+          <section className="artifact-block">
+            <div className="pane-heading">
+              <span>Mock 产物</span>
+              <small>{selectedTask.mediaAssets.length}</small>
+            </div>
+            <div className="asset-list">
+              {visibleAssets.length > 0 ? (
+                visibleAssets.map((asset) => (
+                  <div className="asset-row" key={asset.id}>
+                    <strong>{assetKindLabel(asset.kind)}</strong>
+                    <span>{asset.relativePath}</span>
+                  </div>
+                ))
+              ) : (
+                <p>运行 mock 流程后显示生成的占位文件。</p>
+              )}
+            </div>
           </section>
         </aside>
       </main>
@@ -554,6 +763,49 @@ function statusLabel(status: WorkbenchStep["status"]): string {
   };
 
   return labels[status];
+}
+
+function stepLabel(stepId: GenerationStepId): string {
+  const labels: Record<GenerationStepId, string> = {
+    source: "源文案",
+    script: "原创脚本",
+    avatar: "数字人",
+    subtitles: "字幕",
+    "post-production": "合成",
+    export: "导出"
+  };
+
+  return labels[stepId];
+}
+
+function presetLabel(presetId: OutputPresetId): string {
+  return OUTPUT_PRESETS.find((preset) => preset.id === presetId)?.label ?? presetId;
+}
+
+function variantStatusLabel(status: VideoTask["outputVariants"][number]["status"]): string {
+  const labels: Record<VideoTask["outputVariants"][number]["status"], string> = {
+    waiting: "等待后续步骤",
+    rendering: "生成中",
+    complete: "已生成",
+    failed: "需要重试"
+  };
+
+  return labels[status];
+}
+
+function assetKindLabel(kind: VideoTask["mediaAssets"][number]["kind"]): string {
+  const labels: Record<VideoTask["mediaAssets"][number]["kind"], string> = {
+    "source-audio": "源音频",
+    "source-video": "源视频",
+    "avatar-video": "数字人视频",
+    "subtitle-file": "字幕",
+    "background-music": "BGM",
+    "cover-image": "封面",
+    "finished-video": "成片",
+    "publishing-package": "发布包"
+  };
+
+  return labels[kind];
 }
 
 function formatTaskMeta(task: VideoTaskSummary): string {
