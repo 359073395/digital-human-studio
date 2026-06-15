@@ -1,20 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { VideoTask } from "../../shared/domain";
 import type { SourceTranscriptionResult } from "../../shared/scriptGeneration";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 import { MockAsrProvider } from "./mockAsrProvider";
 import { defaultSourceScript, MockScriptProvider } from "./mockScriptProvider";
+import { ScriptProviderUnavailableError, type ScriptProvider } from "./scriptProvider";
 
 export class ScriptWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
-    private readonly scriptProvider = new MockScriptProvider(),
-    private readonly asrProvider = new MockAsrProvider()
+    private readonly scriptProvider: ScriptProvider = new MockScriptProvider(),
+    private readonly asrProvider = new MockAsrProvider(),
+    private readonly fallbackScriptProvider: ScriptProvider = new MockScriptProvider()
   ) {}
 
-  generateScript(taskId: string) {
+  async generateScript(taskId: string) {
     const task = this.requireTask(taskId);
     const sourceScript = task.sourceScript || defaultSourceScript(task.contentLanguage);
 
@@ -29,7 +32,7 @@ export class ScriptWorkflowService {
         });
       }
 
-      const result = this.scriptProvider.generate({
+      const result = await this.generateWithFallback({
         ...task,
         sourceScript
       });
@@ -95,6 +98,18 @@ export class ScriptWorkflowService {
       throw new Error(`Task ${taskId} was not found.`);
     }
     return task;
+  }
+
+  private async generateWithFallback(task: VideoTask) {
+    try {
+      return await this.scriptProvider.generate(task);
+    } catch (error) {
+      if (error instanceof ScriptProviderUnavailableError) {
+        return this.fallbackScriptProvider.generate(task);
+      }
+
+      throw error;
+    }
   }
 }
 

@@ -60,6 +60,14 @@ _Avoid_: Hook sentence, opening copy
 A product-facing warning that estimates whether a generated script is too close to the reference script's expression. It is used to encourage further originality, not to evade platform checks.
 _Avoid_: Detection bypass, duplicate-check score, anti-plagiarism score
 
+**Script Provider**:
+A main-process adapter that turns a video task's source script and content language into an original final script. The renderer triggers script generation through IPC and never calls language model APIs directly.
+_Avoid_: Renderer LLM client, prompt-only utility, direct API button
+
+**Mock Script Fallback**:
+The local runnable script generator used when the language model provider is disabled or missing credentials. Once a real provider is configured, provider failures should surface as retry-ready errors instead of silently falling back to mock output.
+_Avoid_: Hidden fallback, production generator, fake success
+
 **Editable Default**:
 An automatically generated asset or setting that gives the user a ready-to-use result while still allowing manual replacement or adjustment before final rendering.
 _Avoid_: Forced default, manual-only setting

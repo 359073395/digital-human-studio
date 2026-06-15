@@ -1,9 +1,10 @@
 import type { ScriptGenerationResult } from "../../shared/scriptGeneration";
 import type { VideoTask } from "../../shared/domain";
 import { buildScriptGenerationPrompt } from "./promptBuilder";
+import type { ScriptProvider } from "./scriptProvider";
 
-export class MockScriptProvider {
-  generate(task: VideoTask): ScriptGenerationResult {
+export class MockScriptProvider implements ScriptProvider {
+  async generate(task: VideoTask): Promise<ScriptGenerationResult> {
     const sourceScript = task.sourceScript || defaultSourceScript(task.contentLanguage);
     const finalScript = createFinalScript(task, sourceScript);
 

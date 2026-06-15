@@ -11,6 +11,7 @@ import {
 import { createAppPaths, ensureAppPaths, getTaskMediaDirectory } from "./storage/appPaths";
 import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
+import { OpenAiCompatibleScriptProvider } from "./script/openAiCompatibleScriptProvider";
 import { SafeStorageCipher } from "./storage/safeStorageCipher";
 import { ScriptWorkflowService } from "./script/scriptWorkflowService";
 import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
@@ -85,10 +86,14 @@ function createRepositories(): MainRepositories {
     new SafeStorageCipher()
   );
   const taskRepository = new TaskRepository(taskDatabase, appPaths);
-  const scriptWorkflowService = new ScriptWorkflowService(taskRepository, appPaths);
   const serviceConfigurationRepository = new ServiceConfigurationRepository(
     taskDatabase,
     credentialStore
+  );
+  const scriptWorkflowService = new ScriptWorkflowService(
+    taskRepository,
+    appPaths,
+    new OpenAiCompatibleScriptProvider(serviceConfigurationRepository, credentialStore)
   );
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   taskRepository.ensureSeedTask();
