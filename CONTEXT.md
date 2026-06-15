@@ -149,5 +149,5 @@ The language used by the desktop application's controls, labels, and messages. T
 _Avoid_: Content language
 
 **Content Language**:
-The language of generated scripts, avatar speech, subtitles, and publishing copy. The MVP supports Chinese and English content languages.
+The language of generated scripts, avatar speech, subtitles, and publishing copy. The MVP supports Chinese, English, and Indonesian content languages.
 _Avoid_: Interface language

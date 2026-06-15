@@ -5,6 +5,7 @@ import type {
   VideoTask,
   VideoTaskSummary
 } from "./domain";
+import type { SourceTranscriptionResult } from "./scriptGeneration";
 import type {
   ProviderId,
   SaveServiceConfigurationInput,
@@ -28,6 +29,8 @@ export interface DigitalHumanStudioAPI {
   getTask: (taskId: string) => Promise<VideoTask | null>;
   createTask: (input?: CreateTaskInput) => Promise<VideoTask>;
   updateTask: (input: UpdateTaskInput) => Promise<VideoTask>;
+  generateScript: (taskId: string) => Promise<VideoTask>;
+  transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
   runMockWorkflow: (taskId: string) => Promise<VideoTask>;
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
   openTaskExports: (taskId: string) => Promise<void>;
@@ -44,6 +47,8 @@ export const IPC_CHANNELS = {
   getTask: "tasks:get",
   createTask: "tasks:create",
   updateTask: "tasks:update",
+  generateScript: "script:generate",
+  transcribeSource: "source:transcribe",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
   openTaskExports: "workflow:open-exports",

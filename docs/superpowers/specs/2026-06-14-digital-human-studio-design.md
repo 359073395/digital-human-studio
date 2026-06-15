@@ -11,7 +11,7 @@ The MVP must prove one complete path from user input to a finished video and a l
 The MVP includes:
 
 - Chinese desktop interface.
-- Chinese and English content generation.
+- Chinese, English, and Indonesian content generation.
 - One active video task as the primary UI workflow.
 - A persistent task list underneath the UI model.
 - Direct source-script input.
@@ -303,7 +303,7 @@ The MVP is accepted when a real sample task can:
 
 1. Configure API keys locally.
 2. Create a video task.
-3. Enter a Chinese or English source script.
+3. Enter a Chinese, English, or Indonesian source script.
 4. Generate an original talking-head script with similarity risk shown.
 5. Select a HeyGen preset avatar and voice.
 6. Select portrait output by default and optionally add landscape output.

@@ -3,6 +3,7 @@ import {
   DEFAULT_GENERATION_STEPS,
   DEFAULT_PUBLISHING_PACKAGE,
   defaultOutputPresetIds,
+  isContentLanguage,
   isOutputPresetId,
   type ContentLanguage,
   type GenerationStep,
@@ -11,6 +12,7 @@ import {
   type OutputPresetId,
   type OutputVariant,
   type PublishingPackage,
+  type SimilarityRisk,
   type StepStatus,
   type VideoTask,
   type VideoTaskSummary
@@ -24,6 +26,8 @@ interface TaskRow {
   title: string;
   source_script: string;
   final_script: string;
+  similarity_risk: SimilarityRisk;
+  script_generation_notes: string;
   content_language: ContentLanguage;
   selected_output_presets: string;
   publishing_package: string;
@@ -107,6 +111,8 @@ export class TaskRepository {
     const title = input.title?.trim() || "未命名视频任务";
     const sourceScript = input.sourceScript?.trim() || "";
     const finalScript = "";
+    const similarityRisk: SimilarityRisk = "unknown";
+    const scriptGenerationNotes = "";
     const contentLanguage: ContentLanguage = "zh-CN";
     const selectedOutputPresets = defaultOutputPresetIds();
     const publishingPackage = DEFAULT_PUBLISHING_PACKAGE;
@@ -119,18 +125,22 @@ export class TaskRepository {
             title,
             source_script,
             final_script,
+            similarity_risk,
+            script_generation_notes,
             content_language,
             selected_output_presets,
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
           title,
           sourceScript,
           finalScript,
+          similarityRisk,
+          scriptGenerationNotes,
           contentLanguage,
           JSON.stringify(selectedOutputPresets),
           JSON.stringify(publishingPackage),
@@ -189,7 +199,9 @@ export class TaskRepository {
     const title = input.title?.trim() || existing.title;
     const sourceScript =
       input.sourceScript === undefined ? existing.sourceScript : input.sourceScript.trim();
-    const contentLanguage = input.contentLanguage ?? existing.contentLanguage;
+    const contentLanguage = normalizeContentLanguage(
+      input.contentLanguage ?? existing.contentLanguage
+    );
     const selectedOutputPresets = normalizeOutputPresetIds(
       input.selectedOutputPresets ?? existing.selectedOutputPresets
     );
@@ -237,6 +249,37 @@ export class TaskRepository {
     const task = this.getTask(taskId);
     if (!task) {
       throw new Error(`Task ${taskId} was not found after final script update.`);
+    }
+    return task;
+  }
+
+  updateScriptGeneration(
+    taskId: string,
+    input: {
+      finalScript: string;
+      similarityRisk: SimilarityRisk;
+      scriptGenerationNotes: string;
+    }
+  ): VideoTask {
+    const now = new Date().toISOString();
+    const result = this.database
+      .prepare(
+        `UPDATE video_tasks
+         SET final_script = ?,
+             similarity_risk = ?,
+             script_generation_notes = ?,
+             updated_at = ?
+         WHERE id = ?`
+      )
+      .run(input.finalScript, input.similarityRisk, input.scriptGenerationNotes, now, taskId);
+
+    if (result.changes === 0) {
+      throw new Error(`Task ${taskId} was not found.`);
+    }
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after script generation update.`);
     }
     return task;
   }
@@ -416,7 +459,9 @@ export class TaskRepository {
       title: row.title,
       sourceScript: row.source_script,
       finalScript: row.final_script,
-      contentLanguage: row.content_language,
+      similarityRisk: row.similarity_risk,
+      scriptGenerationNotes: row.script_generation_notes,
+      contentLanguage: normalizeContentLanguage(row.content_language),
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
       publishingPackage: parsePublishingPackage(row.publishing_package),
       steps: this.listSteps(row.id),
@@ -525,4 +570,8 @@ function parsePublishingPackage(value: string): PublishingPackage {
 function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
   const unique = Array.from(new Set(value.filter(isOutputPresetId)));
   return unique.length > 0 ? unique : defaultOutputPresetIds();
+}
+
+function normalizeContentLanguage(value: string): ContentLanguage {
+  return isContentLanguage(value) ? value : "zh-CN";
 }

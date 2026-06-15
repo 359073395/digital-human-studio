@@ -12,6 +12,7 @@ import { createAppPaths, ensureAppPaths, getTaskMediaDirectory } from "./storage
 import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
 import { SafeStorageCipher } from "./storage/safeStorageCipher";
+import { ScriptWorkflowService } from "./script/scriptWorkflowService";
 import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
 import { TaskRepository } from "./storage/taskRepository";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
@@ -67,6 +68,7 @@ interface MainRepositories {
   taskRepository: TaskRepository;
   serviceConfigurationRepository: ServiceConfigurationRepository;
   mockWorkflowRunner: MockWorkflowRunner;
+  scriptWorkflowService: ScriptWorkflowService;
   appPaths: ReturnType<typeof createAppPaths>;
 }
 
@@ -83,18 +85,30 @@ function createRepositories(): MainRepositories {
     new SafeStorageCipher()
   );
   const taskRepository = new TaskRepository(taskDatabase, appPaths);
+  const scriptWorkflowService = new ScriptWorkflowService(taskRepository, appPaths);
   const serviceConfigurationRepository = new ServiceConfigurationRepository(
     taskDatabase,
     credentialStore
   );
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   taskRepository.ensureSeedTask();
-  return { taskRepository, serviceConfigurationRepository, mockWorkflowRunner, appPaths };
+  return {
+    taskRepository,
+    serviceConfigurationRepository,
+    mockWorkflowRunner,
+    scriptWorkflowService,
+    appPaths
+  };
 }
 
 function registerIpcHandlers(repositories: MainRepositories): void {
-  const { appPaths, mockWorkflowRunner, serviceConfigurationRepository, taskRepository } =
-    repositories;
+  const {
+    appPaths,
+    mockWorkflowRunner,
+    scriptWorkflowService,
+    serviceConfigurationRepository,
+    taskRepository
+  } = repositories;
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, (): AppInfo => {
     return {
@@ -119,6 +133,14 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.updateTask, (_event, input: UpdateTaskInput) =>
     taskRepository.updateTask(input)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.generateScript, (_event, taskId: string) =>
+    scriptWorkflowService.generateScript(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.transcribeSource, (_event, taskId: string) =>
+    scriptWorkflowService.transcribeSource(taskId)
   );
 
   ipcMain.handle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>

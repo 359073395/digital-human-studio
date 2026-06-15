@@ -13,6 +13,7 @@ import type {
   RetryWorkflowStepInput,
   UpdateTaskInput
 } from "../shared/ipc";
+import type { SourceTranscriptionResult } from "../shared/scriptGeneration";
 
 const IPC_CHANNELS = {
   getAppInfo: "app:get-info",
@@ -21,6 +22,8 @@ const IPC_CHANNELS = {
   getTask: "tasks:get",
   createTask: "tasks:create",
   updateTask: "tasks:update",
+  generateScript: "script:generate",
+  transcribeSource: "source:transcribe",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
   openTaskExports: "workflow:open-exports",
@@ -40,6 +43,10 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.createTask, input) as Promise<VideoTask>,
   updateTask: (input: UpdateTaskInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.updateTask, input) as Promise<VideoTask>,
+  generateScript: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.generateScript, taskId) as Promise<VideoTask>,
+  transcribeSource: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.transcribeSource, taskId) as Promise<SourceTranscriptionResult>,
   runMockWorkflow: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.runMockWorkflow, taskId) as Promise<VideoTask>,
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) =>

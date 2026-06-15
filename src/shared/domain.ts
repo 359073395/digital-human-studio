@@ -1,4 +1,6 @@
-export type ContentLanguage = "zh-CN" | "en-US";
+export type ContentLanguage = "zh-CN" | "en-US" | "id-ID";
+
+export type SimilarityRisk = "unknown" | "low" | "medium" | "high";
 
 export type StepStatus = "waiting" | "running" | "complete" | "failed" | "retry-ready";
 
@@ -17,6 +19,7 @@ export type OutputVariantStatus = "waiting" | "rendering" | "complete" | "failed
 export type MediaAssetKind =
   | "source-audio"
   | "source-video"
+  | "source-transcript"
   | "avatar-video"
   | "subtitle-file"
   | "background-music"
@@ -39,6 +42,12 @@ export interface OutputPreset {
   width: number;
   height: number;
   defaultSelected: boolean;
+}
+
+export interface ContentLanguageOption {
+  id: ContentLanguage;
+  label: string;
+  voiceLocale: string;
 }
 
 export interface OutputVariant {
@@ -73,6 +82,8 @@ export interface VideoTask {
   title: string;
   sourceScript: string;
   finalScript: string;
+  similarityRisk: SimilarityRisk;
+  scriptGenerationNotes: string;
   contentLanguage: ContentLanguage;
   selectedOutputPresets: OutputPresetId[];
   steps: GenerationStep[];
@@ -113,6 +124,24 @@ export const OUTPUT_PRESETS: OutputPreset[] = [
   }
 ];
 
+export const CONTENT_LANGUAGES: ContentLanguageOption[] = [
+  {
+    id: "zh-CN",
+    label: "中文",
+    voiceLocale: "zh-CN"
+  },
+  {
+    id: "en-US",
+    label: "English",
+    voiceLocale: "en-US"
+  },
+  {
+    id: "id-ID",
+    label: "印尼语",
+    voiceLocale: "id-ID"
+  }
+];
+
 export const DEFAULT_GENERATION_STEPS: Omit<GenerationStep, "updatedAt">[] = [
   { id: "source", label: "源文案", status: "waiting" },
   { id: "script", label: "原创脚本", status: "waiting" },
@@ -135,4 +164,8 @@ export function defaultOutputPresetIds(): OutputPresetId[] {
 
 export function isOutputPresetId(value: string): value is OutputPresetId {
   return OUTPUT_PRESETS.some((preset) => preset.id === value);
+}
+
+export function isContentLanguage(value: string): value is ContentLanguage {
+  return CONTENT_LANGUAGES.some((language) => language.id === value);
 }

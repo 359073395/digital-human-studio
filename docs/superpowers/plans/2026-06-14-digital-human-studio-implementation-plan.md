@@ -120,7 +120,7 @@ Tasks:
 - Add final-script editing and locking behavior before avatar generation.
 - Implement local audio/video upload as a source asset.
 - Implement ASR provider for source transcription.
-- Add content language selection for Chinese and English.
+- Add content language and voice locale selection for Chinese, English, and Indonesian.
 
 Deliverables:
 
@@ -134,7 +134,7 @@ Verification:
 - Unit tests for prompt builders.
 - Unit tests for similarity-risk parsing.
 - Integration tests using mocked LLM and ASR responses.
-- Manual test with one Chinese and one English script.
+- Manual test with one Chinese, one English, and one Indonesian script.
 
 ## Milestone 6: HeyGen Avatar Provider
 
@@ -250,7 +250,7 @@ Acceptance checklist:
 
 - Configure API keys locally.
 - Create a video task.
-- Enter Chinese or English source script.
+- Enter Chinese, English, or Indonesian source script.
 - Generate original script with similarity risk shown.
 - Select HeyGen preset avatar and voice.
 - Generate portrait by default.

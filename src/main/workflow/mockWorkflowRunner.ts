@@ -7,6 +7,7 @@ import {
   type PublishingPackage,
   type VideoTask
 } from "../../shared/domain";
+import { defaultSourceScript } from "../script/mockScriptProvider";
 import { ensureTaskMediaDirectories, getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 
@@ -227,14 +228,6 @@ function writeTaskFile(
   fs.writeFileSync(absolutePath, content, "utf8");
 }
 
-function defaultSourceScript(language: VideoTask["contentLanguage"]): string {
-  if (language === "en-US") {
-    return "If your video gets views but no sales, the hook may be missing a clear buying reason.";
-  }
-
-  return "如果你的视频有播放却没有成交，问题可能不是流量，而是前 5 秒没有给出购买理由。";
-}
-
 function createMockFinalScript(task: VideoTask): string {
   const source = task.sourceScript || defaultSourceScript(task.contentLanguage);
 
@@ -244,6 +237,15 @@ function createMockFinalScript(task: VideoTask): string {
       "When a video gets views but does not bring orders, the first thing to fix is the buying reason in the opening seconds.",
       `Use this angle: ${source}`,
       "Show the pain point, give one concrete proof, then tell viewers exactly what to do next."
+    ].join("\n");
+  }
+
+  if (task.contentLanguage === "id-ID") {
+    return [
+      "Jangan langsung salahkan trafik dulu.",
+      "Kalau video sudah ditonton tapi pesanan belum masuk, bagian pertama yang harus diperbaiki adalah alasan orang harus beli sekarang.",
+      `Sudut bicaranya bisa seperti ini: ${source}`,
+      "Mulai dari masalah yang terasa dekat, tunjukkan satu bukti yang jelas, lalu tutup dengan ajakan yang simpel."
     ].join("\n");
   }
 
@@ -304,6 +306,16 @@ function createPlaceholderVideoText(
 }
 
 function createPublishingPackage(task: VideoTask): PublishingPackage {
+  if (task.contentLanguage === "id-ID") {
+    return {
+      title: createPublishingTitle(task),
+      description:
+        "Ini adalah catatan publish dari mock workflow Digital Human Studio. Nanti bisa diganti dengan copy final setelah API asli tersambung.",
+      tags: ["digitalhuman", "videopendek", "tiktokshop"],
+      notes: "Output mock hanya untuk memvalidasi status task, struktur file, dan paket publish."
+    };
+  }
+
   return {
     title: createPublishingTitle(task),
     description:

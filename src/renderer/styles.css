@@ -313,6 +313,13 @@ label {
   font-weight: 700;
 }
 
+.script-note {
+  margin: 8px 0 0;
+  color: #66758b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

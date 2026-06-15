@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  CONTENT_LANGUAGES,
   OUTPUT_PRESETS,
   type GenerationStepId,
   type OutputPresetId,
@@ -34,6 +35,8 @@ const fallbackTask: VideoTask = {
   title: "护肤品口播样片",
   sourceScript: "如果你的内容一直有播放，却始终带不动成交，问题可能不在流量。",
   finalScript: "播放量不差却没有订单时，先别急着加预算。真正要改的，往往是前三秒给用户的购买理由。",
+  similarityRisk: "low",
+  scriptGenerationNotes: "本地预览 mock 脚本。",
   contentLanguage: "zh-CN",
   selectedOutputPresets: ["portrait-9-16"],
   publishingPackage: {
@@ -202,7 +205,7 @@ export function App() {
     }
 
     setIsWorkflowRunning(true);
-    setActionMessage("正在生成 mock 脚本...");
+    setActionMessage("正在生成脚本...");
 
     try {
       await window.digitalHumanStudio.updateTask({
@@ -211,18 +214,33 @@ export function App() {
         contentLanguage: selectedTask.contentLanguage,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
-      await window.digitalHumanStudio.retryMockWorkflowStep({
-        taskId: selectedTask.id,
-        stepId: "source"
-      });
-      const task = await window.digitalHumanStudio.retryMockWorkflowStep({
-        taskId: selectedTask.id,
-        stepId: "script"
-      });
-      setActionMessage("mock 脚本已生成");
+      const task = await window.digitalHumanStudio.generateScript(selectedTask.id);
+      setActionMessage("脚本已生成");
       await refreshTaskState(task.id, task);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "mock 脚本生成失败");
+      setActionMessage(error instanceof Error ? error.message : "脚本生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function transcribeSource() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在 mock 转写源素材...");
+
+    try {
+      const result = await window.digitalHumanStudio.transcribeSource(selectedTask.id);
+      const task = await window.digitalHumanStudio.getTask(selectedTask.id);
+      setActionMessage(result.notes);
+      if (task) {
+        await refreshTaskState(task.id, task);
+      }
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "源素材转写失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -421,9 +439,13 @@ export function App() {
                 }
               />
               <div className="button-row">
-                <button type="button">
+                <button
+                  type="button"
+                  disabled={isWorkflowRunning}
+                  onClick={() => void transcribeSource()}
+                >
                   <Upload size={16} />
-                  上传音视频
+                  Mock 转写
                 </button>
                 <button type="button">
                   <WandSparkles size={16} />
@@ -444,8 +466,11 @@ export function App() {
               />
               <div className="risk-row">
                 <CheckCircle2 size={16} />
-                <span>相似风险：低</span>
+                <span>相似风险：{similarityRiskLabel(selectedTask.similarityRisk)}</span>
               </div>
+              {selectedTask.scriptGenerationNotes ? (
+                <p className="script-note">{selectedTask.scriptGenerationNotes}</p>
+              ) : null}
             </section>
           </div>
 
@@ -467,7 +492,7 @@ export function App() {
                 </select>
               </label>
               <label>
-                生成语言
+                生成语言 / 语音
                 <select
                   value={selectedTask.contentLanguage}
                   onChange={(event) =>
@@ -476,8 +501,11 @@ export function App() {
                     })
                   }
                 >
-                  <option value="zh-CN">中文</option>
-                  <option value="en-US">English</option>
+                  {CONTENT_LANGUAGES.map((language) => (
+                    <option key={language.id} value={language.id}>
+                      {language.label}
+                    </option>
+                  ))}
                 </select>
               </label>
             </section>
@@ -793,10 +821,22 @@ function variantStatusLabel(status: VideoTask["outputVariants"][number]["status"
   return labels[status];
 }
 
+function similarityRiskLabel(risk: VideoTask["similarityRisk"]): string {
+  const labels: Record<VideoTask["similarityRisk"], string> = {
+    unknown: "待生成",
+    low: "低",
+    medium: "中",
+    high: "高"
+  };
+
+  return labels[risk];
+}
+
 function assetKindLabel(kind: VideoTask["mediaAssets"][number]["kind"]): string {
   const labels: Record<VideoTask["mediaAssets"][number]["kind"], string> = {
     "source-audio": "源音频",
     "source-video": "源视频",
+    "source-transcript": "源转写",
     "avatar-video": "数字人视频",
     "subtitle-file": "字幕",
     "background-music": "BGM",

@@ -62,6 +62,14 @@ const MIGRATIONS = [
         updated_at TEXT NOT NULL
       );
     `
+  },
+  {
+    id: 3,
+    name: "add-script-generation-metadata",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN similarity_risk TEXT NOT NULL DEFAULT 'unknown';
+      ALTER TABLE video_tasks ADD COLUMN script_generation_notes TEXT NOT NULL DEFAULT '';
+    `
   }
 ] as const;
 

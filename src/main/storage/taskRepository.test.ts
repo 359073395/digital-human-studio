@@ -35,6 +35,8 @@ describe("TaskRepository", () => {
     expect(task.title).toBe("测试任务");
     expect(task.sourceScript).toBe("这是一段源文案。");
     expect(task.selectedOutputPresets).toEqual(["portrait-9-16"]);
+    expect(task.similarityRisk).toBe("unknown");
+    expect(task.scriptGenerationNotes).toBe("");
     expect(task.steps).toHaveLength(6);
     expect(task.outputVariants).toHaveLength(1);
 
@@ -79,12 +81,12 @@ describe("TaskRepository", () => {
 
     const withLandscape = repository.updateTask({
       taskId: task.id,
-      contentLanguage: "en-US",
+      contentLanguage: "id-ID",
       selectedOutputPresets: ["portrait-9-16", "landscape-16-9"],
       sourceScript: "Updated source"
     });
 
-    expect(withLandscape.contentLanguage).toBe("en-US");
+    expect(withLandscape.contentLanguage).toBe("id-ID");
     expect(withLandscape.sourceScript).toBe("Updated source");
     expect(withLandscape.outputVariants.map((variant) => variant.presetId)).toEqual([
       "portrait-9-16",
@@ -122,5 +124,19 @@ describe("TaskRepository", () => {
     expect(updated.outputVariants[0]?.status).toBe("complete");
     expect(updated.outputVariants[0]?.finishedVideoPath).toBe("exports/portrait-9-16/mock.mp4");
     expect(updated.publishingPackage.exportDirectory).toBe("exports/publishing-package");
+  });
+
+  it("persists generated script metadata", () => {
+    const task = repository.createTask({ title: "Script metadata test" });
+
+    const updated = repository.updateScriptGeneration(task.id, {
+      finalScript: "Generated original script",
+      similarityRisk: "low",
+      scriptGenerationNotes: "Mock notes"
+    });
+
+    expect(updated.finalScript).toBe("Generated original script");
+    expect(updated.similarityRisk).toBe("low");
+    expect(updated.scriptGenerationNotes).toBe("Mock notes");
   });
 });
