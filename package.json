@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
+    "configure:services": "npm run build:main && electron scripts/configure-services.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
