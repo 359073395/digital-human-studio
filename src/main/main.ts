@@ -30,8 +30,11 @@ import { ExportWorkflowService } from "./workflow/exportWorkflowService";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 import { RealWorkflowRunner } from "./workflow/realWorkflowRunner";
 
+const APP_DISPLAY_NAME = "自媒体视频工作台";
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const ASSET_PROTOCOL = "dhs-asset";
+
+app.setName(APP_DISPLAY_NAME);
 
 let mainWindow: BrowserWindow | null = null;
 let taskDatabase: TaskDatabase | null = null;
@@ -63,7 +66,7 @@ function createMainWindow(): void {
     height: 860,
     minWidth: 1180,
     minHeight: 720,
-    title: "数字人口播工作台",
+    title: APP_DISPLAY_NAME,
     backgroundColor: "#f5f7fb",
     show: false,
     webPreferences: {
@@ -178,7 +181,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, (): AppInfo => {
     return {
-      name: app.getName(),
+      name: APP_DISPLAY_NAME,
       version: app.getVersion(),
       environment: isDevelopment ? "development" : "production",
       platform: process.platform
@@ -196,6 +199,14 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   ipcMain.handle(IPC_CHANNELS.createTask, (_event, input?: CreateTaskInput) =>
     taskRepository.createTask(input)
   );
+
+  ipcMain.handle(IPC_CHANNELS.deleteTask, (_event, taskId: string) => {
+    taskRepository.deleteTask(taskId);
+    if (taskRepository.listTasks().length === 0) {
+      taskRepository.createTask({ title: "新建视频任务" });
+    }
+    return taskRepository.listTasks();
+  });
 
   ipcMain.handle(IPC_CHANNELS.updateTask, (_event, input: UpdateTaskInput) =>
     taskRepository.updateTask(input)

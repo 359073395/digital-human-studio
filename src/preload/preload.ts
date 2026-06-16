@@ -23,6 +23,7 @@ const IPC_CHANNELS = {
   listTasks: "tasks:list",
   getTask: "tasks:get",
   createTask: "tasks:create",
+  deleteTask: "tasks:delete",
   updateTask: "tasks:update",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
@@ -51,6 +52,8 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.getTask, taskId) as Promise<VideoTask | null>,
   createTask: (input?: CreateTaskInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.createTask, input) as Promise<VideoTask>,
+  deleteTask: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.deleteTask, taskId) as Promise<VideoTaskSummary[]>,
   updateTask: (input: UpdateTaskInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.updateTask, input) as Promise<VideoTask>,
   generateScript: (taskId: string) =>

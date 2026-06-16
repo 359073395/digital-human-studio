@@ -226,16 +226,32 @@ button:disabled {
 
 .task-row {
   display: grid;
-  grid-template-columns: 1fr;
-  place-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   width: 100%;
   min-height: 44px;
-  padding: 6px;
+  overflow: hidden;
+  border: 1px solid #c8d1df;
+  border-radius: 8px;
+  background: #ffffff;
   text-align: left;
 }
 
-.task-row > span:not(.task-dot) {
-  display: none;
+.task-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-content: stretch;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.task-main:hover {
+  border-color: transparent;
 }
 
 .task-row strong {
@@ -311,22 +327,30 @@ button:disabled {
 
 .task-strip .task-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   flex: 0 0 220px;
-  place-items: initial;
   align-items: center;
   width: 220px;
   min-height: 38px;
-  padding: 6px 10px;
-}
-
-.task-strip .task-row > span:not(.task-dot) {
-  display: block;
-  min-width: 0;
 }
 
 .task-strip .task-dot {
   margin-right: 8px;
+}
+
+.task-delete-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  margin-right: 5px;
+  border-color: transparent;
+  color: #7b8797;
+}
+
+.task-delete-button:hover {
+  border-color: #f0c0c0;
+  color: #bd3c3c;
+  background: #fff5f5;
 }
 
 .task-strip .task-error {
@@ -929,6 +953,7 @@ label {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
 }
 
 .preview-style-header strong,
@@ -942,6 +967,12 @@ label {
   min-height: 30px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.preview-style-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
 }
 
 .style-control-panel {

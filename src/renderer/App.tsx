@@ -9,6 +9,8 @@ import {
   RefreshCw,
   Settings,
   Smartphone,
+  Save,
+  Trash2,
   Upload,
   UserRound,
   WandSparkles
@@ -160,7 +162,7 @@ const GENERATION_MODE_TABS: Array<{
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState("Digital Human Studio 本地预览");
+  const [appVersion, setAppVersion] = useState("自媒体视频工作台 本地预览");
   const [taskSummaries, setTaskSummaries] = useState<VideoTaskSummary[]>(fallbackTasks);
   const [selectedTaskId, setSelectedTaskId] = useState(fallbackTask.id);
   const [selectedTask, setSelectedTask] = useState<VideoTask>(fallbackTask);
@@ -283,7 +285,7 @@ export function App() {
     window.digitalHumanStudio
       .getAppInfo()
       .then((info) => setAppVersion(`${info.name} ${info.version}`))
-      .catch(() => setAppVersion("Digital Human Studio"));
+      .catch(() => setAppVersion("自媒体视频工作台"));
     void loadServiceConfigurations();
   }, []);
 
@@ -440,14 +442,49 @@ export function App() {
     setSelectedTask(task);
   }
 
+  async function deleteTask(taskId: string) {
+    const api = requireDesktopRuntime("删除任务");
+    if (!api) {
+      return;
+    }
+
+    const targetTask = taskSummaries.find((task) => task.id === taskId);
+    const confirmed = window.confirm(`确定删除「${targetTask?.title ?? "这个任务"}」吗？`);
+    if (!confirmed) {
+      return;
+    }
+
+    const summaries = await api.deleteTask(taskId);
+    setTaskSummaries(summaries);
+    const nextSelectedId =
+      taskId === selectedTaskId
+        ? summaries[0]?.id
+        : summaries.find((task) => task.id === selectedTaskId)?.id;
+
+    if (!nextSelectedId) {
+      const newTask = await api.createTask({ title: "新建视频任务" });
+      const nextSummaries = await api.listTasks();
+      setTaskSummaries(nextSummaries);
+      setSelectedTaskId(newTask.id);
+      setSelectedTask(newTask);
+      return;
+    }
+
+    setSelectedTaskId(nextSelectedId);
+    const nextTask = await api.getTask(nextSelectedId);
+    if (nextTask) {
+      setSelectedTask(nextTask);
+    }
+  }
+
   async function runRealWorkflow() {
-    const api = requireDesktopRuntime("一键生成视频");
+    const api = requireDesktopRuntime("一键输出视频和封面");
     if (!api) {
       return;
     }
 
     setIsWorkflowRunning(true);
-    setActionMessage("正在一键生成视频：脚本、数字人、字幕、封面和导出...");
+    setActionMessage("正在输出视频、封面和字幕文件...");
 
     try {
       await api.updateTask({
@@ -474,14 +511,23 @@ export function App() {
       setActionMessage(
         failedStep
           ? failedStep.errorMessage || `${failedStep.label}未完成`
-          : "视频已生成，成片和封面可在右侧预览"
+          : "视频、封面和字幕文件已输出；当前版本暂未把字幕烧录进 MP4"
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "一键生成视频失败");
+      setActionMessage(error instanceof Error ? error.message : "一键输出视频和封面失败");
     } finally {
       setIsWorkflowRunning(false);
     }
+  }
+
+  async function savePreviewStyleSettings() {
+    await updateCurrentTask({
+      frameTitleStyle,
+      subtitleStyle,
+      coverStyle
+    });
+    setActionMessage("字幕、画面标题和封面样式已保存");
   }
 
   async function uploadProductImage() {
@@ -856,8 +902,8 @@ export function App() {
       ) : null}
       <header className="topbar">
         <div>
-          <h1>数字人口播工作台</h1>
-          <p>{appVersion || "Digital Human Studio"}</p>
+          <h1>自媒体视频工作台</h1>
+          <p>{appVersion || "自媒体视频工作台"}</p>
         </div>
         <div className="topbar-actions">
           <button className="icon-button" title="设置" onClick={() => void openSettingsModal()}>
@@ -872,19 +918,27 @@ export function App() {
         </button>
         <div className="task-list">
           {taskSummaries.map((task) => (
-            <button
+            <div
               key={task.id}
               className={`task-row ${task.id === selectedTaskId ? "active" : ""}`}
-              type="button"
               title={`${task.title} · ${formatTaskMeta(task)}`}
-              onClick={() => void selectTask(task.id)}
             >
-              <span className={`task-dot ${task.status}`} />
-              <span>
-                <strong>{task.title}</strong>
-                <small>{formatTaskMeta(task)}</small>
-              </span>
-            </button>
+              <button className="task-main" type="button" onClick={() => void selectTask(task.id)}>
+                <span className={`task-dot ${task.status}`} />
+                <span>
+                  <strong>{task.title}</strong>
+                  <small>{formatTaskMeta(task)}</small>
+                </span>
+              </button>
+              <button
+                className="icon-button task-delete-button"
+                type="button"
+                title="删除任务"
+                onClick={() => void deleteTask(task.id)}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
           ))}
         </div>
         {taskError ? <p className="task-error">{taskError}</p> : null}
@@ -942,7 +996,6 @@ export function App() {
                 }
               />
             </div>
-            <p>先提取文案或视频素材，再做分析/改写，最后生成数字人口播视频。</p>
           </section>
 
           <div className="script-grid">
@@ -1288,7 +1341,7 @@ export function App() {
               onClick={() => void runRealWorkflow()}
             >
               <Play size={18} />
-              一键生成视频
+              一键输出视频和封面
             </button>
           </div>
         </section>
@@ -1348,6 +1401,7 @@ export function App() {
               onFrameTitleStyleChange={(patch) => void updateFrameTitleStyle(patch)}
               onSubtitleStyleChange={(patch) => void updateSubtitleStyle(patch)}
               onUploadCustomFont={() => void uploadCustomFont()}
+              onSaveSettings={() => void savePreviewStyleSettings()}
               frameTitleStyle={frameTitleStyle}
               subtitleStyle={subtitleStyle}
             />
@@ -1637,6 +1691,7 @@ function PreviewStyleControls({
   frameTitleStyle,
   onCoverStyleChange,
   onFrameTitleStyleChange,
+  onSaveSettings,
   onSubtitleStyleChange,
   onUploadCustomFont,
   subtitleStyle
@@ -1648,6 +1703,7 @@ function PreviewStyleControls({
   frameTitleStyle: FrameTitleStyle;
   onCoverStyleChange: (patch: Partial<CoverStyle>) => void;
   onFrameTitleStyleChange: (patch: Partial<FrameTitleStyle>) => void;
+  onSaveSettings: () => void;
   onSubtitleStyleChange: (patch: Partial<SubtitleStyle>) => void;
   onUploadCustomFont: () => void;
   subtitleStyle: SubtitleStyle;
@@ -1656,10 +1712,16 @@ function PreviewStyleControls({
     <div className="preview-style-panel">
       <div className="preview-style-header">
         <strong>{activePreviewMode === "finished" ? "成品样式" : "封面样式"}</strong>
-        <button type="button" disabled={disabled} onClick={onUploadCustomFont}>
-          <Upload size={14} />
-          上传字体
-        </button>
+        <span className="preview-style-actions">
+          <button type="button" disabled={disabled} onClick={onSaveSettings}>
+            <Save size={14} />
+            保存设置
+          </button>
+          <button type="button" disabled={disabled} onClick={onUploadCustomFont}>
+            <Upload size={14} />
+            上传字体
+          </button>
+        </span>
       </div>
 
       {activePreviewMode === "finished" ? (

@@ -4,7 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TASK_MEDIA_DIRECTORIES, createAppPaths, getTaskMediaDirectory } from "./appPaths";
+import {
+  TASK_MEDIA_DIRECTORIES,
+  createAppPaths,
+  getTaskDirectory,
+  getTaskMediaDirectory
+} from "./appPaths";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./database";
 import { TaskRepository } from "./taskRepository";
 
@@ -59,6 +64,20 @@ describe("TaskRepository", () => {
     for (const directory of TASK_MEDIA_DIRECTORIES) {
       expect(fs.existsSync(getTaskMediaDirectory(appPaths, task.id, directory))).toBe(true);
     }
+  });
+
+  it("deletes a task and its media directory", () => {
+    const task = repository.createTask({ title: "删除测试" });
+    const appPaths = createAppPaths(tempDir);
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const markerPath = path.join(taskDirectory, "source", "marker.txt");
+    fs.writeFileSync(markerPath, "delete me");
+
+    repository.deleteTask(task.id);
+
+    expect(repository.getTask(task.id)).toBeNull();
+    expect(repository.listTasks()).toHaveLength(0);
+    expect(fs.existsSync(taskDirectory)).toBe(false);
   });
 
   it("persists step status updates", () => {

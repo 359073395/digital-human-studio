@@ -35,6 +35,7 @@ export interface DigitalHumanStudioAPI {
   listTasks: () => Promise<VideoTaskSummary[]>;
   getTask: (taskId: string) => Promise<VideoTask | null>;
   createTask: (input?: CreateTaskInput) => Promise<VideoTask>;
+  deleteTask: (taskId: string) => Promise<VideoTaskSummary[]>;
   updateTask: (input: UpdateTaskInput) => Promise<VideoTask>;
   generateScript: (taskId: string) => Promise<VideoTask>;
   transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
@@ -61,6 +62,7 @@ export const IPC_CHANNELS = {
   listTasks: "tasks:list",
   getTask: "tasks:get",
   createTask: "tasks:create",
+  deleteTask: "tasks:delete",
   updateTask: "tasks:update",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",

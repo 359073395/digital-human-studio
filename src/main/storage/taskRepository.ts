@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import {
   DEFAULT_COVER_STYLE,
   DEFAULT_FRAME_TITLE_STYLE,
@@ -29,7 +31,7 @@ import {
   type VideoTaskSummary
 } from "../../shared/domain";
 import type { CreateTaskInput, UpdateTaskInput } from "../../shared/ipc";
-import { ensureTaskMediaDirectories, type AppPaths } from "./appPaths";
+import { ensureTaskMediaDirectories, getTaskDirectory, type AppPaths } from "./appPaths";
 import { runInTransaction, type TaskDatabase } from "./database";
 
 interface TaskRow {
@@ -256,6 +258,20 @@ export class TaskRepository {
       throw new Error(`Created task ${id} could not be loaded.`);
     }
     return task;
+  }
+
+  deleteTask(taskId: string): void {
+    const taskDirectory = path.resolve(getTaskDirectory(this.paths, taskId));
+    const tasksDirectory = path.resolve(this.paths.tasksDir);
+    if (!taskDirectory.startsWith(`${tasksDirectory}${path.sep}`)) {
+      throw new Error("任务目录不在应用数据目录内，已取消删除。");
+    }
+
+    runInTransaction(this.database, () => {
+      this.database.prepare("DELETE FROM video_tasks WHERE id = ?").run(taskId);
+    });
+
+    fs.rmSync(taskDirectory, { recursive: true, force: true });
   }
 
   updateTask(input: UpdateTaskInput): VideoTask {
