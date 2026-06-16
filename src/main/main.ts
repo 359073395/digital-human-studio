@@ -91,7 +91,7 @@ function createRepositories(): MainRepositories {
 
   const credentialStore = new CredentialStore(
     createCredentialFilePath(appDataDir),
-    new SafeStorageCipher()
+    new SafeStorageCipher(appDataDir)
   );
   const taskRepository = new TaskRepository(taskDatabase, appPaths);
   const serviceConfigurationRepository = new ServiceConfigurationRepository(

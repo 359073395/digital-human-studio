@@ -1,6 +1,8 @@
 # API Configuration
 
-The desktop app stores service settings locally. API keys are saved in the local credential store, while Base URL, model name, Avatar ID, Voice ID, and resolution are saved as non-secret settings.
+The desktop app stores service settings locally. API keys are saved in the encrypted local credential store, while Base URL, model name, Avatar ID, Voice ID, and resolution are saved as non-secret settings.
+
+The credential store lives under the app data directory, for example `D:\Codex\2026-06-13\digital-human-studio\data\credentials`. This directory is ignored by Git. Keep it with your project backup if you want the configured accounts to keep working after moving the project to another machine; otherwise you can re-enter keys in the settings modal.
 
 ## OpenAI-Compatible Relay
 

@@ -44,7 +44,7 @@ async function main() {
 
   const credentialStore = new CredentialStore(
     createCredentialFilePath(appDataDir),
-    new SafeStorageCipher()
+    new SafeStorageCipher(appDataDir)
   );
   const repository = new ServiceConfigurationRepository(database, credentialStore);
 
