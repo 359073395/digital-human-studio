@@ -51,9 +51,10 @@ describe("MockWorkflowRunner", () => {
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(taskDirectory, "exports", "landscape-16-9", "finished-landscape-16-9.mp4")
+        path.join(taskDirectory, "exports", "landscape-16-9", "mock-finished-landscape-16-9.txt")
       )
     ).toBe(true);
+    expect(completed.outputVariants.every((variant) => !variant.finishedVideoPath)).toBe(true);
   });
 
   it("marks a failed mock step retry-ready and succeeds on single-step retry", async () => {
@@ -74,7 +75,11 @@ describe("MockWorkflowRunner", () => {
     const retried = await runner.retryStep(task.id, "avatar");
 
     expect(retried.steps.find((step) => step.id === "avatar")?.status).toBe("complete");
-    expect(retried.mediaAssets.some((asset) => asset.kind === "avatar-video")).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(getTaskDirectory(appPaths, task.id), "avatar", "mock-avatar-portrait-9-16.txt")
+      )
+    ).toBe(true);
   });
 
   it("stops the full mock workflow when a step fails", async () => {

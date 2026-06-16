@@ -414,6 +414,32 @@ export class TaskRepository {
     return task;
   }
 
+  resetOutputVariants(taskId: string, presetIds: OutputPresetId[]): VideoTask {
+    const now = new Date().toISOString();
+    runInTransaction(this.database, () => {
+      for (const presetId of presetIds) {
+        this.database
+          .prepare(
+            `UPDATE output_variants
+             SET status = 'waiting',
+                 finished_video_path = NULL,
+                 cover_image_path = NULL,
+                 updated_at = ?
+             WHERE task_id = ? AND preset_id = ?`
+          )
+          .run(now, taskId, presetId);
+      }
+
+      this.database.prepare("UPDATE video_tasks SET updated_at = ? WHERE id = ?").run(now, taskId);
+    });
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after variant reset.`);
+    }
+    return task;
+  }
+
   addMediaAsset(taskId: string, kind: MediaAsset["kind"], relativePath: string): VideoTask {
     const existing = this.database
       .prepare("SELECT id FROM media_assets WHERE task_id = ? AND kind = ? AND relative_path = ?")

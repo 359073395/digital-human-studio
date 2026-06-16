@@ -53,6 +53,8 @@ HeyGen can be replaced directly from the settings modal:
 
 The MVP stores one active HeyGen configuration at a time.
 
+`完整生成视频` runs the real API workflow and requires a HeyGen account with API credits. `Mock 检查` only validates local task state and placeholder file layout; it does not create publishable MP4 video files.
+
 PowerShell setup example:
 
 ```powershell

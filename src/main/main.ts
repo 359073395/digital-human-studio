@@ -22,7 +22,9 @@ import { ScriptWorkflowService } from "./script/scriptWorkflowService";
 import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
 import { OpenAiAsrSubtitleProvider } from "./subtitles/openAiAsrSubtitleProvider";
 import { TaskRepository } from "./storage/taskRepository";
+import { ExportWorkflowService } from "./workflow/exportWorkflowService";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
+import { RealWorkflowRunner } from "./workflow/realWorkflowRunner";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -78,6 +80,7 @@ interface MainRepositories {
   scriptWorkflowService: ScriptWorkflowService;
   avatarWorkflowService: AvatarWorkflowService;
   presenterImageWorkflowService: PresenterImageWorkflowService;
+  realWorkflowRunner: RealWorkflowRunner;
   appPaths: ReturnType<typeof createAppPaths>;
 }
 
@@ -114,6 +117,14 @@ function createRepositories(): MainRepositories {
     appPaths,
     new OpenAiImageProvider(serviceConfigurationRepository, credentialStore)
   );
+  const exportWorkflowService = new ExportWorkflowService(taskRepository, appPaths);
+  const realWorkflowRunner = new RealWorkflowRunner(
+    taskRepository,
+    scriptWorkflowService,
+    presenterImageWorkflowService,
+    avatarWorkflowService,
+    exportWorkflowService
+  );
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   taskRepository.ensureSeedTask();
   return {
@@ -123,6 +134,7 @@ function createRepositories(): MainRepositories {
     scriptWorkflowService,
     avatarWorkflowService,
     presenterImageWorkflowService,
+    realWorkflowRunner,
     appPaths
   };
 }
@@ -133,6 +145,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     avatarWorkflowService,
     mockWorkflowRunner,
     presenterImageWorkflowService,
+    realWorkflowRunner,
     scriptWorkflowService,
     serviceConfigurationRepository,
     taskRepository
@@ -207,6 +220,10 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>
     mockWorkflowRunner.runTask(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.runRealWorkflow, (_event, taskId: string) =>
+    realWorkflowRunner.runTask(taskId)
   );
 
   ipcMain.handle(IPC_CHANNELS.retryMockWorkflowStep, (_event, input: RetryWorkflowStepInput) =>

@@ -125,14 +125,13 @@ export class MockWorkflowRunner {
 
     for (const presetId of task.selectedOutputPresets) {
       this.taskRepository.updateOutputVariant(taskId, presetId, { status: "rendering" });
-      const relativePath = `avatar/avatar-${presetId}.mp4`;
+      const relativePath = `avatar/mock-avatar-${presetId}.txt`;
       writeTaskFile(
         this.paths,
         taskId,
         relativePath,
         createPlaceholderVideoText(task, presetId, "avatar")
       );
-      this.taskRepository.addMediaAsset(taskId, "avatar-video", relativePath);
       this.taskRepository.updateOutputVariant(taskId, presetId, { status: "waiting" });
     }
   }
@@ -164,18 +163,14 @@ export class MockWorkflowRunner {
     const publishingPackage = createPublishingPackage(task);
 
     for (const presetId of task.selectedOutputPresets) {
-      const relativePath = `exports/${presetId}/finished-${presetId}.mp4`;
+      const relativePath = `exports/${presetId}/mock-finished-${presetId}.txt`;
       writeTaskFile(
         this.paths,
         taskId,
         relativePath,
         createPlaceholderVideoText(task, presetId, "finished")
       );
-      this.taskRepository.addMediaAsset(taskId, "finished-video", relativePath);
-      this.taskRepository.updateOutputVariant(taskId, presetId, {
-        status: "complete",
-        finishedVideoPath: relativePath
-      });
+      this.taskRepository.updateOutputVariant(taskId, presetId, { status: "complete" });
     }
 
     const manifestPath = "exports/publishing-package/manifest.json";

@@ -36,6 +36,7 @@ export interface DigitalHumanStudioAPI {
   uploadProductImage: (taskId: string) => Promise<VideoTask>;
   generatePresenterImages: (taskId: string) => Promise<VideoTask>;
   renderHeyGenAvatar: (taskId: string) => Promise<VideoTask>;
+  runRealWorkflow: (taskId: string) => Promise<VideoTask>;
   runMockWorkflow: (taskId: string) => Promise<VideoTask>;
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
   openTaskExports: (taskId: string) => Promise<void>;
@@ -57,6 +58,7 @@ export const IPC_CHANNELS = {
   uploadProductImage: "source:upload-product-image",
   generatePresenterImages: "image:generate-presenter-images",
   renderHeyGenAvatar: "avatar:render-heygen",
+  runRealWorkflow: "workflow:real-run",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
   openTaskExports: "workflow:open-exports",

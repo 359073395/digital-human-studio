@@ -283,13 +283,13 @@ export function App() {
   }
 
   async function runMockWorkflow() {
-    const api = requireDesktopRuntime("运行 Mock 全流程");
+    const api = requireDesktopRuntime("运行 Mock 检查");
     if (!api) {
       return;
     }
 
     setIsWorkflowRunning(true);
-    setActionMessage("正在运行 mock 全流程...");
+    setActionMessage("正在运行 mock 占位检查...");
 
     try {
       await api.updateTask({
@@ -302,10 +302,46 @@ export function App() {
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
       const task = await api.runMockWorkflow(selectedTask.id);
-      setActionMessage("mock 全流程已完成，发布资料包已生成");
+      setActionMessage("Mock 检查已完成；这只会生成占位文件，不是可发布视频。");
       await refreshTaskState(task.id, task);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "mock 全流程运行失败");
+      setActionMessage(error instanceof Error ? error.message : "Mock 检查运行失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function runRealWorkflow() {
+    const api = requireDesktopRuntime("完整生成视频");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在运行真实 API 全流程：脚本、人物图、HeyGen、导出...");
+
+    try {
+      await api.updateTask({
+        taskId: selectedTask.id,
+        sourceScript: selectedTask.sourceScript,
+        contentLanguage: selectedTask.contentLanguage,
+        avatarMode: selectedTask.avatarMode,
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
+        selectedOutputPresets: selectedTask.selectedOutputPresets
+      });
+      const task = await api.runRealWorkflow(selectedTask.id);
+      const failedStep = task.steps.find(
+        (step) => step.status === "retry-ready" || step.status === "failed"
+      );
+      setActionMessage(
+        failedStep
+          ? failedStep.errorMessage || `${failedStep.label}未完成`
+          : "真实 API 全流程已完成，最终视频已导出"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "完整生成视频失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -792,6 +828,14 @@ export function App() {
               type="button"
               className="primary"
               disabled={isWorkflowRunning}
+              onClick={() => void runRealWorkflow()}
+            >
+              <Play size={17} />
+              完整生成视频
+            </button>
+            <button
+              type="button"
+              disabled={isWorkflowRunning}
               onClick={() => void renderHeyGenAvatar()}
             >
               <Play size={17} />
@@ -803,7 +847,7 @@ export function App() {
               onClick={() => void runMockWorkflow()}
             >
               <Play size={17} />
-              运行 Mock 全流程
+              Mock 检查
             </button>
             <button type="button" onClick={() => void openTaskExports()}>
               <FolderOpen size={17} />
