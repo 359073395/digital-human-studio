@@ -37,7 +37,7 @@ import type {
   ServiceConfiguration,
   ServiceConfigurationSettings
 } from "../shared/serviceConfig";
-import { countCompleteSteps, type WorkbenchStep } from "../shared/workbench";
+import { countCompleteSteps } from "../shared/workbench";
 
 const now = new Date().toISOString();
 
@@ -88,6 +88,7 @@ const fallbackTasks: VideoTaskSummary[] = [
     id: fallbackTask.id,
     title: fallbackTask.title,
     contentLanguage: fallbackTask.contentLanguage,
+    generationMode: fallbackTask.generationMode,
     selectedOutputPresets: fallbackTask.selectedOutputPresets,
     activeStepLabel: "数字人",
     status: "running",
@@ -1332,6 +1333,7 @@ export function App() {
               />
             ) : (
               <CoverPreview
+                imageUrl={coverAssetUrl}
                 style={coverStyle}
                 title={coverStyle.title || createCoverTitle(selectedTask)}
                 presetId={previewPresetId}
@@ -1982,10 +1984,12 @@ function FontSelect({
 }
 
 function CoverPreview({
+  imageUrl,
   style,
   title,
   presetId
 }: {
+  imageUrl: string;
   style: CoverStyle;
   title: string;
   presetId: OutputPresetId | undefined;
@@ -2013,6 +2017,8 @@ function CoverPreview({
 
   return (
     <div className={`cover-preview ${isLandscape ? "landscape" : "portrait"}`} style={previewStyle}>
+      {imageUrl ? <img className="cover-preview-image" alt="默认封面底图" src={imageUrl} /> : null}
+      {imageUrl ? <span className="cover-preview-shade" /> : null}
       <span className="cover-accent" style={{ backgroundColor: style.accentColor }} />
       <div className="cover-title-block" style={titleBlockStyle}>
         <strong
@@ -2110,18 +2116,6 @@ function createCoverTitle(task: VideoTask): string {
   return base.length > 22 ? `${base.slice(0, 22)}...` : base;
 }
 
-function statusLabel(status: WorkbenchStep["status"]): string {
-  const labels: Record<WorkbenchStep["status"], string> = {
-    waiting: "等待",
-    running: "运行中",
-    complete: "完成",
-    failed: "失败",
-    "retry-ready": "可重试"
-  };
-
-  return labels[status];
-}
-
 function presetLabel(presetId: OutputPresetId): string {
   return OUTPUT_PRESETS.find((preset) => preset.id === presetId)?.label ?? presetId;
 }
@@ -2186,7 +2180,7 @@ function formatTaskMeta(task: VideoTaskSummary): string {
     .map((preset) => (preset === "portrait-9-16" ? "竖屏" : "横屏"))
     .join(" + ");
 
-  return `${presets || "未选比例"} · ${statusLabel(task.status)}`;
+  return `${presets || "未选比例"} · ${generationModeLabel(task.generationMode)}`;
 }
 
 interface SettingsDraft extends ServiceConfigurationSettings {

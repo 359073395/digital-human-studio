@@ -43,6 +43,14 @@ describe("ExportWorkflowService", () => {
     fs.mkdirSync(path.dirname(avatarPath), { recursive: true });
     fs.writeFileSync(avatarPath, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
     repository.addMediaAsset(task.id, "avatar-video", "avatar/avatar-portrait-9-16.mp4");
+    const frameCoverPath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "post",
+      "video-frame-cover-portrait-9-16.jpg"
+    );
+    fs.mkdirSync(path.dirname(frameCoverPath), { recursive: true });
+    fs.writeFileSync(frameCoverPath, Buffer.from("first-frame-cover"));
+    repository.addMediaAsset(task.id, "cover-image", "post/video-frame-cover-portrait-9-16.jpg");
 
     const exported = service.exportTask(task.id);
     const finalPath = path.join(
@@ -56,7 +64,16 @@ describe("ExportWorkflowService", () => {
     expect(exported.outputVariants[0]?.finishedVideoPath).toBe(
       "exports/portrait-9-16/finished-portrait-9-16.mp4"
     );
+    expect(exported.outputVariants[0]?.coverImagePath).toBe("post/cover-portrait-9-16.svg");
     expect(fs.readFileSync(finalPath)).toEqual(fs.readFileSync(avatarPath));
+    expect(
+      fs.readFileSync(
+        path.join(getTaskDirectory(appPaths, task.id), "post", "cover-portrait-9-16.svg"),
+        {
+          encoding: "utf8"
+        }
+      )
+    ).toContain("data:image/jpeg;base64");
   });
 
   it("rejects mock placeholder avatar files", () => {

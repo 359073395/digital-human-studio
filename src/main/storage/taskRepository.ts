@@ -110,6 +110,7 @@ export class TaskRepository {
         id: row.id,
         title: row.title,
         contentLanguage: row.content_language,
+        generationMode: normalizeGenerationMode(row.generation_mode),
         selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
         activeStepLabel: activeStep?.label ?? "已完成",
         status: activeStep?.status ?? "complete",

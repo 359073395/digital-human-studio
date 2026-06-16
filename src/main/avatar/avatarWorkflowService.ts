@@ -73,6 +73,19 @@ export class AvatarWorkflowService {
     await downloadFile(result.videoUrl, absoluteAvatarPath);
     this.taskRepository.addMediaAsset(taskId, "avatar-video", avatarPath);
 
+    if (result.thumbnailUrl) {
+      const coverPath = `post/video-frame-cover-${preset.id}${thumbnailExtensionFromUrl(
+        result.thumbnailUrl
+      )}`;
+      try {
+        await downloadFile(result.thumbnailUrl, absoluteTaskPath(this.paths, taskId, coverPath));
+        this.taskRepository.addMediaAsset(taskId, "cover-image", coverPath);
+        this.taskRepository.updateOutputVariant(taskId, preset.id, { coverImagePath: coverPath });
+      } catch {
+        // Thumbnail download is a best-effort default cover; video generation can still continue.
+      }
+    }
+
     if (result.captionUrl) {
       const captionPath = `subtitles/provider-subtitles-${preset.id}.srt`;
       try {
@@ -145,6 +158,19 @@ async function downloadFile(url: string, absolutePath: string): Promise<void> {
 
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   fs.writeFileSync(absolutePath, Buffer.from(await response.arrayBuffer()));
+}
+
+function thumbnailExtensionFromUrl(url: string): string {
+  try {
+    const extension = path.extname(new URL(url).pathname).toLowerCase();
+    if ([".jpg", ".jpeg", ".png", ".webp"].includes(extension)) {
+      return extension;
+    }
+  } catch {
+    // Fall through to the safest common thumbnail extension.
+  }
+
+  return ".jpg";
 }
 
 function absoluteTaskPath(paths: AppPaths, taskId: string, relativePath: string): string {

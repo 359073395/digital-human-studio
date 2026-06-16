@@ -46,6 +46,7 @@ describe("TaskRepository", () => {
     const summaries = repository.listTasks();
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.title).toBe("测试任务");
+    expect(summaries[0]?.generationMode).toBe("preset-avatar");
 
     const loaded = repository.getTask(task.id);
     expect(loaded?.id).toBe(task.id);

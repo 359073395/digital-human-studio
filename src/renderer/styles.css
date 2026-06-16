@@ -1082,10 +1082,27 @@ label {
   position: absolute;
   left: 26px;
   right: 26px;
+  z-index: 2;
   display: grid;
   gap: 8px;
   max-height: calc(100% - 52px);
   overflow: hidden;
+}
+
+.cover-preview-image,
+.cover-preview-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.cover-preview-image {
+  object-fit: cover;
+}
+
+.cover-preview-shade {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.1), rgba(15, 23, 42, 0.46));
 }
 
 .cover-preview strong {
@@ -1112,6 +1129,7 @@ label {
 
 .cover-accent {
   position: absolute;
+  z-index: 2;
   top: 22px;
   left: 26px;
   right: 26px;

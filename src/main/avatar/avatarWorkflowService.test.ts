@@ -25,7 +25,8 @@ class SuccessfulAvatarProvider implements AvatarProvider {
       presetId: input.preset.id,
       providerVideoId: `provider-${input.preset.id}`,
       videoUrl: `https://cdn.example.test/${input.preset.id}.mp4`,
-      captionUrl: `https://cdn.example.test/${input.preset.id}.srt`
+      captionUrl: `https://cdn.example.test/${input.preset.id}.srt`,
+      thumbnailUrl: `https://cdn.example.test/${input.preset.id}.jpg`
     };
   }
 }
@@ -115,11 +116,16 @@ describe("AvatarWorkflowService", () => {
     expect(updated.steps.find((step) => step.id === "avatar")?.status).toBe("complete");
     expect(updated.steps.find((step) => step.id === "subtitles")?.status).toBe("complete");
     expect(updated.outputVariants.every((variant) => variant.status === "waiting")).toBe(true);
+    expect(updated.outputVariants.every((variant) => variant.coverImagePath)).toBe(true);
     expect(updated.mediaAssets.filter((asset) => asset.kind === "avatar-video")).toHaveLength(2);
     expect(updated.mediaAssets.filter((asset) => asset.kind === "subtitle-file")).toHaveLength(2);
+    expect(updated.mediaAssets.filter((asset) => asset.kind === "cover-image")).toHaveLength(2);
     expect(fs.existsSync(path.join(taskDirectory, "avatar", "avatar-portrait-9-16.mp4"))).toBe(
       true
     );
+    expect(
+      fs.existsSync(path.join(taskDirectory, "post", "video-frame-cover-portrait-9-16.jpg"))
+    ).toBe(true);
     expect(
       fs.existsSync(path.join(taskDirectory, "subtitles", "provider-subtitles-landscape-16-9.srt"))
     ).toBe(true);

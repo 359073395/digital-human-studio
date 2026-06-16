@@ -248,6 +248,10 @@ _Avoid_: Built-in music, platform music, stock music
 A still image exported with a publishing package for a specific output variant. The MVP creates it from a selected video frame with title treatment and lets the user replace it.
 _Avoid_: AI cover, thumbnail-only asset
 
+**Default Video Frame Cover**:
+The default cover background derived from the generated avatar video's provider thumbnail. It is treated as the MVP-compatible video-frame source until bundled FFmpeg can extract the exact first frame locally.
+_Avoid_: Pure graphic default cover, unrelated stock background, platform thumbnail scraping
+
 **Interface Language**:
 The language used by the desktop application's controls, labels, and messages. The MVP interface language is Chinese.
 _Avoid_: Content language

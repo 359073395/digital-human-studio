@@ -40,7 +40,12 @@ export class ExportWorkflowService {
         this.taskRepository.addMediaAsset(taskId, "finished-video", relativePath);
 
         const coverPath = `post/cover-${preset.id}.svg`;
-        writeTaskFile(this.paths, taskId, coverPath, createCoverSvg(task, preset));
+        writeTaskFile(
+          this.paths,
+          taskId,
+          coverPath,
+          createCoverSvg(task, preset, findDefaultCoverFramePath(this.paths, taskId, task, preset))
+        );
         this.taskRepository.addMediaAsset(taskId, "cover-image", coverPath);
         this.taskRepository.updateOutputVariant(taskId, preset.id, {
           status: "complete",
@@ -195,7 +200,11 @@ function absoluteTaskPath(paths: AppPaths, taskId: string, relativePath: string)
   return path.join(getTaskDirectory(paths, taskId), ...relativePath.split("/"));
 }
 
-function createCoverSvg(task: VideoTask, preset: OutputPreset): string {
+function createCoverSvg(
+  task: VideoTask,
+  preset: OutputPreset,
+  backgroundImagePath?: string
+): string {
   const style = task.coverStyle;
   const title = escapeXml(style.title.trim() || createPublishingTitle(task));
   const subtitle = escapeXml(style.subtitle.trim());
@@ -205,15 +214,65 @@ function createCoverSvg(task: VideoTask, preset: OutputPreset): string {
   const titleY = Math.round(preset.height * (style.verticalPercent / 100));
   const subtitleY = titleY + Math.round(titleSize * 1.15);
   const underlineY = subtitleY + Math.round(subtitleSize * 1.8);
+  const background = createCoverBackgroundMarkup(style, preset, backgroundImagePath);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${preset.width}" height="${preset.height}" viewBox="0 0 ${preset.width} ${preset.height}">
-  <rect width="100%" height="100%" fill="${style.backgroundColor}"/>
+${background}
   <rect x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.1)}" width="${Math.round(preset.width * 0.84)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
   <text x="${Math.round(preset.width * 0.08)}" y="${titleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${fontWeight}">${title}</text>
   <text x="${Math.round(preset.width * 0.08)}" y="${subtitleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.78">${subtitle}</text>
   <rect x="${Math.round(preset.width * 0.08)}" y="${underlineY}" width="${Math.round(preset.width * 0.26)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
 </svg>
 `;
+}
+
+function findDefaultCoverFramePath(
+  paths: AppPaths,
+  taskId: string,
+  task: VideoTask,
+  preset: OutputPreset
+): string | undefined {
+  const frameAsset = task.mediaAssets.find(
+    (asset) =>
+      asset.kind === "cover-image" && asset.relativePath.includes(`video-frame-cover-${preset.id}`)
+  );
+  const variantCoverPath = task.outputVariants.find(
+    (variant) =>
+      variant.presetId === preset.id && variant.coverImagePath?.includes("video-frame-cover")
+  )?.coverImagePath;
+  const relativePath = frameAsset?.relativePath ?? variantCoverPath;
+  if (!relativePath) {
+    return undefined;
+  }
+
+  const absolutePath = absoluteTaskPath(paths, taskId, relativePath);
+  return fs.existsSync(absolutePath) ? absolutePath : undefined;
+}
+
+function createCoverBackgroundMarkup(
+  style: CoverStyle,
+  preset: OutputPreset,
+  backgroundImagePath: string | undefined
+): string {
+  if (!backgroundImagePath) {
+    return `  <rect width="100%" height="100%" fill="${style.backgroundColor}"/>`;
+  }
+
+  const base64 = fs.readFileSync(backgroundImagePath).toString("base64");
+  return `  <image href="data:${mimeTypeFromPath(backgroundImagePath)};base64,${base64}" x="0" y="0" width="${preset.width}" height="${preset.height}" preserveAspectRatio="xMidYMid slice"/>
+  <rect width="100%" height="100%" fill="#0f172a" opacity="0.38"/>`;
+}
+
+function mimeTypeFromPath(filePath: string): string {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".png") {
+    return "image/png";
+  }
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+
+  return "image/jpeg";
 }
 
 function fontWeightValue(style: CoverStyle): string {

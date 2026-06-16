@@ -173,6 +173,7 @@ export interface VideoTaskSummary {
   id: string;
   title: string;
   contentLanguage: ContentLanguage;
+  generationMode: VideoGenerationMode;
   selectedOutputPresets: OutputPresetId[];
   activeStepLabel: string;
   status: StepStatus;
