@@ -50,7 +50,7 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-rows: 64px minmax(0, 1fr);
+  grid-template-rows: 64px auto minmax(0, 1fr);
   height: 100vh;
   background: #f5f7fb;
 }
@@ -85,7 +85,7 @@ button:disabled {
 
 .workspace {
   display: grid;
-  grid-template-columns: 72px minmax(560px, 1fr) minmax(430px, 500px);
+  grid-template-columns: minmax(560px, 1fr) minmax(420px, 500px);
   gap: 10px;
   min-height: 0;
   padding: 10px;
@@ -285,6 +285,57 @@ button:disabled {
   margin: 12px 0 0;
   color: #bd3c3c;
   font-size: 13px;
+}
+
+.task-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid #dfe5ee;
+  background: #ffffff;
+}
+
+.task-strip .task-list {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+.task-strip .task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  flex: 0 0 220px;
+  place-items: initial;
+  align-items: center;
+  width: 220px;
+  min-height: 38px;
+  padding: 6px 10px;
+}
+
+.task-strip .task-row > span:not(.task-dot) {
+  display: block;
+  min-width: 0;
+}
+
+.task-strip .task-dot {
+  margin-right: 8px;
+}
+
+.task-strip .task-error {
+  flex: 0 1 260px;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .script-grid,
@@ -727,7 +778,7 @@ label {
 
 .preview-pane {
   display: grid;
-  grid-template-rows: auto auto auto auto;
+  grid-template-rows: auto auto auto;
   gap: 10px;
   overflow: auto;
 }
@@ -736,6 +787,50 @@ label {
   min-height: 30px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.preview-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.preview-mode-tabs button {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 50px;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.preview-mode-tabs button strong,
+.preview-mode-tabs button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-mode-tabs button strong {
+  color: #1d2a3d;
+  font-size: 13px;
+}
+
+.preview-mode-tabs button span {
+  color: #66758b;
+  font-size: 11px;
+}
+
+.preview-mode-tabs button.active {
+  border-color: #2459bd;
+  background: #eef4ff;
+}
+
+.preview-mode-tabs button.active strong {
+  color: #2459bd;
 }
 
 .media-stage {
@@ -797,6 +892,26 @@ label {
   -webkit-line-clamp: 2;
   text-align: center;
   line-height: 1.32;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.frame-title-preview {
+  position: absolute;
+  left: 7%;
+  right: 7%;
+  z-index: 3;
+  display: -webkit-box;
+  max-height: 3em;
+  padding: 6px 10px;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.24);
+  transform: translateY(-50%);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-align: center;
+  line-height: 1.18;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -876,6 +991,15 @@ label {
   padding: 0 8px;
 }
 
+.inline-toggle {
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 1px solid #e0e6ef;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #314258;
+}
+
 .status-strip {
   display: flex;
   align-items: center;
@@ -937,23 +1061,31 @@ label {
 
 .cover-preview {
   position: relative;
-  display: grid;
-  align-content: center;
-  gap: 8px;
+  display: block;
   width: min(100%, 320px);
   margin: 8px auto 0;
   overflow: hidden;
   border-radius: 8px;
-  padding: 26px;
 }
 
 .cover-preview.portrait {
+  width: min(100%, 270px);
   aspect-ratio: 9 / 16;
-  max-height: 410px;
 }
 
 .cover-preview.landscape {
+  width: min(100%, 430px);
   aspect-ratio: 16 / 9;
+}
+
+.cover-title-block {
+  position: absolute;
+  left: 26px;
+  right: 26px;
+  display: grid;
+  gap: 8px;
+  max-height: calc(100% - 52px);
+  overflow: hidden;
 }
 
 .cover-preview strong {

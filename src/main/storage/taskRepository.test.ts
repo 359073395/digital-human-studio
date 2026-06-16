@@ -126,9 +126,16 @@ describe("TaskRepository", () => {
         fontFamily: "DHS Custom Font",
         verticalPercent: 64
       },
+      frameTitleStyle: {
+        ...task.frameTitleStyle,
+        text: "画面标题",
+        verticalPercent: 22,
+        fontFamily: "DHS Custom Font"
+      },
       coverStyle: {
         ...task.coverStyle,
-        fontFamily: "DHS Custom Font"
+        fontFamily: "DHS Custom Font",
+        verticalPercent: 48
       }
     });
 
@@ -138,7 +145,11 @@ describe("TaskRepository", () => {
     expect(updated.customFontFamily).toBe("DHS Custom Font");
     expect(updated.subtitleStyle.verticalPercent).toBe(64);
     expect(updated.subtitleStyle.fontFamily).toBe("DHS Custom Font");
+    expect(updated.frameTitleStyle.text).toBe("画面标题");
+    expect(updated.frameTitleStyle.verticalPercent).toBe(22);
+    expect(updated.frameTitleStyle.fontFamily).toBe("DHS Custom Font");
     expect(updated.coverStyle.fontFamily).toBe("DHS Custom Font");
+    expect(updated.coverStyle.verticalPercent).toBe(48);
   });
 
   it("persists media assets, output metadata, and publishing package", () => {

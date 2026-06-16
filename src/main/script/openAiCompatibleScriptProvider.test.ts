@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_COVER_STYLE,
+  DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE,
   type VideoTask
@@ -27,6 +28,7 @@ function createTask(): VideoTask {
     avatarDescriptionPrompt: "",
     motionPrompt: "",
     selectedOutputPresets: ["portrait-9-16"],
+    frameTitleStyle: DEFAULT_FRAME_TITLE_STYLE,
     subtitleStyle: DEFAULT_SUBTITLE_STYLE,
     coverStyle: DEFAULT_COVER_STYLE,
     personalIpProfile: DEFAULT_PERSONAL_IP_PROFILE,

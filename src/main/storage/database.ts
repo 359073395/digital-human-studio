@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_COVER_STYLE,
+  DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE
 } from "../../shared/domain";
@@ -9,6 +10,10 @@ export type TaskDatabase = InstanceType<typeof DatabaseSync>;
 
 const DEFAULT_SUBTITLE_STYLE_JSON = JSON.stringify(DEFAULT_SUBTITLE_STYLE).replaceAll("'", "''");
 const DEFAULT_COVER_STYLE_JSON = JSON.stringify(DEFAULT_COVER_STYLE).replaceAll("'", "''");
+const DEFAULT_FRAME_TITLE_STYLE_JSON = JSON.stringify(DEFAULT_FRAME_TITLE_STYLE).replaceAll(
+  "'",
+  "''"
+);
 const DEFAULT_PERSONAL_IP_PROFILE_JSON = JSON.stringify(DEFAULT_PERSONAL_IP_PROFILE).replaceAll(
   "'",
   "''"
@@ -119,6 +124,13 @@ const MIGRATIONS = [
       ALTER TABLE video_tasks ADD COLUMN preset_avatar_id TEXT NOT NULL DEFAULT '';
       ALTER TABLE video_tasks ADD COLUMN custom_font_asset_id TEXT;
       ALTER TABLE video_tasks ADD COLUMN custom_font_family TEXT NOT NULL DEFAULT '';
+    `
+  },
+  {
+    id: 8,
+    name: "add-frame-title-style",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN frame_title_style TEXT NOT NULL DEFAULT '${DEFAULT_FRAME_TITLE_STYLE_JSON}';
     `
   }
 ] as const;

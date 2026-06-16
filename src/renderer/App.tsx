@@ -17,10 +17,12 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   CONTENT_LANGUAGES,
   DEFAULT_COVER_STYLE,
+  DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE,
   OUTPUT_PRESETS,
   type CoverStyle,
+  type FrameTitleStyle,
   type OutputPresetId,
   type PersonalIpProfile,
   type SubtitleStyle,
@@ -39,6 +41,8 @@ import { countCompleteSteps, type WorkbenchStep } from "../shared/workbench";
 
 const now = new Date().toISOString();
 
+type PreviewMode = "finished" | "cover";
+
 const fallbackTask: VideoTask = {
   id: "preview-task",
   title: "护肤品口播样片",
@@ -55,6 +59,7 @@ const fallbackTask: VideoTask = {
   motionPrompt: "",
   customFontFamily: "",
   selectedOutputPresets: ["portrait-9-16"],
+  frameTitleStyle: DEFAULT_FRAME_TITLE_STYLE,
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
   coverStyle: DEFAULT_COVER_STYLE,
   personalIpProfile: DEFAULT_PERSONAL_IP_PROFILE,
@@ -105,6 +110,7 @@ type EditableTaskPatch = Partial<
     | "avatarDescriptionPrompt"
     | "motionPrompt"
     | "selectedOutputPresets"
+    | "frameTitleStyle"
     | "subtitleStyle"
     | "coverStyle"
     | "customFontFamily"
@@ -167,9 +173,11 @@ export function App() {
   const [avatarLooks, setAvatarLooks] = useState<HeyGenAvatarLook[]>([]);
   const [avatarLookMessage, setAvatarLookMessage] = useState("");
   const [isAvatarLookLoading, setIsAvatarLookLoading] = useState(false);
+  const [activePreviewMode, setActivePreviewMode] = useState<PreviewMode>("finished");
 
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
+  const frameTitleStyle = selectedTask.frameTitleStyle ?? DEFAULT_FRAME_TITLE_STYLE;
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
   const sourceScriptLabel =
@@ -453,6 +461,7 @@ export function App() {
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets,
+        frameTitleStyle,
         subtitleStyle,
         coverStyle,
         personalIpProfile: selectedTask.personalIpProfile
@@ -562,6 +571,7 @@ export function App() {
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets,
+        frameTitleStyle,
         subtitleStyle,
         coverStyle,
         personalIpProfile: selectedTask.personalIpProfile
@@ -627,6 +637,7 @@ export function App() {
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets,
+        frameTitleStyle,
         subtitleStyle,
         coverStyle
       });
@@ -727,6 +738,18 @@ export function App() {
       }
     }));
     void updateCurrentTask({ subtitleStyle: nextStyle });
+  }
+
+  async function updateFrameTitleStyle(patch: Partial<FrameTitleStyle>) {
+    const nextStyle = { ...frameTitleStyle, ...patch };
+    setSelectedTask((current) => ({
+      ...current,
+      frameTitleStyle: {
+        ...(current.frameTitleStyle ?? DEFAULT_FRAME_TITLE_STYLE),
+        ...patch
+      }
+    }));
+    void updateCurrentTask({ frameTitleStyle: nextStyle });
   }
 
   async function updateCoverStyle(patch: Partial<CoverStyle>) {
@@ -842,39 +865,31 @@ export function App() {
         </div>
       </header>
 
-      <main className="workspace">
-        <aside className="task-pane">
-          <div className="pane-heading">
-            <span>任务列表</span>
+      <section className="task-strip" aria-label="任务列表">
+        <button className="icon-button small" title="新建任务" onClick={() => void createTask()}>
+          <Plus size={16} />
+        </button>
+        <div className="task-list">
+          {taskSummaries.map((task) => (
             <button
-              className="icon-button small"
-              title="新建任务"
-              onClick={() => void createTask()}
+              key={task.id}
+              className={`task-row ${task.id === selectedTaskId ? "active" : ""}`}
+              type="button"
+              title={`${task.title} · ${formatTaskMeta(task)}`}
+              onClick={() => void selectTask(task.id)}
             >
-              <Plus size={16} />
+              <span className={`task-dot ${task.status}`} />
+              <span>
+                <strong>{task.title}</strong>
+                <small>{formatTaskMeta(task)}</small>
+              </span>
             </button>
-          </div>
+          ))}
+        </div>
+        {taskError ? <p className="task-error">{taskError}</p> : null}
+      </section>
 
-          <div className="task-list">
-            {taskSummaries.map((task) => (
-              <button
-                key={task.id}
-                className={`task-row ${task.id === selectedTaskId ? "active" : ""}`}
-                type="button"
-                title={`${task.title} · ${formatTaskMeta(task)}`}
-                onClick={() => void selectTask(task.id)}
-              >
-                <span className={`task-dot ${task.status}`} />
-                <span>
-                  <strong>{task.title}</strong>
-                  <small>{formatTaskMeta(task)}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-          {taskError ? <p className="task-error">{taskError}</p> : null}
-        </aside>
-
+      <main className="workspace">
         <section className="editor-pane">
           <nav className="mode-tabs" aria-label="视频生成类别">
             {GENERATION_MODE_TABS.map((mode) => (
@@ -1280,27 +1295,58 @@ export function App() {
         <aside className="preview-pane">
           <section className="preview-card">
             <div className="pane-heading">
-              <span>成片预览</span>
+              <span>预览</span>
               <button type="button" onClick={() => void openTaskExports()}>
                 <FolderOpen size={16} />
                 打开导出
               </button>
             </div>
-            <PrimaryPreview
-              presetId={previewPresetId}
-              videoUrl={finishedVideoUrl}
-              imageUrl={generatedPresenterUrl || referenceImageUrl || productImageUrl}
-              subtitleStyle={subtitleStyle}
-              subtitleText={createSubtitleSample(selectedTask)}
-              variantStatus={primaryVariant?.status}
-            />
+            <nav className="preview-mode-tabs" aria-label="预览类型">
+              <button
+                className={activePreviewMode === "finished" ? "active" : ""}
+                type="button"
+                onClick={() => setActivePreviewMode("finished")}
+              >
+                <strong>成品预览</strong>
+                <span>{presetLabel(previewPresetId ?? "portrait-9-16")}</span>
+              </button>
+              <button
+                className={activePreviewMode === "cover" ? "active" : ""}
+                type="button"
+                onClick={() => setActivePreviewMode("cover")}
+              >
+                <strong>封面预览</strong>
+                <span>{coverAssetUrl ? "已生成" : "编辑中"}</span>
+              </button>
+            </nav>
+            {activePreviewMode === "finished" ? (
+              <PrimaryPreview
+                frameTitleStyle={frameTitleStyle}
+                frameTitleText={createFrameTitleText(selectedTask, coverStyle)}
+                presetId={previewPresetId}
+                videoUrl={finishedVideoUrl}
+                imageUrl={generatedPresenterUrl || referenceImageUrl || productImageUrl}
+                subtitleStyle={subtitleStyle}
+                subtitleText={createSubtitleSample(selectedTask)}
+                variantStatus={primaryVariant?.status}
+              />
+            ) : (
+              <CoverPreview
+                style={coverStyle}
+                title={coverStyle.title || createCoverTitle(selectedTask)}
+                presetId={previewPresetId}
+              />
+            )}
             <PreviewStyleControls
+              activePreviewMode={activePreviewMode}
               coverStyle={coverStyle}
               customFontEnabled={Boolean(customFontUrl)}
               disabled={isWorkflowRunning}
               onCoverStyleChange={(patch) => void updateCoverStyle(patch)}
+              onFrameTitleStyleChange={(patch) => void updateFrameTitleStyle(patch)}
               onSubtitleStyleChange={(patch) => void updateSubtitleStyle(patch)}
               onUploadCustomFont={() => void uploadCustomFont()}
+              frameTitleStyle={frameTitleStyle}
               subtitleStyle={subtitleStyle}
             />
           </section>
@@ -1325,18 +1371,6 @@ export function App() {
             <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
             <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
           </div>
-
-          <section className="preview-card">
-            <div className="pane-heading">
-              <span>封面预览</span>
-              <small>{coverAssetUrl ? "已生成" : "编辑中"}</small>
-            </div>
-            <CoverPreview
-              style={coverStyle}
-              title={coverStyle.title || createCoverTitle(selectedTask)}
-              presetId={previewPresetId}
-            />
-          </section>
         </aside>
       </main>
 
@@ -1547,6 +1581,8 @@ function AssetPreview({
 }
 
 function PrimaryPreview({
+  frameTitleStyle,
+  frameTitleText,
   presetId,
   videoUrl,
   imageUrl,
@@ -1554,6 +1590,8 @@ function PrimaryPreview({
   subtitleText,
   variantStatus
 }: {
+  frameTitleStyle: FrameTitleStyle;
+  frameTitleText: string;
   presetId: OutputPresetId | undefined;
   videoUrl: string;
   imageUrl: string;
@@ -1580,23 +1618,34 @@ function PrimaryPreview({
           {subtitleText}
         </div>
       ) : null}
+      {frameTitleStyle.enabled && frameTitleText ? (
+        <div className="frame-title-preview" style={frameTitlePreviewStyle(frameTitleStyle)}>
+          {frameTitleText}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function PreviewStyleControls({
+  activePreviewMode,
   coverStyle,
   customFontEnabled,
   disabled,
+  frameTitleStyle,
   onCoverStyleChange,
+  onFrameTitleStyleChange,
   onSubtitleStyleChange,
   onUploadCustomFont,
   subtitleStyle
 }: {
+  activePreviewMode: PreviewMode;
   coverStyle: CoverStyle;
   customFontEnabled: boolean;
   disabled: boolean;
+  frameTitleStyle: FrameTitleStyle;
   onCoverStyleChange: (patch: Partial<CoverStyle>) => void;
+  onFrameTitleStyleChange: (patch: Partial<FrameTitleStyle>) => void;
   onSubtitleStyleChange: (patch: Partial<SubtitleStyle>) => void;
   onUploadCustomFont: () => void;
   subtitleStyle: SubtitleStyle;
@@ -1604,154 +1653,306 @@ function PreviewStyleControls({
   return (
     <div className="preview-style-panel">
       <div className="preview-style-header">
-        <strong>字幕和封面样式</strong>
+        <strong>{activePreviewMode === "finished" ? "成品样式" : "封面样式"}</strong>
         <button type="button" disabled={disabled} onClick={onUploadCustomFont}>
           <Upload size={14} />
           上传字体
         </button>
       </div>
 
-      <section className="style-control-panel">
-        <h3>字幕</h3>
-        <div className="preview-control-grid">
-          <label className="range-control">
-            位置 {subtitleStyle.verticalPercent}%
-            <span className="range-row">
-              <input
-                type="range"
-                min={5}
-                max={92}
-                value={subtitleStyle.verticalPercent}
-                onInput={(event) =>
-                  onSubtitleStyleChange({
-                    verticalPercent: Number((event.target as HTMLInputElement).value)
-                  })
-                }
-                onChange={(event) =>
-                  onSubtitleStyleChange({ verticalPercent: Number(event.target.value) })
-                }
-              />
-              <input
-                type="number"
-                min={5}
-                max={92}
-                value={subtitleStyle.verticalPercent}
-                onChange={(event) =>
-                  onSubtitleStyleChange({ verticalPercent: Number(event.target.value) })
-                }
-              />
-            </span>
-          </label>
-          <label>
-            字号
-            <input
-              type="number"
-              min={20}
-              max={72}
-              value={subtitleStyle.fontSize}
-              onChange={(event) => onSubtitleStyleChange({ fontSize: Number(event.target.value) })}
-            />
-          </label>
-          <FontSelect
+      {activePreviewMode === "finished" ? (
+        <>
+          <FrameTitleControls
             customFontEnabled={customFontEnabled}
-            label="字体"
-            value={subtitleStyle.fontFamily}
-            onChange={(fontFamily) => onSubtitleStyleChange({ fontFamily })}
+            onChange={onFrameTitleStyleChange}
+            style={frameTitleStyle}
           />
-          <label>
-            字重
-            <select
-              value={subtitleStyle.fontWeight}
-              onChange={(event) =>
-                onSubtitleStyleChange({
-                  fontWeight: event.target.value as SubtitleStyle["fontWeight"]
-                })
-              }
-            >
-              <option value="bold">粗体</option>
-              <option value="regular">常规</option>
-            </select>
-          </label>
-          <ColorInput
-            label="文字"
-            value={subtitleStyle.textColor}
-            onChange={(value) => onSubtitleStyleChange({ textColor: value })}
-          />
-          <ColorInput
-            label="底色"
-            value={subtitleStyle.backgroundColor}
-            onChange={(value) => onSubtitleStyleChange({ backgroundColor: value })}
-          />
-        </div>
-      </section>
-
-      <section className="style-control-panel">
-        <h3>封面</h3>
-        <div className="preview-control-grid">
-          <label className="wide-control">
-            标题
-            <input
-              type="text"
-              value={coverStyle.title}
-              onChange={(event) => onCoverStyleChange({ title: event.target.value })}
-            />
-          </label>
-          <label className="wide-control">
-            副标题
-            <input
-              type="text"
-              value={coverStyle.subtitle}
-              onChange={(event) => onCoverStyleChange({ subtitle: event.target.value })}
-            />
-          </label>
-          <FontSelect
+          <SubtitleControls
             customFontEnabled={customFontEnabled}
-            label="字体"
-            value={coverStyle.fontFamily}
-            onChange={(fontFamily) => onCoverStyleChange({ fontFamily })}
+            onChange={onSubtitleStyleChange}
+            style={subtitleStyle}
           />
-          <label>
-            字号
-            <input
-              type="number"
-              min={32}
-              max={96}
-              value={coverStyle.fontSize}
-              onChange={(event) => onCoverStyleChange({ fontSize: Number(event.target.value) })}
-            />
-          </label>
-          <label>
-            字重
-            <select
-              value={coverStyle.fontWeight}
-              onChange={(event) =>
-                onCoverStyleChange({
-                  fontWeight: event.target.value as CoverStyle["fontWeight"]
-                })
-              }
-            >
-              <option value="bold">粗体</option>
-              <option value="regular">常规</option>
-            </select>
-          </label>
-          <ColorInput
-            label="文字"
-            value={coverStyle.textColor}
-            onChange={(value) => onCoverStyleChange({ textColor: value })}
-          />
-          <ColorInput
-            label="背景"
-            value={coverStyle.backgroundColor}
-            onChange={(value) => onCoverStyleChange({ backgroundColor: value })}
-          />
-          <ColorInput
-            label="强调"
-            value={coverStyle.accentColor}
-            onChange={(value) => onCoverStyleChange({ accentColor: value })}
-          />
-        </div>
-      </section>
+        </>
+      ) : (
+        <CoverControls
+          customFontEnabled={customFontEnabled}
+          onChange={onCoverStyleChange}
+          style={coverStyle}
+        />
+      )}
     </div>
+  );
+}
+
+function FrameTitleControls({
+  customFontEnabled,
+  onChange,
+  style
+}: {
+  customFontEnabled: boolean;
+  onChange: (patch: Partial<FrameTitleStyle>) => void;
+  style: FrameTitleStyle;
+}) {
+  return (
+    <section className="style-control-panel">
+      <h3>画面标题</h3>
+      <div className="preview-control-grid">
+        <label className="wide-control checkbox-row inline-toggle">
+          <input
+            type="checkbox"
+            checked={style.enabled}
+            onChange={(event) => onChange({ enabled: event.target.checked })}
+          />
+          显示画面标题
+        </label>
+        <label className="wide-control">
+          标题文字
+          <input
+            type="text"
+            value={style.text}
+            placeholder="留空时自动取 AI 文案首句"
+            onChange={(event) => onChange({ text: event.target.value })}
+          />
+        </label>
+        <label className="range-control">
+          位置 {style.verticalPercent}%
+          <span className="range-row">
+            <input
+              type="range"
+              min={5}
+              max={92}
+              value={style.verticalPercent}
+              onInput={(event) =>
+                onChange({ verticalPercent: Number((event.target as HTMLInputElement).value) })
+              }
+              onChange={(event) => onChange({ verticalPercent: Number(event.target.value) })}
+            />
+            <input
+              type="number"
+              min={5}
+              max={92}
+              value={style.verticalPercent}
+              onChange={(event) => onChange({ verticalPercent: Number(event.target.value) })}
+            />
+          </span>
+        </label>
+        <label>
+          字号
+          <input
+            type="number"
+            min={24}
+            max={84}
+            value={style.fontSize}
+            onChange={(event) => onChange({ fontSize: Number(event.target.value) })}
+          />
+        </label>
+        <FontSelect
+          customFontEnabled={customFontEnabled}
+          label="字体"
+          value={style.fontFamily}
+          onChange={(fontFamily) => onChange({ fontFamily })}
+        />
+        <label>
+          字重
+          <select
+            value={style.fontWeight}
+            onChange={(event) =>
+              onChange({ fontWeight: event.target.value as FrameTitleStyle["fontWeight"] })
+            }
+          >
+            <option value="bold">粗体</option>
+            <option value="regular">常规</option>
+          </select>
+        </label>
+        <ColorInput
+          label="文字"
+          value={style.textColor}
+          onChange={(value) => onChange({ textColor: value })}
+        />
+        <ColorInput
+          label="底色"
+          value={style.backgroundColor}
+          onChange={(value) => onChange({ backgroundColor: value })}
+        />
+      </div>
+    </section>
+  );
+}
+
+function SubtitleControls({
+  customFontEnabled,
+  onChange,
+  style
+}: {
+  customFontEnabled: boolean;
+  onChange: (patch: Partial<SubtitleStyle>) => void;
+  style: SubtitleStyle;
+}) {
+  return (
+    <section className="style-control-panel">
+      <h3>字幕</h3>
+      <div className="preview-control-grid">
+        <label className="range-control">
+          位置 {style.verticalPercent}%
+          <span className="range-row">
+            <input
+              type="range"
+              min={5}
+              max={92}
+              value={style.verticalPercent}
+              onInput={(event) =>
+                onChange({ verticalPercent: Number((event.target as HTMLInputElement).value) })
+              }
+              onChange={(event) => onChange({ verticalPercent: Number(event.target.value) })}
+            />
+            <input
+              type="number"
+              min={5}
+              max={92}
+              value={style.verticalPercent}
+              onChange={(event) => onChange({ verticalPercent: Number(event.target.value) })}
+            />
+          </span>
+        </label>
+        <label>
+          字号
+          <input
+            type="number"
+            min={20}
+            max={72}
+            value={style.fontSize}
+            onChange={(event) => onChange({ fontSize: Number(event.target.value) })}
+          />
+        </label>
+        <FontSelect
+          customFontEnabled={customFontEnabled}
+          label="字体"
+          value={style.fontFamily}
+          onChange={(fontFamily) => onChange({ fontFamily })}
+        />
+        <label>
+          字重
+          <select
+            value={style.fontWeight}
+            onChange={(event) =>
+              onChange({ fontWeight: event.target.value as SubtitleStyle["fontWeight"] })
+            }
+          >
+            <option value="bold">粗体</option>
+            <option value="regular">常规</option>
+          </select>
+        </label>
+        <ColorInput
+          label="文字"
+          value={style.textColor}
+          onChange={(value) => onChange({ textColor: value })}
+        />
+        <ColorInput
+          label="底色"
+          value={style.backgroundColor}
+          onChange={(value) => onChange({ backgroundColor: value })}
+        />
+      </div>
+    </section>
+  );
+}
+
+function CoverControls({
+  customFontEnabled,
+  onChange,
+  style
+}: {
+  customFontEnabled: boolean;
+  onChange: (patch: Partial<CoverStyle>) => void;
+  style: CoverStyle;
+}) {
+  return (
+    <section className="style-control-panel">
+      <h3>封面</h3>
+      <div className="preview-control-grid">
+        <label className="wide-control">
+          标题
+          <input
+            type="text"
+            value={style.title}
+            onChange={(event) => onChange({ title: event.target.value })}
+          />
+        </label>
+        <label className="wide-control">
+          副标题
+          <input
+            type="text"
+            value={style.subtitle}
+            onChange={(event) => onChange({ subtitle: event.target.value })}
+          />
+        </label>
+        <label className="range-control">
+          标题位置 {style.verticalPercent}%
+          <span className="range-row">
+            <input
+              type="range"
+              min={8}
+              max={90}
+              value={style.verticalPercent}
+              onInput={(event) =>
+                onChange({ verticalPercent: Number((event.target as HTMLInputElement).value) })
+              }
+              onChange={(event) => onChange({ verticalPercent: Number(event.target.value) })}
+            />
+            <input
+              type="number"
+              min={8}
+              max={90}
+              value={style.verticalPercent}
+              onChange={(event) => onChange({ verticalPercent: Number(event.target.value) })}
+            />
+          </span>
+        </label>
+        <FontSelect
+          customFontEnabled={customFontEnabled}
+          label="字体"
+          value={style.fontFamily}
+          onChange={(fontFamily) => onChange({ fontFamily })}
+        />
+        <label>
+          字号
+          <input
+            type="number"
+            min={32}
+            max={96}
+            value={style.fontSize}
+            onChange={(event) => onChange({ fontSize: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          字重
+          <select
+            value={style.fontWeight}
+            onChange={(event) =>
+              onChange({ fontWeight: event.target.value as CoverStyle["fontWeight"] })
+            }
+          >
+            <option value="bold">粗体</option>
+            <option value="regular">常规</option>
+          </select>
+        </label>
+        <ColorInput
+          label="文字"
+          value={style.textColor}
+          onChange={(value) => onChange({ textColor: value })}
+        />
+        <ColorInput
+          label="背景"
+          value={style.backgroundColor}
+          onChange={(value) => onChange({ backgroundColor: value })}
+        />
+        <ColorInput
+          label="强调"
+          value={style.accentColor}
+          onChange={(value) => onChange({ accentColor: value })}
+        />
+      </div>
+    </section>
   );
 }
 
@@ -1799,20 +2000,32 @@ function CoverPreview({
     color: style.textColor,
     fontFamily: style.fontFamily
   };
+  const coverTitleTransform =
+    style.verticalPercent <= 18
+      ? "translateY(0)"
+      : style.verticalPercent >= 82
+        ? "translateY(-100%)"
+        : "translateY(-50%)";
+  const titleBlockStyle: CSSProperties = {
+    top: `${style.verticalPercent}%`,
+    transform: coverTitleTransform
+  };
 
   return (
     <div className={`cover-preview ${isLandscape ? "landscape" : "portrait"}`} style={previewStyle}>
       <span className="cover-accent" style={{ backgroundColor: style.accentColor }} />
-      <strong
-        style={{
-          fontSize: `${titleFontSize}px`,
-          fontWeight: style.fontWeight === "bold" ? 700 : 400
-        }}
-      >
-        {title}
-      </strong>
-      <small>{style.subtitle}</small>
-      <i style={{ backgroundColor: style.accentColor }} />
+      <div className="cover-title-block" style={titleBlockStyle}>
+        <strong
+          style={{
+            fontSize: `${titleFontSize}px`,
+            fontWeight: style.fontWeight === "bold" ? 700 : 400
+          }}
+        >
+          {title}
+        </strong>
+        <small>{style.subtitle}</small>
+        <i style={{ backgroundColor: style.accentColor }} />
+      </div>
     </div>
   );
 }
@@ -1845,6 +2058,17 @@ function subtitlePreviewStyle(style: SubtitleStyle): CSSProperties {
   };
 }
 
+function frameTitlePreviewStyle(style: FrameTitleStyle): CSSProperties {
+  return {
+    color: style.textColor,
+    backgroundColor: style.backgroundColor,
+    fontFamily: style.fontFamily,
+    fontSize: `${Math.max(14, Math.round(style.fontSize * 0.38))}px`,
+    fontWeight: style.fontWeight === "bold" ? 700 : 400,
+    top: `${style.verticalPercent}%`
+  };
+}
+
 function createSubtitleSample(task: VideoTask): string {
   const line = (task.finalScript || task.sourceScript || "字幕预览")
     .split(/\r?\n/)
@@ -1855,6 +2079,26 @@ function createSubtitleSample(task: VideoTask): string {
   }
 
   return line.length > 28 ? `${line.slice(0, 28)}...` : line;
+}
+
+function createFrameTitleText(task: VideoTask, coverStyle: CoverStyle): string {
+  const explicitTitle = task.frameTitleStyle?.text.trim();
+  if (explicitTitle) {
+    return explicitTitle.length > 24 ? `${explicitTitle.slice(0, 24)}...` : explicitTitle;
+  }
+
+  const coverTitle = coverStyle.title.trim();
+  if (coverTitle) {
+    return coverTitle.length > 24 ? `${coverTitle.slice(0, 24)}...` : coverTitle;
+  }
+
+  const line =
+    (task.finalScript || task.sourceScript || task.title)
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .find(Boolean) ?? task.title;
+
+  return line.length > 24 ? `${line.slice(0, 24)}...` : line;
 }
 
 function createCoverTitle(task: VideoTask): string {

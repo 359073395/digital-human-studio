@@ -2,6 +2,7 @@ import type {
   AvatarMode,
   CoverStyle,
   ContentLanguage,
+  FrameTitleStyle,
   GenerationStepId,
   MediaAsset,
   OutputPresetId,
@@ -103,6 +104,7 @@ export interface UpdateTaskInput {
   customFontAssetId?: MediaAsset["id"] | null;
   customFontFamily?: string;
   selectedOutputPresets?: OutputPresetId[];
+  frameTitleStyle?: FrameTitleStyle;
   subtitleStyle?: SubtitleStyle;
   coverStyle?: CoverStyle;
   personalIpProfile?: PersonalIpProfile;

@@ -52,6 +52,10 @@ _Avoid_: Workflow step, output preset, provider setting
 The persistent collection of video tasks managed by the application. The MVP does not expose batch generation as a primary workflow, but the product language treats each video as a task in a list.
 _Avoid_: Batch queue, playlist, spreadsheet
 
+**Task Strip**:
+A compact horizontal task switcher shown at the top of the workspace. It preserves access to the task list without taking a full vertical column from the single-task production flow.
+_Avoid_: Left task rail, batch dashboard, large queue panel
+
 **Default Voice Path**:
 The standard MVP path where HeyGen generates speech and lip-synced avatar video from the script, selected voice, and preset avatar.
 _Avoid_: Basic TTS, automatic voice mode
@@ -104,12 +108,16 @@ _Avoid_: Effects, decorations, optional extras
 The task-level visual settings for subtitles, including percentage-based vertical position, font, font size, text color, background color, and weight. These settings are user-editable inside the finished-video preview area.
 _Avoid_: Subtitle timing, caption file, hard-coded style
 
+**Frame Title Style**:
+The task-level visual settings for an optional title layer shown inside the finished-video frame above or near the subtitle layer. It includes editable text, percentage-based vertical position, font, size, colors, and weight.
+_Avoid_: Cover title, publishing title, source script headline
+
 **Cover Style**:
-The task-level visual settings used to generate and preview a cover image, including title, subtitle, font, font size, text color, background color, accent color, and weight. Cover style controls live next to the preview because users tune them visually.
+The task-level visual settings used to generate and preview a cover image, including title, subtitle, percentage-based title position, font, font size, text color, background color, accent color, and weight. Cover style controls live next to the preview because users tune them visually.
 _Avoid_: Publishing copy, video thumbnail URL, platform cover
 
 **Custom Font**:
-A local font file uploaded by the user for creator-specific subtitle and cover styling. It is stored as task media and previewed through the renderer's safe task-asset URL path.
+A local font file uploaded by the user for creator-specific subtitle, frame title, and cover styling. It is stored as task media and previewed through the renderer's safe task-asset URL path.
 _Avoid_: System-wide font install, bundled font library, remote font dependency
 
 **Publishing Package**:
@@ -151,6 +159,10 @@ _Avoid_: Live final preview, real-time render preview
 **Preview-Attached Controls**:
 Style controls that belong inside or directly next to the preview they affect. Subtitle and cover controls use this pattern so users can adjust them while watching the visual result.
 _Avoid_: Detached style form, hidden design settings
+
+**Preview Mode Card**:
+A preview surface that switches between finished-video preview and cover preview as peer cards. Each card owns its relevant controls so users can adjust text, position, font, and color while seeing the exact affected frame.
+_Avoid_: Separate scattered preview panels, hidden style drawer, detached preview tab
 
 **Previewable Media Asset**:
 A local task media file that the desktop app can safely display in the renderer, such as a product image, generated presenter image, cover image, or finished video.

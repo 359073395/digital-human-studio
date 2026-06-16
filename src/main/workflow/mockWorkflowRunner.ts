@@ -283,12 +283,14 @@ function createMockCoverSvg(task: VideoTask, presetId: OutputPresetId): string {
   const titleSize = Math.round((style.fontSize / 1080) * width);
   const subtitleSize = Math.round(titleSize * 0.42);
   const fontWeight = style.fontWeight === "bold" ? "700" : "400";
+  const titleY = Math.round(height * (style.verticalPercent / 100));
+  const subtitleY = titleY + Math.round(titleSize * 1.15);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <rect width="100%" height="100%" fill="${style.backgroundColor}"/>
   <rect x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.1)}" width="${Math.round(width * 0.84)}" height="${Math.round(height * 0.012)}" fill="${style.accentColor}"/>
-  <text x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.44)}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${fontWeight}">${title}</text>
-  <text x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.51)}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.78">${subtitle}</text>
+  <text x="${Math.round(width * 0.08)}" y="${titleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${fontWeight}">${title}</text>
+  <text x="${Math.round(width * 0.08)}" y="${subtitleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.78">${subtitle}</text>
 </svg>
 `;
 }
@@ -346,6 +348,9 @@ function createPublishingManifest(task: VideoTask, publishingPackage: Publishing
       contentLanguage: task.contentLanguage,
       selectedOutputPresets: task.selectedOutputPresets
     },
+    subtitleStyle: task.subtitleStyle,
+    frameTitleStyle: task.frameTitleStyle,
+    coverStyle: task.coverStyle,
     publishingPackage,
     outputVariants: task.outputVariants,
     mediaAssets: task.mediaAssets

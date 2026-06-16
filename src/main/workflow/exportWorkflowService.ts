@@ -174,6 +174,7 @@ function createPublishingManifest(task: VideoTask, publishingPackage: Publishing
       selectedOutputPresets: task.selectedOutputPresets
     },
     subtitleStyle: task.subtitleStyle,
+    frameTitleStyle: task.frameTitleStyle,
     coverStyle: task.coverStyle,
     publishingPackage,
     outputVariants: task.outputVariants,
@@ -201,13 +202,16 @@ function createCoverSvg(task: VideoTask, preset: OutputPreset): string {
   const titleSize = Math.round((style.fontSize / 1080) * preset.width);
   const subtitleSize = Math.round(titleSize * 0.42);
   const fontWeight = fontWeightValue(style);
+  const titleY = Math.round(preset.height * (style.verticalPercent / 100));
+  const subtitleY = titleY + Math.round(titleSize * 1.15);
+  const underlineY = subtitleY + Math.round(subtitleSize * 1.8);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${preset.width}" height="${preset.height}" viewBox="0 0 ${preset.width} ${preset.height}">
   <rect width="100%" height="100%" fill="${style.backgroundColor}"/>
   <rect x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.1)}" width="${Math.round(preset.width * 0.84)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
-  <text x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.44)}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${fontWeight}">${title}</text>
-  <text x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.51)}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.78">${subtitle}</text>
-  <rect x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.76)}" width="${Math.round(preset.width * 0.26)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
+  <text x="${Math.round(preset.width * 0.08)}" y="${titleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${fontWeight}">${title}</text>
+  <text x="${Math.round(preset.width * 0.08)}" y="${subtitleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.78">${subtitle}</text>
+  <rect x="${Math.round(preset.width * 0.08)}" y="${underlineY}" width="${Math.round(preset.width * 0.26)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
 </svg>
 `;
 }

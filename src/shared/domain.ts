@@ -79,9 +79,21 @@ export interface SubtitleStyle {
   fontWeight: TextWeight;
 }
 
+export interface FrameTitleStyle {
+  enabled: boolean;
+  text: string;
+  verticalPercent: number;
+  fontFamily: string;
+  fontSize: number;
+  textColor: string;
+  backgroundColor: string;
+  fontWeight: TextWeight;
+}
+
 export interface CoverStyle {
   title: string;
   subtitle: string;
+  verticalPercent: number;
   fontFamily: string;
   fontSize: number;
   textColor: string;
@@ -145,6 +157,7 @@ export interface VideoTask {
   customFontAssetId?: string;
   customFontFamily?: string;
   selectedOutputPresets: OutputPresetId[];
+  frameTitleStyle: FrameTitleStyle;
   subtitleStyle: SubtitleStyle;
   coverStyle: CoverStyle;
   personalIpProfile: PersonalIpProfile;
@@ -231,9 +244,21 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   fontWeight: "bold"
 };
 
+export const DEFAULT_FRAME_TITLE_STYLE: FrameTitleStyle = {
+  enabled: true,
+  text: "",
+  verticalPercent: 18,
+  fontFamily: "Microsoft YaHei",
+  fontSize: 42,
+  textColor: "#ffffff",
+  backgroundColor: "#111827",
+  fontWeight: "bold"
+};
+
 export const DEFAULT_COVER_STYLE: CoverStyle = {
   title: "",
   subtitle: "数字人口播",
+  verticalPercent: 54,
   fontFamily: "Microsoft YaHei",
   fontSize: 56,
   textColor: "#ffffff",

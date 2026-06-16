@@ -80,6 +80,10 @@ export class PresenterImageWorkflowService {
       taskId,
       customFontAssetId: asset.id,
       customFontFamily: CUSTOM_FONT_FAMILY,
+      frameTitleStyle: {
+        ...taskWithAsset.frameTitleStyle,
+        fontFamily: CUSTOM_FONT_FAMILY
+      },
       subtitleStyle: {
         ...taskWithAsset.subtitleStyle,
         fontFamily: CUSTOM_FONT_FAMILY

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {
   DEFAULT_COVER_STYLE,
+  DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_GENERATION_STEPS,
   DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_PUBLISHING_PACKAGE,
@@ -12,6 +13,7 @@ import {
   type AvatarMode,
   type CoverStyle,
   type ContentLanguage,
+  type FrameTitleStyle,
   type GenerationStep,
   type GenerationStepId,
   type MediaAsset,
@@ -51,6 +53,7 @@ interface TaskRow {
   custom_font_family: string;
   selected_output_presets: string;
   subtitle_style: string;
+  frame_title_style: string;
   cover_style: string;
   personal_ip_profile: string;
   publishing_package: string;
@@ -146,6 +149,7 @@ export class TaskRepository {
     const customFontAssetId = null;
     const customFontFamily = "";
     const selectedOutputPresets = defaultOutputPresetIds();
+    const frameTitleStyle = DEFAULT_FRAME_TITLE_STYLE;
     const subtitleStyle = DEFAULT_SUBTITLE_STYLE;
     const coverStyle = DEFAULT_COVER_STYLE;
     const personalIpProfile = DEFAULT_PERSONAL_IP_PROFILE;
@@ -174,13 +178,14 @@ export class TaskRepository {
             custom_font_asset_id,
             custom_font_family,
             selected_output_presets,
+            frame_title_style,
             subtitle_style,
             cover_style,
             personal_ip_profile,
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -202,6 +207,7 @@ export class TaskRepository {
           customFontAssetId,
           customFontFamily,
           JSON.stringify(selectedOutputPresets),
+          JSON.stringify(frameTitleStyle),
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
           JSON.stringify(personalIpProfile),
@@ -306,6 +312,9 @@ export class TaskRepository {
     const selectedOutputPresets = normalizeOutputPresetIds(
       input.selectedOutputPresets ?? existing.selectedOutputPresets
     );
+    const frameTitleStyle = normalizeFrameTitleStyle(
+      input.frameTitleStyle ?? existing.frameTitleStyle
+    );
     const subtitleStyle = normalizeSubtitleStyle(input.subtitleStyle ?? existing.subtitleStyle);
     const coverStyle = normalizeCoverStyle(input.coverStyle ?? existing.coverStyle);
     const personalIpProfile = normalizePersonalIpProfile(
@@ -331,8 +340,9 @@ export class TaskRepository {
                generated_presenter_image_asset_id = ?,
                custom_font_asset_id = ?,
                custom_font_family = ?,
-               selected_output_presets = ?,
-               subtitle_style = ?,
+                selected_output_presets = ?,
+                frame_title_style = ?,
+                subtitle_style = ?,
                cover_style = ?,
                personal_ip_profile = ?,
                updated_at = ?
@@ -355,6 +365,7 @@ export class TaskRepository {
           customFontAssetId ?? null,
           customFontFamily,
           JSON.stringify(selectedOutputPresets),
+          JSON.stringify(frameTitleStyle),
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
           JSON.stringify(personalIpProfile),
@@ -636,6 +647,7 @@ export class TaskRepository {
       customFontAssetId: row.custom_font_asset_id ?? undefined,
       customFontFamily: row.custom_font_family ?? "",
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
+      frameTitleStyle: parseFrameTitleStyle(row.frame_title_style),
       subtitleStyle: parseSubtitleStyle(row.subtitle_style),
       coverStyle: parseCoverStyle(row.cover_style),
       personalIpProfile: parsePersonalIpProfile(row.personal_ip_profile),
@@ -751,6 +763,14 @@ function parseSubtitleStyle(value: string | null | undefined): SubtitleStyle {
   }
 }
 
+function parseFrameTitleStyle(value: string | null | undefined): FrameTitleStyle {
+  try {
+    return normalizeFrameTitleStyle(value ? (JSON.parse(value) as Partial<FrameTitleStyle>) : {});
+  } catch {
+    return DEFAULT_FRAME_TITLE_STYLE;
+  }
+}
+
 function parseCoverStyle(value: string | null | undefined): CoverStyle {
   try {
     return normalizeCoverStyle(value ? (JSON.parse(value) as Partial<CoverStyle>) : {});
@@ -820,6 +840,32 @@ function normalizeSubtitleStyle(value: Partial<SubtitleStyle>): SubtitleStyle {
   };
 }
 
+function normalizeFrameTitleStyle(value: Partial<FrameTitleStyle>): FrameTitleStyle {
+  return {
+    ...DEFAULT_FRAME_TITLE_STYLE,
+    ...value,
+    enabled: value.enabled ?? DEFAULT_FRAME_TITLE_STYLE.enabled,
+    text: typeof value.text === "string" ? value.text.slice(0, 80) : DEFAULT_FRAME_TITLE_STYLE.text,
+    verticalPercent: clampNumber(
+      value.verticalPercent,
+      5,
+      92,
+      DEFAULT_FRAME_TITLE_STYLE.verticalPercent
+    ),
+    fontFamily:
+      typeof value.fontFamily === "string" && value.fontFamily.trim()
+        ? value.fontFamily.trim().slice(0, 80)
+        : DEFAULT_FRAME_TITLE_STYLE.fontFamily,
+    fontSize: clampNumber(value.fontSize, 24, 84, DEFAULT_FRAME_TITLE_STYLE.fontSize),
+    textColor: normalizeColor(value.textColor, DEFAULT_FRAME_TITLE_STYLE.textColor),
+    backgroundColor: normalizeColor(
+      value.backgroundColor,
+      DEFAULT_FRAME_TITLE_STYLE.backgroundColor
+    ),
+    fontWeight: value.fontWeight === "regular" ? "regular" : DEFAULT_FRAME_TITLE_STYLE.fontWeight
+  };
+}
+
 function normalizeCoverStyle(value: Partial<CoverStyle>): CoverStyle {
   return {
     ...DEFAULT_COVER_STYLE,
@@ -829,6 +875,7 @@ function normalizeCoverStyle(value: Partial<CoverStyle>): CoverStyle {
       typeof value.subtitle === "string"
         ? value.subtitle.slice(0, 80)
         : DEFAULT_COVER_STYLE.subtitle,
+    verticalPercent: clampNumber(value.verticalPercent, 8, 90, DEFAULT_COVER_STYLE.verticalPercent),
     fontFamily:
       typeof value.fontFamily === "string" && value.fontFamily.trim()
         ? value.fontFamily.trim().slice(0, 48)
