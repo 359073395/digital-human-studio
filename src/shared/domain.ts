@@ -205,7 +205,7 @@ export const CONTENT_LANGUAGES: ContentLanguageOption[] = [
 ];
 
 export const DEFAULT_GENERATION_STEPS: Omit<GenerationStep, "updatedAt">[] = [
-  { id: "source", label: "源文案", status: "waiting" },
+  { id: "source", label: "提取文案", status: "waiting" },
   { id: "script", label: "原创脚本", status: "waiting" },
   { id: "avatar", label: "数字人", status: "waiting" },
   { id: "subtitles", label: "字幕", status: "waiting" },

@@ -1,6 +1,8 @@
 import {
   CheckCircle2,
+  FileSearch,
   FolderOpen,
+  Link2,
   Monitor,
   Play,
   Plus,
@@ -63,7 +65,7 @@ const fallbackTask: VideoTask = {
     notes: ""
   },
   steps: [
-    { id: "source", label: "源文案", status: "complete", updatedAt: now },
+    { id: "source", label: "提取文案", status: "complete", updatedAt: now },
     { id: "script", label: "原创脚本", status: "complete", updatedAt: now },
     { id: "avatar", label: "数字人", status: "running", updatedAt: now },
     { id: "subtitles", label: "字幕", status: "waiting", updatedAt: now },
@@ -574,6 +576,37 @@ export function App() {
     }
   }
 
+  async function extractSourceCopy() {
+    const api = requireDesktopRuntime("一键提取文案");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在提取参考文案...");
+
+    try {
+      await api.updateTask({
+        taskId: selectedTask.id,
+        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
+        sourceScript: selectedTask.sourceScript,
+        contentLanguage: selectedTask.contentLanguage
+      });
+      const result = await api.transcribeSource(selectedTask.id);
+      const task = await api.getTask(selectedTask.id);
+      setActionMessage(
+        `已提取${result.contentLanguage === "id-ID" ? "印尼语" : result.contentLanguage === "en-US" ? "英文" : "中文"}参考文案，可继续修改后生成 AI 文案`
+      );
+      if (task) {
+        await refreshTaskState(task.id, task);
+      }
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "一键提取文案失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
   async function generatePresenterImages() {
     const api = requireDesktopRuntime("生成人物商品图");
     if (!api) {
@@ -828,6 +861,7 @@ export function App() {
                 key={task.id}
                 className={`task-row ${task.id === selectedTaskId ? "active" : ""}`}
                 type="button"
+                title={`${task.title} · ${formatTaskMeta(task)}`}
                 onClick={() => void selectTask(task.id)}
               >
                 <span className={`task-dot ${task.status}`} />
@@ -858,13 +892,50 @@ export function App() {
             ))}
           </nav>
 
+          <section className="source-ingest-card">
+            <div className="source-ingest-heading">
+              <span>
+                <Link2 size={16} />
+                原视频链接
+              </span>
+              <button
+                type="button"
+                disabled={isWorkflowRunning}
+                onClick={() => void extractSourceCopy()}
+              >
+                <FileSearch size={16} />
+                一键提取文案
+              </button>
+            </div>
+            <div className="source-link-row">
+              <input
+                type="url"
+                value={selectedTask.originalVideoUrl ?? ""}
+                placeholder="先粘贴 TikTok / 抖音 / Reels / Shorts 原视频链接"
+                aria-label="原视频链接"
+                onBlur={() =>
+                  void updateCurrentTask({
+                    originalVideoUrl: selectedTask.originalVideoUrl ?? ""
+                  })
+                }
+                onChange={(event) =>
+                  setSelectedTask((current) => ({
+                    ...current,
+                    originalVideoUrl: event.target.value
+                  }))
+                }
+              />
+            </div>
+            <p>先提取文案或视频素材，再做分析/改写，最后生成数字人口播视频。</p>
+          </section>
+
           <div className="script-grid">
             <section className="field-block">
               <div className="section-title">
-                <Upload size={16} />
+                <FileSearch size={16} />
                 <h2>{sourceScriptLabel}</h2>
               </div>
-              <p className="field-hint">可粘贴原视频文案，后续会接入从链接一键提取和爆款分析。</p>
+              <p className="field-hint">提取后会填到这里；也可以直接粘贴或修改原视频文案。</p>
               <textarea
                 value={selectedTask.sourceScript}
                 aria-label={sourceScriptLabel}
@@ -919,26 +990,7 @@ export function App() {
 
           <section className="compact-block generation-settings-block">
             <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
-            <div className="control-grid">
-              <label>
-                原视频链接
-                <input
-                  type="url"
-                  value={selectedTask.originalVideoUrl ?? ""}
-                  placeholder="粘贴 TikTok / 抖音 / Reels / Shorts 链接"
-                  onBlur={() =>
-                    void updateCurrentTask({
-                      originalVideoUrl: selectedTask.originalVideoUrl ?? ""
-                    })
-                  }
-                  onChange={(event) =>
-                    setSelectedTask((current) => ({
-                      ...current,
-                      originalVideoUrl: event.target.value
-                    }))
-                  }
-                />
-              </label>
+            <div className="control-grid mode-settings-grid">
               <label>
                 生成语言 / 语音
                 <select

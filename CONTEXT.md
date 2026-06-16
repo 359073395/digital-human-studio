@@ -29,8 +29,12 @@ Text supplied directly by the user or transcribed from an uploaded local audio o
 _Avoid_: Scraped script, platform extraction, competitor download
 
 **Original Video Link**:
-A task-level URL field for the source or reference video. The MVP stores the link for later extraction and analysis features, but it does not yet scrape platform content from the link.
+A task-level URL field for the source or reference video. It is shown directly under the video-generation mode navigation as the first workflow input, because users start by extracting source copy or source media before analysis and generation.
 _Avoid_: Downloaded video, scraped transcript, platform import
+
+**Source Extraction Action**:
+The first workflow command that attempts to turn source material into editable reference copy. The MVP routes it through the desktop extraction/transcription service and leaves platform-link downloading as a provider enhancement behind the same button.
+_Avoid_: Mock check, hidden import, final script generation
 
 **Mixed-Cut Video**:
 A future enhancement that combines talking-head footage with additional clips, B-roll, or montage editing. It is not part of the MVP core workflow.
