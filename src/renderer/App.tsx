@@ -4,9 +4,11 @@ import {
   Monitor,
   Play,
   Plus,
+  RefreshCw,
   Settings,
   Smartphone,
   Upload,
+  UserRound,
   WandSparkles
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -24,7 +26,7 @@ import {
   type VideoTask,
   type VideoTaskSummary
 } from "../shared/domain";
-import type { UpdateTaskInput } from "../shared/ipc";
+import type { HeyGenAvatarLook, UpdateTaskInput } from "../shared/ipc";
 import type {
   ProviderId,
   SaveServiceConfigurationInput,
@@ -38,6 +40,7 @@ const now = new Date().toISOString();
 const fallbackTask: VideoTask = {
   id: "preview-task",
   title: "护肤品口播样片",
+  originalVideoUrl: "",
   sourceScript: "如果你的内容一直有播放，却始终带不动成交，问题可能不在流量。",
   finalScript: "播放量不差却没有订单时，先别急着加预算。真正要改的，往往是前三秒给用户的购买理由。",
   similarityRisk: "low",
@@ -45,8 +48,10 @@ const fallbackTask: VideoTask = {
   contentLanguage: "zh-CN",
   generationMode: "preset-avatar",
   avatarMode: "preset-avatar",
+  presetAvatarId: "",
   avatarDescriptionPrompt: "",
   motionPrompt: "",
+  customFontFamily: "",
   selectedOutputPresets: ["portrait-9-16"],
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
   coverStyle: DEFAULT_COVER_STYLE,
@@ -88,15 +93,19 @@ type EditableTaskPatch = Partial<
   Pick<
     VideoTask,
     | "title"
+    | "originalVideoUrl"
     | "sourceScript"
+    | "finalScript"
     | "contentLanguage"
     | "generationMode"
     | "avatarMode"
+    | "presetAvatarId"
     | "avatarDescriptionPrompt"
     | "motionPrompt"
     | "selectedOutputPresets"
     | "subtitleStyle"
     | "coverStyle"
+    | "customFontFamily"
     | "personalIpProfile"
   >
 >;
@@ -153,13 +162,16 @@ export function App() {
   const [actionMessage, setActionMessage] = useState("");
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
+  const [avatarLooks, setAvatarLooks] = useState<HeyGenAvatarLook[]>([]);
+  const [avatarLookMessage, setAvatarLookMessage] = useState("");
+  const [isAvatarLookLoading, setIsAvatarLookLoading] = useState(false);
 
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
   const sourceScriptLabel =
-    selectedTask.generationMode === "viral-remix" ? "参考爆款文案" : "源文案";
+    selectedTask.generationMode === "viral-remix" ? "爆款参考文案" : "参考文案";
   const primaryVariant =
     selectedTask.outputVariants.find((variant) =>
       selectedTask.selectedOutputPresets.includes(variant.presetId)
@@ -167,6 +179,9 @@ export function App() {
   const productImageAsset = selectedTask.mediaAssets.find(
     (asset) => asset.id === selectedTask.productImageAssetId
   );
+  const customFontAsset =
+    selectedTask.mediaAssets.find((asset) => asset.id === selectedTask.customFontAssetId) ??
+    selectedTask.mediaAssets.find((asset) => asset.kind === "custom-font");
   const referenceImageAsset =
     selectedTask.mediaAssets.find((asset) => asset.id === selectedTask.referenceImageAssetId) ??
     selectedTask.mediaAssets.find((asset) => asset.kind === "reference-image");
@@ -186,6 +201,7 @@ export function App() {
         new Set(
           [
             productImageAsset?.relativePath,
+            customFontAsset?.relativePath,
             referenceImageAsset?.relativePath,
             generatedPresenterAsset?.relativePath,
             ...selectedTask.outputVariants.flatMap((variant) => [
@@ -197,6 +213,7 @@ export function App() {
       ),
     [
       generatedPresenterAsset?.relativePath,
+      customFontAsset?.relativePath,
       productImageAsset?.relativePath,
       referenceImageAsset?.relativePath,
       selectedTask
@@ -218,7 +235,22 @@ export function App() {
   const generatedPresenterUrl = generatedPresenterAsset?.relativePath
     ? assetUrls[generatedPresenterAsset.relativePath]
     : "";
+  const customFontUrl = customFontAsset?.relativePath
+    ? assetUrls[customFontAsset.relativePath]
+    : "";
   const previewPresetId = primaryVariant?.presetId ?? selectedTask.selectedOutputPresets[0];
+  const heygenConfiguration = serviceConfigurations.find(
+    (configuration) => configuration.providerId === "heygen"
+  );
+  const configuredAvatarIds = useMemo(
+    () => parseAvatarOptions(heygenConfiguration?.settings.avatarId),
+    [heygenConfiguration?.settings.avatarId]
+  );
+  const avatarOptions = useMemo(
+    () => Array.from(new Set([...avatarLooks.map((look) => look.id), ...configuredAvatarIds])),
+    [avatarLooks, configuredAvatarIds]
+  );
+  const selectedAvatarLook = avatarLooks.find((look) => look.id === selectedTask.presetAvatarId);
 
   function requireDesktopRuntime(
     actionLabel: string
@@ -241,6 +273,7 @@ export function App() {
       .getAppInfo()
       .then((info) => setAppVersion(`${info.name} ${info.version}`))
       .catch(() => setAppVersion("Digital Human Studio"));
+    void loadServiceConfigurations();
   }, []);
 
   useEffect(() => {
@@ -320,6 +353,24 @@ export function App() {
     };
   }, [previewPathSignature, previewRelativePaths, selectedTask.id]);
 
+  useEffect(() => {
+    if (
+      selectedTask.generationMode !== "preset-avatar" ||
+      !heygenConfiguration?.credentialConfigured ||
+      avatarLooks.length > 0 ||
+      isAvatarLookLoading
+    ) {
+      return;
+    }
+
+    void refreshHeyGenAvatarLooks(false);
+  }, [
+    selectedTask.generationMode,
+    heygenConfiguration?.credentialConfigured,
+    avatarLooks.length,
+    isAvatarLookLoading
+  ]);
+
   async function refreshTaskState(taskId: string, nextTask?: VideoTask) {
     if (!window.digitalHumanStudio) {
       return;
@@ -390,10 +441,13 @@ export function App() {
     try {
       await api.updateTask({
         taskId: selectedTask.id,
+        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
         sourceScript: selectedTask.sourceScript,
+        finalScript: selectedTask.finalScript,
         contentLanguage: selectedTask.contentLanguage,
         generationMode: selectedTask.generationMode,
         avatarMode: selectedTask.avatarMode,
+        presetAvatarId: selectedTask.presetAvatarId ?? "",
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets,
@@ -462,6 +516,64 @@ export function App() {
     }
   }
 
+  async function uploadCustomFont() {
+    const api = requireDesktopRuntime("上传字体");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择字体文件...");
+
+    try {
+      const task = await api.uploadCustomFont(selectedTask.id);
+      setActionMessage(
+        task.customFontAssetId ? "字体已导入，并应用到字幕和封面预览" : "未选择字体文件"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "字体导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function generateScriptOnly() {
+    const api = requireDesktopRuntime("一键AI生成文案");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在生成可编辑文案...");
+
+    try {
+      await api.updateTask({
+        taskId: selectedTask.id,
+        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
+        sourceScript: selectedTask.sourceScript,
+        finalScript: selectedTask.finalScript,
+        contentLanguage: selectedTask.contentLanguage,
+        generationMode: selectedTask.generationMode,
+        avatarMode: selectedTask.avatarMode,
+        presetAvatarId: selectedTask.presetAvatarId ?? "",
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
+        selectedOutputPresets: selectedTask.selectedOutputPresets,
+        subtitleStyle,
+        coverStyle,
+        personalIpProfile: selectedTask.personalIpProfile
+      });
+      const task = await api.generateScript(selectedTask.id);
+      setActionMessage("文案已生成，可以直接修改价格、词语和表达后再生成视频");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "AI 文案生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
   async function generatePresenterImages() {
     const api = requireDesktopRuntime("生成人物商品图");
     if (!api) {
@@ -476,6 +588,9 @@ export function App() {
         taskId: selectedTask.id,
         generationMode: "product-avatar",
         avatarMode: "image-presenter",
+        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
+        sourceScript: selectedTask.sourceScript,
+        finalScript: selectedTask.finalScript,
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets,
@@ -525,6 +640,48 @@ export function App() {
       generationMode: mode,
       avatarMode: nextAvatarMode
     });
+  }
+
+  async function refreshHeyGenAvatarLooks(showSuccessMessage = true) {
+    const api = window.digitalHumanStudio;
+    if (!api) {
+      if (showSuccessMessage) {
+        setAvatarLookMessage(
+          "数字人列表需要桌面版本机服务；当前浏览器预览可继续手动输入 Avatar ID。"
+        );
+      }
+      return;
+    }
+
+    setIsAvatarLookLoading(true);
+    setAvatarLookMessage("正在从 HeyGen 读取预设数字人...");
+
+    try {
+      const looks = await api.listHeyGenAvatarLooks();
+      setAvatarLooks(looks);
+      if (looks.length === 0) {
+        setAvatarLookMessage("HeyGen 没有返回可用数字人；可以继续手动输入 Avatar ID。");
+        return;
+      }
+
+      setAvatarLookMessage(showSuccessMessage ? `已加载 ${looks.length} 个 HeyGen 数字人。` : "");
+    } catch (error) {
+      setAvatarLookMessage(
+        error instanceof Error
+          ? error.message
+          : "HeyGen 数字人列表读取失败；可以继续手动输入 Avatar ID。"
+      );
+    } finally {
+      setIsAvatarLookLoading(false);
+    }
+  }
+
+  async function selectHeyGenAvatarLook(look: HeyGenAvatarLook) {
+    setSelectedTask((current) => ({
+      ...current,
+      presetAvatarId: look.id
+    }));
+    await updateCurrentTask({ presetAvatarId: look.id });
   }
 
   async function updateSubtitleStyle(patch: Partial<SubtitleStyle>) {
@@ -637,6 +794,9 @@ export function App() {
 
   return (
     <div className="app-shell">
+      {customFontUrl ? (
+        <style>{`@font-face { font-family: "DHS Custom Font"; src: url("${customFontUrl}"); font-display: swap; }`}</style>
+      ) : null}
       <header className="topbar">
         <div>
           <h1>数字人口播工作台</h1>
@@ -704,6 +864,7 @@ export function App() {
                 <Upload size={16} />
                 <h2>{sourceScriptLabel}</h2>
               </div>
+              <p className="field-hint">可粘贴原视频文案，后续会接入从链接一键提取和爆款分析。</p>
               <textarea
                 value={selectedTask.sourceScript}
                 aria-label={sourceScriptLabel}
@@ -720,12 +881,31 @@ export function App() {
             <section className="field-block">
               <div className="section-title">
                 <WandSparkles size={16} />
-                <h2>原创脚本</h2>
+                <h2>AI生成文案</h2>
+                <button
+                  type="button"
+                  className="small-action-button"
+                  disabled={isWorkflowRunning}
+                  onClick={() => void generateScriptOnly()}
+                >
+                  <WandSparkles size={15} />
+                  一键AI生成文案
+                </button>
               </div>
+              <p className="field-hint">
+                生成后可直接改价格、禁用词和表达，视频会按这里的最终文案生成。
+              </p>
               <textarea
-                value={selectedTask.finalScript || "一键生成视频时会自动生成原创脚本"}
-                readOnly
-                aria-label="原创脚本"
+                value={selectedTask.finalScript}
+                placeholder="点击一键AI生成文案，或直接手动输入最终口播文案"
+                aria-label="AI生成文案"
+                onBlur={() => void updateCurrentTask({ finalScript: selectedTask.finalScript })}
+                onChange={(event) =>
+                  setSelectedTask((current) => ({
+                    ...current,
+                    finalScript: event.target.value
+                  }))
+                }
               />
               <div className="risk-row">
                 <CheckCircle2 size={16} />
@@ -740,6 +920,25 @@ export function App() {
           <section className="compact-block generation-settings-block">
             <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
             <div className="control-grid">
+              <label>
+                原视频链接
+                <input
+                  type="url"
+                  value={selectedTask.originalVideoUrl ?? ""}
+                  placeholder="粘贴 TikTok / 抖音 / Reels / Shorts 链接"
+                  onBlur={() =>
+                    void updateCurrentTask({
+                      originalVideoUrl: selectedTask.originalVideoUrl ?? ""
+                    })
+                  }
+                  onChange={(event) =>
+                    setSelectedTask((current) => ({
+                      ...current,
+                      originalVideoUrl: event.target.value
+                    }))
+                  }
+                />
+              </label>
               <label>
                 生成语言 / 语音
                 <select
@@ -785,6 +984,90 @@ export function App() {
             </div>
 
             <div className="prompt-grid">
+              {selectedTask.generationMode === "preset-avatar" ? (
+                <div className="avatar-picker-block">
+                  <div className="avatar-picker-header">
+                    <span>预设数字人选择</span>
+                    <button
+                      type="button"
+                      disabled={isAvatarLookLoading}
+                      onClick={() => void refreshHeyGenAvatarLooks()}
+                    >
+                      <RefreshCw size={15} />
+                      {isAvatarLookLoading ? "读取中" : "刷新"}
+                    </button>
+                  </div>
+                  {selectedAvatarLook ? (
+                    <p className="selected-avatar-summary">
+                      当前：{selectedAvatarLook.name} · {selectedAvatarLook.id}
+                    </p>
+                  ) : null}
+                  {avatarLooks.length > 0 ? (
+                    <div className="avatar-look-grid" aria-label="HeyGen 预设数字人">
+                      {avatarLooks.map((look) => (
+                        <button
+                          className={
+                            selectedTask.presetAvatarId === look.id
+                              ? "avatar-look-card selected"
+                              : "avatar-look-card"
+                          }
+                          key={look.id}
+                          title={`${look.name} · ${look.id}`}
+                          type="button"
+                          onClick={() => void selectHeyGenAvatarLook(look)}
+                        >
+                          <span className="avatar-look-thumb">
+                            {look.previewImageUrl ? (
+                              <img
+                                alt={look.name}
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                src={look.previewImageUrl}
+                              />
+                            ) : (
+                              <UserRound size={24} />
+                            )}
+                          </span>
+                          <strong>{look.name}</strong>
+                          <small>{avatarLookMeta(look)}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="field-hint">
+                      点击刷新读取当前 HeyGen 账号可用数字人；读取失败时仍可手动输入 Avatar ID。
+                    </p>
+                  )}
+                  {avatarLookMessage ? (
+                    <p className="avatar-look-message">{avatarLookMessage}</p>
+                  ) : null}
+                  <label className="avatar-id-field">
+                    Avatar ID
+                    <input
+                      type="text"
+                      list="avatar-id-options"
+                      value={selectedTask.presetAvatarId ?? ""}
+                      placeholder="留空使用设置里的默认 Avatar ID"
+                      onBlur={() =>
+                        void updateCurrentTask({
+                          presetAvatarId: selectedTask.presetAvatarId ?? ""
+                        })
+                      }
+                      onChange={(event) =>
+                        setSelectedTask((current) => ({
+                          ...current,
+                          presetAvatarId: event.target.value
+                        }))
+                      }
+                    />
+                    <datalist id="avatar-id-options">
+                      {avatarOptions.map((avatarId) => (
+                        <option key={avatarId} value={avatarId} />
+                      ))}
+                    </datalist>
+                  </label>
+                </div>
+              ) : null}
               {selectedTask.generationMode === "product-avatar" ? (
                 <label>
                   数字人描述提示词
@@ -940,144 +1223,6 @@ export function App() {
               一键生成视频
             </button>
           </div>
-
-          <div className="style-grid">
-            <section className="compact-block">
-              <h3>字幕样式</h3>
-              <div className="control-grid tight">
-                <label>
-                  位置
-                  <select
-                    value={subtitleStyle.position}
-                    onChange={(event) =>
-                      void updateSubtitleStyle({
-                        position: event.target.value as SubtitleStyle["position"]
-                      })
-                    }
-                  >
-                    <option value="top">顶部</option>
-                    <option value="middle">中部</option>
-                    <option value="bottom">底部</option>
-                  </select>
-                </label>
-                <label>
-                  字号
-                  <input
-                    type="number"
-                    min={20}
-                    max={72}
-                    value={subtitleStyle.fontSize}
-                    onChange={(event) =>
-                      void updateSubtitleStyle({
-                        fontSize: Number(event.target.value)
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  字重
-                  <select
-                    value={subtitleStyle.fontWeight}
-                    onChange={(event) =>
-                      void updateSubtitleStyle({
-                        fontWeight: event.target.value as SubtitleStyle["fontWeight"]
-                      })
-                    }
-                  >
-                    <option value="bold">粗体</option>
-                    <option value="regular">常规</option>
-                  </select>
-                </label>
-                <ColorInput
-                  label="文字"
-                  value={subtitleStyle.textColor}
-                  onChange={(value) => void updateSubtitleStyle({ textColor: value })}
-                />
-                <ColorInput
-                  label="底色"
-                  value={subtitleStyle.backgroundColor}
-                  onChange={(value) => void updateSubtitleStyle({ backgroundColor: value })}
-                />
-              </div>
-            </section>
-
-            <section className="compact-block">
-              <h3>封面样式</h3>
-              <div className="control-grid tight">
-                <label>
-                  标题
-                  <input
-                    type="text"
-                    value={coverStyle.title}
-                    onChange={(event) => void updateCoverStyle({ title: event.target.value })}
-                  />
-                </label>
-                <label>
-                  副标题
-                  <input
-                    type="text"
-                    value={coverStyle.subtitle}
-                    onChange={(event) => void updateCoverStyle({ subtitle: event.target.value })}
-                  />
-                </label>
-                <label>
-                  字体
-                  <select
-                    value={coverStyle.fontFamily}
-                    onChange={(event) => void updateCoverStyle({ fontFamily: event.target.value })}
-                  >
-                    <option value="Microsoft YaHei">微软雅黑</option>
-                    <option value="SimHei">黑体</option>
-                    <option value="Arial">Arial</option>
-                    <option value="Georgia">Georgia</option>
-                  </select>
-                </label>
-                <label>
-                  字号
-                  <input
-                    type="number"
-                    min={32}
-                    max={96}
-                    value={coverStyle.fontSize}
-                    onChange={(event) =>
-                      void updateCoverStyle({
-                        fontSize: Number(event.target.value)
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  字重
-                  <select
-                    value={coverStyle.fontWeight}
-                    onChange={(event) =>
-                      void updateCoverStyle({
-                        fontWeight: event.target.value as CoverStyle["fontWeight"]
-                      })
-                    }
-                  >
-                    <option value="bold">粗体</option>
-                    <option value="regular">常规</option>
-                  </select>
-                </label>
-                <ColorInput
-                  label="文字"
-                  value={coverStyle.textColor}
-                  onChange={(value) => void updateCoverStyle({ textColor: value })}
-                />
-                <ColorInput
-                  label="背景"
-                  value={coverStyle.backgroundColor}
-                  onChange={(value) => void updateCoverStyle({ backgroundColor: value })}
-                />
-                <ColorInput
-                  label="强调"
-                  value={coverStyle.accentColor}
-                  onChange={(value) => void updateCoverStyle({ accentColor: value })}
-                />
-              </div>
-            </section>
-          </div>
         </section>
 
         <aside className="preview-pane">
@@ -1096,6 +1241,15 @@ export function App() {
               subtitleStyle={subtitleStyle}
               subtitleText={createSubtitleSample(selectedTask)}
               variantStatus={primaryVariant?.status}
+            />
+            <PreviewStyleControls
+              coverStyle={coverStyle}
+              customFontEnabled={Boolean(customFontUrl)}
+              disabled={isWorkflowRunning}
+              onCoverStyleChange={(patch) => void updateCoverStyle(patch)}
+              onSubtitleStyleChange={(patch) => void updateSubtitleStyle(patch)}
+              onUploadCustomFont={() => void uploadCustomFont()}
+              subtitleStyle={subtitleStyle}
             />
           </section>
 
@@ -1370,14 +1524,207 @@ function PrimaryPreview({
         </div>
       )}
       {subtitleStyle.enabled ? (
-        <div
-          className={`subtitle-preview ${subtitleStyle.position}`}
-          style={subtitlePreviewStyle(subtitleStyle)}
-        >
+        <div className="subtitle-preview" style={subtitlePreviewStyle(subtitleStyle)}>
           {subtitleText}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function PreviewStyleControls({
+  coverStyle,
+  customFontEnabled,
+  disabled,
+  onCoverStyleChange,
+  onSubtitleStyleChange,
+  onUploadCustomFont,
+  subtitleStyle
+}: {
+  coverStyle: CoverStyle;
+  customFontEnabled: boolean;
+  disabled: boolean;
+  onCoverStyleChange: (patch: Partial<CoverStyle>) => void;
+  onSubtitleStyleChange: (patch: Partial<SubtitleStyle>) => void;
+  onUploadCustomFont: () => void;
+  subtitleStyle: SubtitleStyle;
+}) {
+  return (
+    <div className="preview-style-panel">
+      <div className="preview-style-header">
+        <strong>字幕和封面样式</strong>
+        <button type="button" disabled={disabled} onClick={onUploadCustomFont}>
+          <Upload size={14} />
+          上传字体
+        </button>
+      </div>
+
+      <section className="style-control-panel">
+        <h3>字幕</h3>
+        <div className="preview-control-grid">
+          <label className="range-control">
+            位置 {subtitleStyle.verticalPercent}%
+            <span className="range-row">
+              <input
+                type="range"
+                min={5}
+                max={92}
+                value={subtitleStyle.verticalPercent}
+                onInput={(event) =>
+                  onSubtitleStyleChange({
+                    verticalPercent: Number((event.target as HTMLInputElement).value)
+                  })
+                }
+                onChange={(event) =>
+                  onSubtitleStyleChange({ verticalPercent: Number(event.target.value) })
+                }
+              />
+              <input
+                type="number"
+                min={5}
+                max={92}
+                value={subtitleStyle.verticalPercent}
+                onChange={(event) =>
+                  onSubtitleStyleChange({ verticalPercent: Number(event.target.value) })
+                }
+              />
+            </span>
+          </label>
+          <label>
+            字号
+            <input
+              type="number"
+              min={20}
+              max={72}
+              value={subtitleStyle.fontSize}
+              onChange={(event) => onSubtitleStyleChange({ fontSize: Number(event.target.value) })}
+            />
+          </label>
+          <FontSelect
+            customFontEnabled={customFontEnabled}
+            label="字体"
+            value={subtitleStyle.fontFamily}
+            onChange={(fontFamily) => onSubtitleStyleChange({ fontFamily })}
+          />
+          <label>
+            字重
+            <select
+              value={subtitleStyle.fontWeight}
+              onChange={(event) =>
+                onSubtitleStyleChange({
+                  fontWeight: event.target.value as SubtitleStyle["fontWeight"]
+                })
+              }
+            >
+              <option value="bold">粗体</option>
+              <option value="regular">常规</option>
+            </select>
+          </label>
+          <ColorInput
+            label="文字"
+            value={subtitleStyle.textColor}
+            onChange={(value) => onSubtitleStyleChange({ textColor: value })}
+          />
+          <ColorInput
+            label="底色"
+            value={subtitleStyle.backgroundColor}
+            onChange={(value) => onSubtitleStyleChange({ backgroundColor: value })}
+          />
+        </div>
+      </section>
+
+      <section className="style-control-panel">
+        <h3>封面</h3>
+        <div className="preview-control-grid">
+          <label className="wide-control">
+            标题
+            <input
+              type="text"
+              value={coverStyle.title}
+              onChange={(event) => onCoverStyleChange({ title: event.target.value })}
+            />
+          </label>
+          <label className="wide-control">
+            副标题
+            <input
+              type="text"
+              value={coverStyle.subtitle}
+              onChange={(event) => onCoverStyleChange({ subtitle: event.target.value })}
+            />
+          </label>
+          <FontSelect
+            customFontEnabled={customFontEnabled}
+            label="字体"
+            value={coverStyle.fontFamily}
+            onChange={(fontFamily) => onCoverStyleChange({ fontFamily })}
+          />
+          <label>
+            字号
+            <input
+              type="number"
+              min={32}
+              max={96}
+              value={coverStyle.fontSize}
+              onChange={(event) => onCoverStyleChange({ fontSize: Number(event.target.value) })}
+            />
+          </label>
+          <label>
+            字重
+            <select
+              value={coverStyle.fontWeight}
+              onChange={(event) =>
+                onCoverStyleChange({
+                  fontWeight: event.target.value as CoverStyle["fontWeight"]
+                })
+              }
+            >
+              <option value="bold">粗体</option>
+              <option value="regular">常规</option>
+            </select>
+          </label>
+          <ColorInput
+            label="文字"
+            value={coverStyle.textColor}
+            onChange={(value) => onCoverStyleChange({ textColor: value })}
+          />
+          <ColorInput
+            label="背景"
+            value={coverStyle.backgroundColor}
+            onChange={(value) => onCoverStyleChange({ backgroundColor: value })}
+          />
+          <ColorInput
+            label="强调"
+            value={coverStyle.accentColor}
+            onChange={(value) => onCoverStyleChange({ accentColor: value })}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FontSelect({
+  customFontEnabled,
+  label,
+  onChange,
+  value
+}: {
+  customFontEnabled: boolean;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <label>
+      {label}
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="Microsoft YaHei">微软雅黑</option>
+        <option value="SimHei">黑体</option>
+        <option value="Arial">Arial</option>
+        <option value="Georgia">Georgia</option>
+        {customFontEnabled ? <option value="DHS Custom Font">自定义字体</option> : null}
+      </select>
+    </label>
   );
 }
 
@@ -1391,7 +1738,10 @@ function CoverPreview({
   presetId: OutputPresetId | undefined;
 }) {
   const isLandscape = presetId === "landscape-16-9";
-  const titleFontSize = Math.round(style.fontSize * (isLandscape ? 0.34 : 0.28));
+  const titleFontSize = Math.min(
+    32,
+    Math.max(15, Math.round(style.fontSize * (isLandscape ? 0.3 : 0.24)))
+  );
   const previewStyle: CSSProperties = {
     backgroundColor: style.backgroundColor,
     color: style.textColor,
@@ -1436,8 +1786,10 @@ function subtitlePreviewStyle(style: SubtitleStyle): CSSProperties {
   return {
     color: style.textColor,
     backgroundColor: style.backgroundColor,
+    fontFamily: style.fontFamily,
     fontSize: `${Math.max(12, Math.round(style.fontSize * 0.42))}px`,
-    fontWeight: style.fontWeight === "bold" ? 700 : 400
+    fontWeight: style.fontWeight === "bold" ? 700 : 400,
+    top: `${style.verticalPercent}%`
   };
 }
 
@@ -1489,6 +1841,26 @@ function generationModeLabel(mode: VideoGenerationMode): string {
   };
 
   return labels[mode];
+}
+
+function parseAvatarOptions(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .split(/[\s,，;；]+/)
+        .map((avatarId) => avatarId.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function avatarLookMeta(look: HeyGenAvatarLook): string {
+  const parts = [look.gender, look.status].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : look.id;
 }
 
 function variantStatusLabel(status: VideoTask["outputVariants"][number]["status"]): string {

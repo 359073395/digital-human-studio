@@ -11,6 +11,8 @@ import { TaskRepository } from "../storage/taskRepository";
 import type { ImageProvider } from "./imageProvider";
 
 const SUPPORTED_PRODUCT_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const SUPPORTED_FONT_EXTENSIONS = new Set([".ttf", ".otf", ".woff", ".woff2"]);
+const CUSTOM_FONT_FAMILY = "DHS Custom Font";
 
 export class PresenterImageWorkflowService {
   constructor(
@@ -60,6 +62,32 @@ export class PresenterImageWorkflowService {
       avatarMode: "image-presenter",
       referenceImageAssetId: asset.id,
       generatedPresenterImageAssetId: null
+    });
+  }
+
+  importCustomFont(taskId: string, sourcePath: string): VideoTask {
+    const extension = normalizeFontExtension(path.extname(sourcePath));
+    const relativePath = `source/custom-font${extension}`;
+    const absolutePath = absoluteTaskPath(this.paths, taskId, relativePath);
+
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.copyFileSync(sourcePath, absolutePath);
+
+    const taskWithAsset = this.taskRepository.addMediaAsset(taskId, "custom-font", relativePath);
+    const asset = requireAsset(taskWithAsset, "custom-font", relativePath);
+
+    return this.taskRepository.updateTask({
+      taskId,
+      customFontAssetId: asset.id,
+      customFontFamily: CUSTOM_FONT_FAMILY,
+      subtitleStyle: {
+        ...taskWithAsset.subtitleStyle,
+        fontFamily: CUSTOM_FONT_FAMILY
+      },
+      coverStyle: {
+        ...taskWithAsset.coverStyle,
+        fontFamily: CUSTOM_FONT_FAMILY
+      }
     });
   }
 
@@ -146,6 +174,15 @@ function normalizeImageExtension(extension: string): ".png" | ".jpg" | ".jpeg" |
   }
 
   return normalized as ".png" | ".jpg" | ".jpeg" | ".webp";
+}
+
+function normalizeFontExtension(extension: string): ".ttf" | ".otf" | ".woff" | ".woff2" {
+  const normalized = extension.toLowerCase();
+  if (!SUPPORTED_FONT_EXTENSIONS.has(normalized)) {
+    throw new Error("字体文件仅支持 TTF、OTF、WOFF 或 WOFF2。");
+  }
+
+  return normalized as ".ttf" | ".otf" | ".woff" | ".woff2";
 }
 
 function findAssetById(task: VideoTask, assetId: string | undefined): MediaAsset | undefined {

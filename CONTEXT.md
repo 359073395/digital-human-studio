@@ -20,9 +20,17 @@ _Avoid_: Avatar slideshow, image narration, static talking image
 A ready-to-use digital human provided by a third-party avatar API. Custom avatar creation from uploaded human footage is outside the MVP.
 _Avoid_: Digital twin, custom avatar, trained avatar
 
+**Preset Avatar Look**:
+A selectable visual preset returned by the avatar provider, including the provider avatar ID, display name, and preview media. In HeyGen, the look ID is the `avatar_id` used for video generation.
+_Avoid_: Hidden ID, text-only avatar setting, trained avatar
+
 **Source Script**:
 Text supplied directly by the user or transcribed from an uploaded local audio or video file. Platform-link scraping is outside the MVP.
 _Avoid_: Scraped script, platform extraction, competitor download
+
+**Original Video Link**:
+A task-level URL field for the source or reference video. The MVP stores the link for later extraction and analysis features, but it does not yet scrape platform content from the link.
+_Avoid_: Downloaded video, scraped transcript, platform import
 
 **Mixed-Cut Video**:
 A future enhancement that combines talking-head footage with additional clips, B-roll, or montage editing. It is not part of the MVP core workflow.
@@ -72,6 +80,10 @@ _Avoid_: Detection bypass, duplicate-check score, anti-plagiarism score
 A main-process adapter that turns a video task's source script and content language into an original final script. The renderer triggers script generation through IPC and never calls language model APIs directly.
 _Avoid_: Renderer LLM client, prompt-only utility, direct API button
 
+**AI Generated Copy**:
+The editable final script produced by the language model. It is the script used for video generation, and users can manually correct price, claims, phrasing, or restricted words before rendering.
+_Avoid_: Read-only result, hidden prompt output, automatic final copy
+
 **Mock Script Fallback**:
 The local runnable script generator used when the language model provider is disabled or missing credentials. Once a real provider is configured, provider failures should surface as retry-ready errors instead of silently falling back to mock output.
 _Avoid_: Hidden fallback, production generator, fake success
@@ -85,12 +97,16 @@ The subtitles, background music, title treatment, and cover image added after th
 _Avoid_: Effects, decorations, optional extras
 
 **Subtitle Style**:
-The task-level visual settings for subtitles, including position, font size, text color, background color, and weight. These settings are user-editable and previewed before export.
+The task-level visual settings for subtitles, including percentage-based vertical position, font, font size, text color, background color, and weight. These settings are user-editable inside the finished-video preview area.
 _Avoid_: Subtitle timing, caption file, hard-coded style
 
 **Cover Style**:
-The task-level visual settings used to generate and preview a cover image, including title, subtitle, font, font size, text color, background color, accent color, and weight.
+The task-level visual settings used to generate and preview a cover image, including title, subtitle, font, font size, text color, background color, accent color, and weight. Cover style controls live next to the preview because users tune them visually.
 _Avoid_: Publishing copy, video thumbnail URL, platform cover
+
+**Custom Font**:
+A local font file uploaded by the user for creator-specific subtitle and cover styling. It is stored as task media and previewed through the renderer's safe task-asset URL path.
+_Avoid_: System-wide font install, bundled font library, remote font dependency
 
 **Publishing Package**:
 A local export bundle containing the finished video, cover image, title, description copy, tag suggestions, and publishing notes. The MVP produces one generic publishing package instead of platform-specific copy variants or social platform uploads.
@@ -127,6 +143,10 @@ _Avoid_: Restart task, regenerate everything
 **Layered Preview**:
 A preview model where scripts, subtitle style, cover image, avatar output, and finished video are previewed at the stage where each artifact exists. The MVP does not promise real-time preview of the final video while it is still being generated.
 _Avoid_: Live final preview, real-time render preview
+
+**Preview-Attached Controls**:
+Style controls that belong inside or directly next to the preview they affect. Subtitle and cover controls use this pattern so users can adjust them while watching the visual result.
+_Avoid_: Detached style form, hidden design settings
 
 **Previewable Media Asset**:
 A local task media file that the desktop app can safely display in the renderer, such as a product image, generated presenter image, cover image, or finished video.

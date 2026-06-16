@@ -33,6 +33,7 @@ import { runInTransaction, type TaskDatabase } from "./database";
 interface TaskRow {
   id: string;
   title: string;
+  original_video_url: string;
   source_script: string;
   final_script: string;
   similarity_risk: SimilarityRisk;
@@ -40,11 +41,14 @@ interface TaskRow {
   content_language: ContentLanguage;
   generation_mode: VideoGenerationMode;
   avatar_mode: AvatarMode;
+  preset_avatar_id: string;
   avatar_description_prompt: string;
   motion_prompt: string;
   product_image_asset_id: string | null;
   reference_image_asset_id: string | null;
   generated_presenter_image_asset_id: string | null;
+  custom_font_asset_id: string | null;
+  custom_font_family: string;
   selected_output_presets: string;
   subtitle_style: string;
   cover_style: string;
@@ -128,6 +132,7 @@ export class TaskRepository {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const title = input.title?.trim() || "未命名视频任务";
+    const originalVideoUrl = "";
     const sourceScript = input.sourceScript?.trim() || "";
     const finalScript = "";
     const similarityRisk: SimilarityRisk = "unknown";
@@ -135,8 +140,11 @@ export class TaskRepository {
     const contentLanguage: ContentLanguage = "zh-CN";
     const generationMode: VideoGenerationMode = "preset-avatar";
     const avatarMode: AvatarMode = "preset-avatar";
+    const presetAvatarId = "";
     const avatarDescriptionPrompt = "";
     const motionPrompt = "";
+    const customFontAssetId = null;
+    const customFontFamily = "";
     const selectedOutputPresets = defaultOutputPresetIds();
     const subtitleStyle = DEFAULT_SUBTITLE_STYLE;
     const coverStyle = DEFAULT_COVER_STYLE;
@@ -149,6 +157,7 @@ export class TaskRepository {
           `INSERT INTO video_tasks (
             id,
             title,
+            original_video_url,
             source_script,
             final_script,
             similarity_risk,
@@ -156,11 +165,14 @@ export class TaskRepository {
             content_language,
             generation_mode,
             avatar_mode,
+            preset_avatar_id,
             avatar_description_prompt,
             motion_prompt,
             product_image_asset_id,
             reference_image_asset_id,
             generated_presenter_image_asset_id,
+            custom_font_asset_id,
+            custom_font_family,
             selected_output_presets,
             subtitle_style,
             cover_style,
@@ -168,11 +180,12 @@ export class TaskRepository {
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
           title,
+          originalVideoUrl,
           sourceScript,
           finalScript,
           similarityRisk,
@@ -180,11 +193,14 @@ export class TaskRepository {
           contentLanguage,
           generationMode,
           avatarMode,
+          presetAvatarId,
           avatarDescriptionPrompt,
           motionPrompt,
           null,
           null,
           null,
+          customFontAssetId,
+          customFontFamily,
           JSON.stringify(selectedOutputPresets),
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
@@ -243,8 +259,14 @@ export class TaskRepository {
 
     const now = new Date().toISOString();
     const title = input.title?.trim() || existing.title;
+    const originalVideoUrl =
+      input.originalVideoUrl === undefined
+        ? (existing.originalVideoUrl ?? "")
+        : input.originalVideoUrl.trim();
     const sourceScript =
       input.sourceScript === undefined ? existing.sourceScript : input.sourceScript.trim();
+    const finalScript =
+      input.finalScript === undefined ? existing.finalScript : input.finalScript.trim();
     const contentLanguage = normalizeContentLanguage(
       input.contentLanguage ?? existing.contentLanguage
     );
@@ -253,6 +275,10 @@ export class TaskRepository {
       generationMode,
       input.avatarMode ?? existing.avatarMode
     );
+    const presetAvatarId =
+      input.presetAvatarId === undefined
+        ? (existing.presetAvatarId ?? "")
+        : input.presetAvatarId.trim();
     const avatarDescriptionPrompt =
       input.avatarDescriptionPrompt === undefined
         ? existing.avatarDescriptionPrompt
@@ -271,6 +297,12 @@ export class TaskRepository {
       input.generatedPresenterImageAssetId === undefined
         ? existing.generatedPresenterImageAssetId
         : input.generatedPresenterImageAssetId;
+    const customFontAssetId =
+      input.customFontAssetId === undefined ? existing.customFontAssetId : input.customFontAssetId;
+    const customFontFamily =
+      input.customFontFamily === undefined
+        ? (existing.customFontFamily ?? "")
+        : input.customFontFamily.trim().slice(0, 80);
     const selectedOutputPresets = normalizeOutputPresetIds(
       input.selectedOutputPresets ?? existing.selectedOutputPresets
     );
@@ -285,15 +317,20 @@ export class TaskRepository {
         .prepare(
           `UPDATE video_tasks
            SET title = ?,
+               original_video_url = ?,
                source_script = ?,
+               final_script = ?,
                content_language = ?,
                generation_mode = ?,
                avatar_mode = ?,
+               preset_avatar_id = ?,
                avatar_description_prompt = ?,
                motion_prompt = ?,
                product_image_asset_id = ?,
                reference_image_asset_id = ?,
                generated_presenter_image_asset_id = ?,
+               custom_font_asset_id = ?,
+               custom_font_family = ?,
                selected_output_presets = ?,
                subtitle_style = ?,
                cover_style = ?,
@@ -303,15 +340,20 @@ export class TaskRepository {
         )
         .run(
           title,
+          originalVideoUrl,
           sourceScript,
+          finalScript,
           contentLanguage,
           generationMode,
           avatarMode,
+          presetAvatarId,
           avatarDescriptionPrompt,
           motionPrompt,
           productImageAssetId ?? null,
           referenceImageAssetId ?? null,
           generatedPresenterImageAssetId ?? null,
+          customFontAssetId ?? null,
+          customFontFamily,
           JSON.stringify(selectedOutputPresets),
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
@@ -577,6 +619,7 @@ export class TaskRepository {
     return {
       id: row.id,
       title: row.title,
+      originalVideoUrl: row.original_video_url ?? "",
       sourceScript: row.source_script,
       finalScript: row.final_script,
       similarityRisk: row.similarity_risk,
@@ -584,11 +627,14 @@ export class TaskRepository {
       contentLanguage: normalizeContentLanguage(row.content_language),
       generationMode: normalizeGenerationMode(row.generation_mode),
       avatarMode: normalizeAvatarMode(row.avatar_mode),
+      presetAvatarId: row.preset_avatar_id ?? "",
       avatarDescriptionPrompt: row.avatar_description_prompt,
       motionPrompt: row.motion_prompt,
       productImageAssetId: row.product_image_asset_id ?? undefined,
       referenceImageAssetId: row.reference_image_asset_id ?? undefined,
       generatedPresenterImageAssetId: row.generated_presenter_image_asset_id ?? undefined,
+      customFontAssetId: row.custom_font_asset_id ?? undefined,
+      customFontFamily: row.custom_font_family ?? "",
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
       subtitleStyle: parseSubtitleStyle(row.subtitle_style),
       coverStyle: parseCoverStyle(row.cover_style),
@@ -757,6 +803,16 @@ function normalizeSubtitleStyle(value: Partial<SubtitleStyle>): SubtitleStyle {
     ...value,
     enabled: value.enabled ?? DEFAULT_SUBTITLE_STYLE.enabled,
     position: isSubtitlePosition(value.position) ? value.position : DEFAULT_SUBTITLE_STYLE.position,
+    verticalPercent: clampNumber(
+      value.verticalPercent,
+      5,
+      92,
+      DEFAULT_SUBTITLE_STYLE.verticalPercent
+    ),
+    fontFamily:
+      typeof value.fontFamily === "string" && value.fontFamily.trim()
+        ? value.fontFamily.trim().slice(0, 80)
+        : DEFAULT_SUBTITLE_STYLE.fontFamily,
     fontSize: clampNumber(value.fontSize, 20, 72, DEFAULT_SUBTITLE_STYLE.fontSize),
     textColor: normalizeColor(value.textColor, DEFAULT_SUBTITLE_STYLE.textColor),
     backgroundColor: normalizeColor(value.backgroundColor, DEFAULT_SUBTITLE_STYLE.backgroundColor),

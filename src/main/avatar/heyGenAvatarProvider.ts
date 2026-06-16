@@ -86,7 +86,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       throw new AvatarProviderUnavailableError("HeyGen API Key 尚未配置。");
     }
 
-    const avatarId = configuration.settings.avatarId?.trim();
+    const avatarId = input.task.presetAvatarId?.trim() || configuration.settings.avatarId?.trim();
     if (input.task.avatarMode === "preset-avatar" && !avatarId) {
       throw new AvatarProviderUnavailableError("HeyGen Avatar ID 尚未配置。");
     }

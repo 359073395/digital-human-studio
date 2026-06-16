@@ -112,6 +112,35 @@ describe("TaskRepository", () => {
     ]);
   });
 
+  it("persists editable copy, avatar selection, source link, and preview style settings", () => {
+    const task = repository.createTask({ title: "Editable settings test" });
+
+    const updated = repository.updateTask({
+      taskId: task.id,
+      originalVideoUrl: "https://example.com/video/123",
+      finalScript: "Final edited copy with corrected price.",
+      presetAvatarId: "avatar-custom-123",
+      customFontFamily: "DHS Custom Font",
+      subtitleStyle: {
+        ...task.subtitleStyle,
+        fontFamily: "DHS Custom Font",
+        verticalPercent: 64
+      },
+      coverStyle: {
+        ...task.coverStyle,
+        fontFamily: "DHS Custom Font"
+      }
+    });
+
+    expect(updated.originalVideoUrl).toBe("https://example.com/video/123");
+    expect(updated.finalScript).toBe("Final edited copy with corrected price.");
+    expect(updated.presetAvatarId).toBe("avatar-custom-123");
+    expect(updated.customFontFamily).toBe("DHS Custom Font");
+    expect(updated.subtitleStyle.verticalPercent).toBe(64);
+    expect(updated.subtitleStyle.fontFamily).toBe("DHS Custom Font");
+    expect(updated.coverStyle.fontFamily).toBe("DHS Custom Font");
+  });
+
   it("persists media assets, output metadata, and publishing package", () => {
     const task = repository.createTask({ title: "Artifact test" });
 

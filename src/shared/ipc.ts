@@ -39,8 +39,10 @@ export interface DigitalHumanStudioAPI {
   transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
   uploadProductImage: (taskId: string) => Promise<VideoTask>;
   uploadReferenceImage: (taskId: string) => Promise<VideoTask>;
+  uploadCustomFont: (taskId: string) => Promise<VideoTask>;
   generatePresenterImages: (taskId: string) => Promise<VideoTask>;
   renderHeyGenAvatar: (taskId: string) => Promise<VideoTask>;
+  listHeyGenAvatarLooks: () => Promise<HeyGenAvatarLook[]>;
   runRealWorkflow: (taskId: string) => Promise<VideoTask>;
   runMockWorkflow: (taskId: string) => Promise<VideoTask>;
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
@@ -63,8 +65,10 @@ export const IPC_CHANNELS = {
   transcribeSource: "source:transcribe",
   uploadProductImage: "source:upload-product-image",
   uploadReferenceImage: "source:upload-reference-image",
+  uploadCustomFont: "source:upload-custom-font",
   generatePresenterImages: "image:generate-presenter-images",
   renderHeyGenAvatar: "avatar:render-heygen",
+  listHeyGenAvatarLooks: "avatar:list-heygen-looks",
   runRealWorkflow: "workflow:real-run",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
@@ -84,19 +88,34 @@ export interface CreateTaskInput {
 export interface UpdateTaskInput {
   taskId: string;
   title?: string;
+  originalVideoUrl?: string;
   sourceScript?: string;
+  finalScript?: string;
   contentLanguage?: ContentLanguage;
   generationMode?: VideoGenerationMode;
   avatarMode?: AvatarMode;
+  presetAvatarId?: string;
   avatarDescriptionPrompt?: string;
   motionPrompt?: string;
   productImageAssetId?: MediaAsset["id"] | null;
   referenceImageAssetId?: MediaAsset["id"] | null;
   generatedPresenterImageAssetId?: MediaAsset["id"] | null;
+  customFontAssetId?: MediaAsset["id"] | null;
+  customFontFamily?: string;
   selectedOutputPresets?: OutputPresetId[];
   subtitleStyle?: SubtitleStyle;
   coverStyle?: CoverStyle;
   personalIpProfile?: PersonalIpProfile;
+}
+
+export interface HeyGenAvatarLook {
+  id: string;
+  name: string;
+  previewImageUrl?: string;
+  previewVideoUrl?: string;
+  gender?: string;
+  defaultVoiceId?: string;
+  status?: string;
 }
 
 export interface RetryWorkflowStepInput {

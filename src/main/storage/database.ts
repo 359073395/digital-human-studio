@@ -110,6 +110,16 @@ const MIGRATIONS = [
       ALTER TABLE video_tasks ADD COLUMN reference_image_asset_id TEXT;
       ALTER TABLE video_tasks ADD COLUMN personal_ip_profile TEXT NOT NULL DEFAULT '${DEFAULT_PERSONAL_IP_PROFILE_JSON}';
     `
+  },
+  {
+    id: 7,
+    name: "add-reference-url-avatar-and-font-fields",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN original_video_url TEXT NOT NULL DEFAULT '';
+      ALTER TABLE video_tasks ADD COLUMN preset_avatar_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE video_tasks ADD COLUMN custom_font_asset_id TEXT;
+      ALTER TABLE video_tasks ADD COLUMN custom_font_family TEXT NOT NULL DEFAULT '';
+    `
   }
 ] as const;
 

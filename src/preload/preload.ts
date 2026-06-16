@@ -10,6 +10,7 @@ import type {
   AppInfo,
   CreateTaskInput,
   DigitalHumanStudioAPI,
+  HeyGenAvatarLook,
   ResolveTaskAssetUrlInput,
   RetryWorkflowStepInput,
   UpdateTaskInput
@@ -27,8 +28,10 @@ const IPC_CHANNELS = {
   transcribeSource: "source:transcribe",
   uploadProductImage: "source:upload-product-image",
   uploadReferenceImage: "source:upload-reference-image",
+  uploadCustomFont: "source:upload-custom-font",
   generatePresenterImages: "image:generate-presenter-images",
   renderHeyGenAvatar: "avatar:render-heygen",
+  listHeyGenAvatarLooks: "avatar:list-heygen-looks",
   runRealWorkflow: "workflow:real-run",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
@@ -58,10 +61,14 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.uploadProductImage, taskId) as Promise<VideoTask>,
   uploadReferenceImage: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadReferenceImage, taskId) as Promise<VideoTask>,
+  uploadCustomFont: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadCustomFont, taskId) as Promise<VideoTask>,
   generatePresenterImages: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.generatePresenterImages, taskId) as Promise<VideoTask>,
   renderHeyGenAvatar: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.renderHeyGenAvatar, taskId) as Promise<VideoTask>,
+  listHeyGenAvatarLooks: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.listHeyGenAvatarLooks) as Promise<HeyGenAvatarLook[]>,
   runRealWorkflow: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.runRealWorkflow, taskId) as Promise<VideoTask>,
   runMockWorkflow: (taskId: string) =>

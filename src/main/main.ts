@@ -13,6 +13,7 @@ import {
   type UpdateTaskInput
 } from "../shared/ipc";
 import { AvatarWorkflowService } from "./avatar/avatarWorkflowService";
+import { HeyGenAvatarCatalog } from "./avatar/heyGenAvatarCatalog";
 import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
 import { OpenAiImageProvider } from "./image/openAiImageProvider";
 import { PresenterImageWorkflowService } from "./image/presenterImageWorkflowService";
@@ -95,6 +96,7 @@ interface MainRepositories {
   serviceConfigurationRepository: ServiceConfigurationRepository;
   mockWorkflowRunner: MockWorkflowRunner;
   scriptWorkflowService: ScriptWorkflowService;
+  heyGenAvatarCatalog: HeyGenAvatarCatalog;
   avatarWorkflowService: AvatarWorkflowService;
   presenterImageWorkflowService: PresenterImageWorkflowService;
   realWorkflowRunner: RealWorkflowRunner;
@@ -123,6 +125,10 @@ function createRepositories(): MainRepositories {
     appPaths,
     new OpenAiCompatibleScriptProvider(serviceConfigurationRepository, credentialStore)
   );
+  const heyGenAvatarCatalog = new HeyGenAvatarCatalog(
+    serviceConfigurationRepository,
+    credentialStore
+  );
   const avatarWorkflowService = new AvatarWorkflowService(
     taskRepository,
     appPaths,
@@ -149,6 +155,7 @@ function createRepositories(): MainRepositories {
     serviceConfigurationRepository,
     mockWorkflowRunner,
     scriptWorkflowService,
+    heyGenAvatarCatalog,
     avatarWorkflowService,
     presenterImageWorkflowService,
     realWorkflowRunner,
@@ -160,6 +167,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   const {
     appPaths,
     avatarWorkflowService,
+    heyGenAvatarCatalog,
     mockWorkflowRunner,
     presenterImageWorkflowService,
     realWorkflowRunner,
@@ -253,6 +261,32 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return presenterImageWorkflowService.importReferenceImage(taskId, result.filePaths[0]);
   });
 
+  ipcMain.handle(IPC_CHANNELS.uploadCustomFont, async (_event, taskId: string) => {
+    const fontDialogOptions: OpenDialogOptions = {
+      title: "选择字体文件",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "字体",
+          extensions: ["ttf", "otf", "woff", "woff2"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, fontDialogOptions)
+      : await dialog.showOpenDialog(fontDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return presenterImageWorkflowService.importCustomFont(taskId, result.filePaths[0]);
+  });
+
   ipcMain.handle(IPC_CHANNELS.generatePresenterImages, (_event, taskId: string) =>
     presenterImageWorkflowService.generatePresenterImages(taskId)
   );
@@ -260,6 +294,8 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   ipcMain.handle(IPC_CHANNELS.renderHeyGenAvatar, (_event, taskId: string) =>
     avatarWorkflowService.renderHeyGenAvatar(taskId)
   );
+
+  ipcMain.handle(IPC_CHANNELS.listHeyGenAvatarLooks, () => heyGenAvatarCatalog.listAvatarLooks());
 
   ipcMain.handle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>
     mockWorkflowRunner.runTask(taskId)

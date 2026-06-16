@@ -36,6 +36,7 @@ export type MediaAssetKind =
   | "source-transcript"
   | "product-image"
   | "reference-image"
+  | "custom-font"
   | "generated-presenter-image"
   | "avatar-video"
   | "subtitle-file"
@@ -70,6 +71,8 @@ export interface ContentLanguageOption {
 export interface SubtitleStyle {
   enabled: boolean;
   position: SubtitlePosition;
+  verticalPercent: number;
+  fontFamily: string;
   fontSize: number;
   textColor: string;
   backgroundColor: string;
@@ -125,6 +128,7 @@ export interface PublishingPackage {
 export interface VideoTask {
   id: string;
   title: string;
+  originalVideoUrl?: string;
   sourceScript: string;
   finalScript: string;
   similarityRisk: SimilarityRisk;
@@ -132,11 +136,14 @@ export interface VideoTask {
   contentLanguage: ContentLanguage;
   generationMode: VideoGenerationMode;
   avatarMode: AvatarMode;
+  presetAvatarId?: string;
   avatarDescriptionPrompt: string;
   motionPrompt: string;
   productImageAssetId?: string;
   referenceImageAssetId?: string;
   generatedPresenterImageAssetId?: string;
+  customFontAssetId?: string;
+  customFontFamily?: string;
   selectedOutputPresets: OutputPresetId[];
   subtitleStyle: SubtitleStyle;
   coverStyle: CoverStyle;
@@ -216,6 +223,8 @@ export const DEFAULT_PUBLISHING_PACKAGE: PublishingPackage = {
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   enabled: true,
   position: "bottom",
+  verticalPercent: 82,
+  fontFamily: "Microsoft YaHei",
   fontSize: 34,
   textColor: "#ffffff",
   backgroundColor: "#111827",
