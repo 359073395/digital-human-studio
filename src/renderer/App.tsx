@@ -98,6 +98,18 @@ export function App() {
     (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
   );
 
+  function requireDesktopRuntime(
+    actionLabel: string
+  ): NonNullable<typeof window.digitalHumanStudio> | null {
+    const api = window.digitalHumanStudio;
+    if (api) {
+      return api;
+    }
+
+    setActionMessage(`${actionLabel}需要桌面版本机服务；当前窗口没有连接到 Electron 后端。`);
+    return null;
+  }
+
   useEffect(() => {
     if (!window.digitalHumanStudio) {
       return;
@@ -204,21 +216,23 @@ export function App() {
   }
 
   async function createTask() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("新建任务");
+    if (!api) {
       return;
     }
 
-    const task = await window.digitalHumanStudio.createTask({
+    const task = await api.createTask({
       title: "新建视频任务"
     });
-    const summaries = await window.digitalHumanStudio.listTasks();
+    const summaries = await api.listTasks();
     setTaskSummaries(summaries);
     setSelectedTaskId(task.id);
     setSelectedTask(task);
   }
 
   async function generateMockScript() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("生成脚本");
+    if (!api) {
       return;
     }
 
@@ -226,7 +240,7 @@ export function App() {
     setActionMessage("正在生成脚本...");
 
     try {
-      await window.digitalHumanStudio.updateTask({
+      await api.updateTask({
         taskId: selectedTask.id,
         sourceScript: selectedTask.sourceScript,
         contentLanguage: selectedTask.contentLanguage,
@@ -235,7 +249,7 @@ export function App() {
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
-      const task = await window.digitalHumanStudio.generateScript(selectedTask.id);
+      const task = await api.generateScript(selectedTask.id);
       setActionMessage("脚本已生成");
       await refreshTaskState(task.id, task);
     } catch (error) {
@@ -246,7 +260,8 @@ export function App() {
   }
 
   async function transcribeSource() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("源素材转写");
+    if (!api) {
       return;
     }
 
@@ -254,8 +269,8 @@ export function App() {
     setActionMessage("正在 mock 转写源素材...");
 
     try {
-      const result = await window.digitalHumanStudio.transcribeSource(selectedTask.id);
-      const task = await window.digitalHumanStudio.getTask(selectedTask.id);
+      const result = await api.transcribeSource(selectedTask.id);
+      const task = await api.getTask(selectedTask.id);
       setActionMessage(result.notes);
       if (task) {
         await refreshTaskState(task.id, task);
@@ -268,7 +283,8 @@ export function App() {
   }
 
   async function runMockWorkflow() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("运行 Mock 全流程");
+    if (!api) {
       return;
     }
 
@@ -276,7 +292,7 @@ export function App() {
     setActionMessage("正在运行 mock 全流程...");
 
     try {
-      await window.digitalHumanStudio.updateTask({
+      await api.updateTask({
         taskId: selectedTask.id,
         sourceScript: selectedTask.sourceScript,
         contentLanguage: selectedTask.contentLanguage,
@@ -285,7 +301,7 @@ export function App() {
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
-      const task = await window.digitalHumanStudio.runMockWorkflow(selectedTask.id);
+      const task = await api.runMockWorkflow(selectedTask.id);
       setActionMessage("mock 全流程已完成，发布资料包已生成");
       await refreshTaskState(task.id, task);
     } catch (error) {
@@ -296,7 +312,8 @@ export function App() {
   }
 
   async function renderHeyGenAvatar() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("生成 HeyGen 数字人");
+    if (!api) {
       return;
     }
 
@@ -304,7 +321,7 @@ export function App() {
     setActionMessage("正在生成 HeyGen 数字人视频...");
 
     try {
-      await window.digitalHumanStudio.updateTask({
+      await api.updateTask({
         taskId: selectedTask.id,
         sourceScript: selectedTask.sourceScript,
         contentLanguage: selectedTask.contentLanguage,
@@ -313,7 +330,7 @@ export function App() {
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
-      const task = await window.digitalHumanStudio.renderHeyGenAvatar(selectedTask.id);
+      const task = await api.renderHeyGenAvatar(selectedTask.id);
       const avatarStep = task.steps.find((step) => step.id === "avatar");
       setActionMessage(
         avatarStep?.status === "complete"
@@ -329,7 +346,8 @@ export function App() {
   }
 
   async function uploadProductImage() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("上传商品图");
+    if (!api) {
       return;
     }
 
@@ -337,7 +355,7 @@ export function App() {
     setActionMessage("正在选择商品图片...");
 
     try {
-      const task = await window.digitalHumanStudio.uploadProductImage(selectedTask.id);
+      const task = await api.uploadProductImage(selectedTask.id);
       setActionMessage(
         task.productImageAssetId ? "商品图片已导入" : "未选择商品图片，任务保持不变"
       );
@@ -350,7 +368,8 @@ export function App() {
   }
 
   async function generatePresenterImages() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("生成人物商品图");
+    if (!api) {
       return;
     }
 
@@ -358,14 +377,14 @@ export function App() {
     setActionMessage("正在生成人物商品图...");
 
     try {
-      await window.digitalHumanStudio.updateTask({
+      await api.updateTask({
         taskId: selectedTask.id,
         avatarMode: "image-presenter",
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets
       });
-      const task = await window.digitalHumanStudio.generatePresenterImages(selectedTask.id);
+      const task = await api.generatePresenterImages(selectedTask.id);
       const avatarStep = task.steps.find((step) => step.id === "avatar");
       setActionMessage(
         avatarStep?.status === "retry-ready"
@@ -381,7 +400,8 @@ export function App() {
   }
 
   async function retryWorkflowStep(stepId: GenerationStepId) {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime(`重试${stepLabel(stepId)}`);
+    if (!api) {
       return;
     }
 
@@ -389,7 +409,7 @@ export function App() {
     setActionMessage(`正在重试：${stepLabel(stepId)}...`);
 
     try {
-      const task = await window.digitalHumanStudio.retryMockWorkflowStep({
+      const task = await api.retryMockWorkflowStep({
         taskId: selectedTask.id,
         stepId
       });
@@ -413,11 +433,12 @@ export function App() {
   }
 
   async function openTaskExports() {
-    if (!window.digitalHumanStudio) {
+    const api = requireDesktopRuntime("打开导出目录");
+    if (!api) {
       return;
     }
 
-    await window.digitalHumanStudio.openTaskExports(selectedTask.id);
+    await api.openTaskExports(selectedTask.id);
   }
 
   async function openSettingsModal() {
@@ -427,6 +448,8 @@ export function App() {
 
   async function loadServiceConfigurations() {
     if (!window.digitalHumanStudio) {
+      setServiceConfigurations([]);
+      setSettingsMessage("当前窗口没有连接到桌面本机服务，服务配置请在桌面版窗口中操作。");
       return;
     }
 
@@ -559,7 +582,7 @@ export function App() {
                   <Upload size={16} />
                   Mock 转写
                 </button>
-                <button type="button">
+                <button type="button" disabled>
                   <WandSparkles size={16} />
                   分析结构
                 </button>
