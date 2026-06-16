@@ -1,11 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import type { ProviderId, SaveServiceConfigurationInput } from "../shared/serviceConfig";
 import {
   IPC_CHANNELS,
   type AppInfo,
   type CreateTaskInput,
+  type ResolveTaskAssetUrlInput,
   type RetryWorkflowStepInput,
   type UpdateTaskInput
 } from "../shared/ipc";
@@ -27,9 +30,23 @@ import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 import { RealWorkflowRunner } from "./workflow/realWorkflowRunner";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+const ASSET_PROTOCOL = "dhs-asset";
 
 let mainWindow: BrowserWindow | null = null;
 let taskDatabase: TaskDatabase | null = null;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: ASSET_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true
+    }
+  }
+]);
 
 function getPreloadPath(): string {
   return path.join(__dirname, "../preload/preload.js");
@@ -230,6 +247,15 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     mockWorkflowRunner.retryStep(input.taskId, input.stepId)
   );
 
+  ipcMain.handle(IPC_CHANNELS.resolveTaskAssetUrl, (_event, input: ResolveTaskAssetUrlInput) => {
+    const absolutePath = resolveTaskAssetPath(appPaths, input.taskId, input.relativePath);
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(`素材文件不存在：${input.relativePath}`);
+    }
+
+    return createTaskAssetUrl(input.taskId, input.relativePath);
+  });
+
   ipcMain.handle(IPC_CHANNELS.openTaskExports, async (_event, taskId: string) => {
     const exportsDirectory = getTaskMediaDirectory(appPaths, taskId, "exports");
     await shell.openPath(exportsDirectory);
@@ -252,6 +278,70 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   ipcMain.handle(IPC_CHANNELS.testServiceConfiguration, (_event, providerId: ProviderId) =>
     serviceConfigurationRepository.testConfiguration(providerId)
   );
+
+  protocol.handle(ASSET_PROTOCOL, (request) => {
+    try {
+      const { taskId, relativePath } = parseTaskAssetUrl(request.url);
+      const absolutePath = resolveTaskAssetPath(appPaths, taskId, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        return new Response("Asset not found", { status: 404 });
+      }
+
+      return net.fetch(pathToFileURL(absolutePath).toString());
+    } catch {
+      return new Response("Invalid asset URL", { status: 400 });
+    }
+  });
+}
+
+function createTaskAssetUrl(taskId: string, relativePath: string): string {
+  const encodedSegments = relativePath.split("/").map(encodeURIComponent).join("/");
+  return `${ASSET_PROTOCOL}://task/${encodeURIComponent(taskId)}/${encodedSegments}`;
+}
+
+function parseTaskAssetUrl(urlValue: string): { taskId: string; relativePath: string } {
+  const url = new URL(urlValue);
+  if (url.protocol !== `${ASSET_PROTOCOL}:` || url.hostname !== "task") {
+    throw new Error("Invalid task asset URL.");
+  }
+
+  const [taskId, ...relativeSegments] = url.pathname
+    .split("/")
+    .filter(Boolean)
+    .map(decodeURIComponent);
+  const relativePath = relativeSegments.join("/");
+  if (!taskId || !relativePath) {
+    throw new Error("Task asset URL is missing path segments.");
+  }
+
+  return { taskId, relativePath };
+}
+
+function resolveTaskAssetPath(
+  appPaths: ReturnType<typeof createAppPaths>,
+  taskId: string,
+  relativePath: string
+): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(taskId)) {
+    throw new Error("任务 ID 不合法。");
+  }
+
+  if (!relativePath || path.isAbsolute(relativePath) || relativePath.includes("\\")) {
+    throw new Error("素材路径不合法。");
+  }
+
+  const taskDirectory = getTaskMediaDirectory(appPaths, taskId, "source");
+  const taskRoot = path.dirname(taskDirectory);
+  const absolutePath = path.resolve(taskRoot, ...relativePath.split("/"));
+  const normalizedRoot = path.resolve(taskRoot);
+  const isInsideTaskRoot =
+    absolutePath === normalizedRoot || absolutePath.startsWith(`${normalizedRoot}${path.sep}`);
+
+  if (!isInsideTaskRoot) {
+    throw new Error("素材路径越界。");
+  }
+
+  return absolutePath;
 }
 
 app.whenReady().then(() => {

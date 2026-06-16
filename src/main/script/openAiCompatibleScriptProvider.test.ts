@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { VideoTask } from "../../shared/domain";
+import { DEFAULT_COVER_STYLE, DEFAULT_SUBTITLE_STYLE, type VideoTask } from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { OpenAiCompatibleScriptProvider } from "./openAiCompatibleScriptProvider";
 import { ScriptProviderUnavailableError } from "./scriptProvider";
@@ -21,6 +21,8 @@ function createTask(): VideoTask {
     avatarDescriptionPrompt: "",
     motionPrompt: "",
     selectedOutputPresets: ["portrait-9-16"],
+    subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+    coverStyle: DEFAULT_COVER_STYLE,
     steps: [],
     outputVariants: [],
     mediaAssets: [],

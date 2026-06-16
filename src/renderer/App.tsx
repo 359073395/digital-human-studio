@@ -1,32 +1,34 @@
 import {
-  AlertCircle,
   CheckCircle2,
   FolderOpen,
   Monitor,
   Play,
   Plus,
-  RefreshCcw,
   Settings,
   Smartphone,
   Upload,
   WandSparkles
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   CONTENT_LANGUAGES,
+  DEFAULT_COVER_STYLE,
+  DEFAULT_SUBTITLE_STYLE,
   OUTPUT_PRESETS,
-  type GenerationStepId,
+  type CoverStyle,
   type OutputPresetId,
+  type SubtitleStyle,
   type VideoTask,
   type VideoTaskSummary
 } from "../shared/domain";
+import type { UpdateTaskInput } from "../shared/ipc";
 import type {
   ProviderId,
   SaveServiceConfigurationInput,
   ServiceConfiguration,
   ServiceConfigurationSettings
 } from "../shared/serviceConfig";
-import { countCompleteSteps, isRetryable, type WorkbenchStep } from "../shared/workbench";
+import { countCompleteSteps, type WorkbenchStep } from "../shared/workbench";
 
 const now = new Date().toISOString();
 
@@ -36,12 +38,14 @@ const fallbackTask: VideoTask = {
   sourceScript: "如果你的内容一直有播放，却始终带不动成交，问题可能不在流量。",
   finalScript: "播放量不差却没有订单时，先别急着加预算。真正要改的，往往是前三秒给用户的购买理由。",
   similarityRisk: "low",
-  scriptGenerationNotes: "本地预览 mock 脚本。",
+  scriptGenerationNotes: "本地预览脚本。",
   contentLanguage: "zh-CN",
   avatarMode: "preset-avatar",
   avatarDescriptionPrompt: "",
   motionPrompt: "",
   selectedOutputPresets: ["portrait-9-16"],
+  subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+  coverStyle: DEFAULT_COVER_STYLE,
   publishingPackage: {
     title: "",
     description: "",
@@ -75,6 +79,21 @@ const fallbackTasks: VideoTaskSummary[] = [
   }
 ];
 
+type EditableTaskPatch = Partial<
+  Pick<
+    VideoTask,
+    | "title"
+    | "sourceScript"
+    | "contentLanguage"
+    | "avatarMode"
+    | "avatarDescriptionPrompt"
+    | "motionPrompt"
+    | "selectedOutputPresets"
+    | "subtitleStyle"
+    | "coverStyle"
+  >
+>;
+
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appVersion, setAppVersion] = useState("Digital Human Studio 本地预览");
@@ -87,16 +106,59 @@ export function App() {
   const [settingsMessage, setSettingsMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
+
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
-  const primaryVariant = selectedTask.outputVariants[0];
-  const visibleAssets = selectedTask.mediaAssets.slice(-6).reverse();
+  const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
+  const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
+  const primaryVariant =
+    selectedTask.outputVariants.find((variant) =>
+      selectedTask.selectedOutputPresets.includes(variant.presetId)
+    ) ?? selectedTask.outputVariants[0];
   const productImageAsset = selectedTask.mediaAssets.find(
     (asset) => asset.id === selectedTask.productImageAssetId
   );
-  const generatedPresenterAsset = selectedTask.mediaAssets.find(
-    (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
+  const generatedPresenterAsset =
+    selectedTask.mediaAssets.find(
+      (asset) =>
+        asset.kind === "generated-presenter-image" &&
+        primaryVariant &&
+        asset.relativePath.includes(primaryVariant.presetId)
+    ) ??
+    selectedTask.mediaAssets.find(
+      (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
+    );
+  const previewRelativePaths = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            productImageAsset?.relativePath,
+            generatedPresenterAsset?.relativePath,
+            ...selectedTask.outputVariants.flatMap((variant) => [
+              variant.finishedVideoPath,
+              variant.coverImagePath
+            ])
+          ].filter((path): path is string => Boolean(path))
+        )
+      ),
+    [generatedPresenterAsset?.relativePath, productImageAsset?.relativePath, selectedTask]
   );
+  const previewPathSignature = previewRelativePaths.join("|");
+  const finishedVideoUrl = primaryVariant?.finishedVideoPath
+    ? assetUrls[primaryVariant.finishedVideoPath]
+    : "";
+  const coverAssetUrl = primaryVariant?.coverImagePath
+    ? assetUrls[primaryVariant.coverImagePath]
+    : "";
+  const productImageUrl = productImageAsset?.relativePath
+    ? assetUrls[productImageAsset.relativePath]
+    : "";
+  const generatedPresenterUrl = generatedPresenterAsset?.relativePath
+    ? assetUrls[generatedPresenterAsset.relativePath]
+    : "";
+  const previewPresetId = primaryVariant?.presetId ?? selectedTask.selectedOutputPresets[0];
 
   function requireDesktopRuntime(
     actionLabel: string
@@ -160,6 +222,44 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const api = window.digitalHumanStudio;
+    if (!api || previewRelativePaths.length === 0) {
+      return;
+    }
+
+    const desktopApi = api;
+    let ignore = false;
+
+    async function loadAssetUrls() {
+      const resolvedEntries = await Promise.all(
+        previewRelativePaths.map(async (relativePath) => {
+          try {
+            const url = await desktopApi.resolveTaskAssetUrl({
+              taskId: selectedTask.id,
+              relativePath
+            });
+            return [relativePath, url] as const;
+          } catch {
+            return [relativePath, ""] as const;
+          }
+        })
+      );
+
+      if (ignore) {
+        return;
+      }
+
+      setAssetUrls(Object.fromEntries(resolvedEntries.filter(([, url]) => Boolean(url))));
+    }
+
+    void loadAssetUrls();
+
+    return () => {
+      ignore = true;
+    };
+  }, [previewPathSignature, previewRelativePaths, selectedTask.id]);
+
   async function refreshTaskState(taskId: string, nextTask?: VideoTask) {
     if (!window.digitalHumanStudio) {
       return;
@@ -190,28 +290,16 @@ export function App() {
     }
   }
 
-  async function updateCurrentTask(
-    patch: Partial<
-      Pick<
-        VideoTask,
-        | "title"
-        | "sourceScript"
-        | "contentLanguage"
-        | "avatarMode"
-        | "avatarDescriptionPrompt"
-        | "motionPrompt"
-        | "selectedOutputPresets"
-      >
-    >
-  ) {
+  async function updateCurrentTask(patch: EditableTaskPatch) {
     if (!window.digitalHumanStudio) {
       return;
     }
 
-    const task = await window.digitalHumanStudio.updateTask({
+    const input: UpdateTaskInput = {
       taskId: selectedTask.id,
       ...patch
-    });
+    };
+    const task = await window.digitalHumanStudio.updateTask(input);
     await refreshTaskState(task.id, task);
   }
 
@@ -230,95 +318,14 @@ export function App() {
     setSelectedTask(task);
   }
 
-  async function generateMockScript() {
-    const api = requireDesktopRuntime("生成脚本");
-    if (!api) {
-      return;
-    }
-
-    setIsWorkflowRunning(true);
-    setActionMessage("正在生成脚本...");
-
-    try {
-      await api.updateTask({
-        taskId: selectedTask.id,
-        sourceScript: selectedTask.sourceScript,
-        contentLanguage: selectedTask.contentLanguage,
-        avatarMode: selectedTask.avatarMode,
-        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
-        motionPrompt: selectedTask.motionPrompt,
-        selectedOutputPresets: selectedTask.selectedOutputPresets
-      });
-      const task = await api.generateScript(selectedTask.id);
-      setActionMessage("脚本已生成");
-      await refreshTaskState(task.id, task);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "脚本生成失败");
-    } finally {
-      setIsWorkflowRunning(false);
-    }
-  }
-
-  async function transcribeSource() {
-    const api = requireDesktopRuntime("源素材转写");
-    if (!api) {
-      return;
-    }
-
-    setIsWorkflowRunning(true);
-    setActionMessage("正在 mock 转写源素材...");
-
-    try {
-      const result = await api.transcribeSource(selectedTask.id);
-      const task = await api.getTask(selectedTask.id);
-      setActionMessage(result.notes);
-      if (task) {
-        await refreshTaskState(task.id, task);
-      }
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "源素材转写失败");
-    } finally {
-      setIsWorkflowRunning(false);
-    }
-  }
-
-  async function runMockWorkflow() {
-    const api = requireDesktopRuntime("运行 Mock 检查");
-    if (!api) {
-      return;
-    }
-
-    setIsWorkflowRunning(true);
-    setActionMessage("正在运行 mock 占位检查...");
-
-    try {
-      await api.updateTask({
-        taskId: selectedTask.id,
-        sourceScript: selectedTask.sourceScript,
-        contentLanguage: selectedTask.contentLanguage,
-        avatarMode: selectedTask.avatarMode,
-        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
-        motionPrompt: selectedTask.motionPrompt,
-        selectedOutputPresets: selectedTask.selectedOutputPresets
-      });
-      const task = await api.runMockWorkflow(selectedTask.id);
-      setActionMessage("Mock 检查已完成；这只会生成占位文件，不是可发布视频。");
-      await refreshTaskState(task.id, task);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "Mock 检查运行失败");
-    } finally {
-      setIsWorkflowRunning(false);
-    }
-  }
-
   async function runRealWorkflow() {
-    const api = requireDesktopRuntime("完整生成视频");
+    const api = requireDesktopRuntime("一键生成视频");
     if (!api) {
       return;
     }
 
     setIsWorkflowRunning(true);
-    setActionMessage("正在运行真实 API 全流程：脚本、人物图、HeyGen、导出...");
+    setActionMessage("正在一键生成视频：脚本、数字人、字幕、封面和导出...");
 
     try {
       await api.updateTask({
@@ -328,7 +335,9 @@ export function App() {
         avatarMode: selectedTask.avatarMode,
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
-        selectedOutputPresets: selectedTask.selectedOutputPresets
+        selectedOutputPresets: selectedTask.selectedOutputPresets,
+        subtitleStyle,
+        coverStyle
       });
       const task = await api.runRealWorkflow(selectedTask.id);
       const failedStep = task.steps.find(
@@ -337,45 +346,11 @@ export function App() {
       setActionMessage(
         failedStep
           ? failedStep.errorMessage || `${failedStep.label}未完成`
-          : "真实 API 全流程已完成，最终视频已导出"
+          : "视频已生成，成片和封面可在右侧预览"
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "完整生成视频失败");
-    } finally {
-      setIsWorkflowRunning(false);
-    }
-  }
-
-  async function renderHeyGenAvatar() {
-    const api = requireDesktopRuntime("生成 HeyGen 数字人");
-    if (!api) {
-      return;
-    }
-
-    setIsWorkflowRunning(true);
-    setActionMessage("正在生成 HeyGen 数字人视频...");
-
-    try {
-      await api.updateTask({
-        taskId: selectedTask.id,
-        sourceScript: selectedTask.sourceScript,
-        contentLanguage: selectedTask.contentLanguage,
-        avatarMode: selectedTask.avatarMode,
-        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
-        motionPrompt: selectedTask.motionPrompt,
-        selectedOutputPresets: selectedTask.selectedOutputPresets
-      });
-      const task = await api.renderHeyGenAvatar(selectedTask.id);
-      const avatarStep = task.steps.find((step) => step.id === "avatar");
-      setActionMessage(
-        avatarStep?.status === "complete"
-          ? "HeyGen 数字人视频已生成"
-          : avatarStep?.errorMessage || "HeyGen 数字人生成未完成"
-      );
-      await refreshTaskState(task.id, task);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "HeyGen 数字人生成失败");
+      setActionMessage(error instanceof Error ? error.message : "一键生成视频失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -393,7 +368,7 @@ export function App() {
     try {
       const task = await api.uploadProductImage(selectedTask.id);
       setActionMessage(
-        task.productImageAssetId ? "商品图片已导入" : "未选择商品图片，任务保持不变"
+        task.productImageAssetId ? "商品图片已导入，可在右侧预览" : "未选择商品图片，任务保持不变"
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
@@ -418,41 +393,20 @@ export function App() {
         avatarMode: "image-presenter",
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
-        selectedOutputPresets: selectedTask.selectedOutputPresets
+        selectedOutputPresets: selectedTask.selectedOutputPresets,
+        subtitleStyle,
+        coverStyle
       });
       const task = await api.generatePresenterImages(selectedTask.id);
       const avatarStep = task.steps.find((step) => step.id === "avatar");
       setActionMessage(
         avatarStep?.status === "retry-ready"
           ? avatarStep.errorMessage || "人物商品图生成失败"
-          : "人物商品图已生成"
+          : "人物商品图已生成，可在右侧预览"
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "人物商品图生成失败");
-    } finally {
-      setIsWorkflowRunning(false);
-    }
-  }
-
-  async function retryWorkflowStep(stepId: GenerationStepId) {
-    const api = requireDesktopRuntime(`重试${stepLabel(stepId)}`);
-    if (!api) {
-      return;
-    }
-
-    setIsWorkflowRunning(true);
-    setActionMessage(`正在重试：${stepLabel(stepId)}...`);
-
-    try {
-      const task = await api.retryMockWorkflowStep({
-        taskId: selectedTask.id,
-        stepId
-      });
-      setActionMessage(`${stepLabel(stepId)}已重试`);
-      await refreshTaskState(task.id, task);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "单步重试失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -466,6 +420,30 @@ export function App() {
     await updateCurrentTask({
       selectedOutputPresets: nextPresets.length > 0 ? nextPresets : ["portrait-9-16"]
     });
+  }
+
+  async function updateSubtitleStyle(patch: Partial<SubtitleStyle>) {
+    const nextStyle = { ...subtitleStyle, ...patch };
+    setSelectedTask((current) => ({
+      ...current,
+      subtitleStyle: {
+        ...(current.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE),
+        ...patch
+      }
+    }));
+    await updateCurrentTask({ subtitleStyle: nextStyle });
+  }
+
+  async function updateCoverStyle(patch: Partial<CoverStyle>) {
+    const nextStyle = { ...coverStyle, ...patch };
+    setSelectedTask((current) => ({
+      ...current,
+      coverStyle: {
+        ...(current.coverStyle ?? DEFAULT_COVER_STYLE),
+        ...patch
+      }
+    }));
+    await updateCurrentTask({ coverStyle: nextStyle });
   }
 
   async function openTaskExports() {
@@ -584,19 +562,11 @@ export function App() {
         </aside>
 
         <section className="editor-pane">
-          <nav className="flow-tabs" aria-label="任务流程">
-            {["源文案", "原创脚本", "数字人", "后期", "导出"].map((tab, index) => (
-              <button className={index === 1 ? "selected" : ""} key={tab} type="button">
-                {tab}
-              </button>
-            ))}
-          </nav>
-
           <div className="script-grid">
             <section className="field-block">
               <div className="section-title">
                 <Upload size={16} />
-                <h2>源文案 / 转写</h2>
+                <h2>源文案</h2>
               </div>
               <textarea
                 value={selectedTask.sourceScript}
@@ -609,20 +579,6 @@ export function App() {
                   }))
                 }
               />
-              <div className="button-row">
-                <button
-                  type="button"
-                  disabled={isWorkflowRunning}
-                  onClick={() => void transcribeSource()}
-                >
-                  <Upload size={16} />
-                  Mock 转写
-                </button>
-                <button type="button" disabled>
-                  <WandSparkles size={16} />
-                  分析结构
-                </button>
-              </div>
             </section>
 
             <section className="field-block">
@@ -631,7 +587,7 @@ export function App() {
                 <h2>原创脚本</h2>
               </div>
               <textarea
-                value={selectedTask.finalScript || "等待生成原创脚本"}
+                value={selectedTask.finalScript || "一键生成视频时会自动生成原创脚本"}
                 readOnly
                 aria-label="原创脚本"
               />
@@ -645,108 +601,90 @@ export function App() {
             </section>
           </div>
 
-          <div className="settings-grid">
-            <section className="compact-block avatar-settings-block">
-              <h3>数字人</h3>
-              <div className="avatar-settings-grid">
-                <label>
-                  模式
-                  <select
-                    value={selectedTask.avatarMode}
+          <section className="compact-block generation-settings-block">
+            <h3>生成设置</h3>
+            <div className="control-grid">
+              <label>
+                模式
+                <select
+                  value={selectedTask.avatarMode}
+                  onChange={(event) =>
+                    void updateCurrentTask({
+                      avatarMode: event.target.value as VideoTask["avatarMode"]
+                    })
+                  }
+                >
+                  <option value="preset-avatar">HeyGen 预设数字人</option>
+                  <option value="image-presenter">AI 商品图数字人</option>
+                </select>
+              </label>
+              <label>
+                生成语言 / 语音
+                <select
+                  value={selectedTask.contentLanguage}
+                  onChange={(event) =>
+                    void updateCurrentTask({
+                      contentLanguage: event.target.value as VideoTask["contentLanguage"]
+                    })
+                  }
+                >
+                  {CONTENT_LANGUAGES.map((language) => (
+                    <option key={language.id} value={language.id}>
+                      {language.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <fieldset className="preset-fieldset">
+                <legend>输出比例</legend>
+                <label className="checkbox-row compact-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
                     onChange={(event) =>
-                      void updateCurrentTask({
-                        avatarMode: event.target.value as VideoTask["avatarMode"]
-                      })
+                      void toggleOutputPreset("portrait-9-16", event.target.checked)
                     }
-                  >
-                    <option value="preset-avatar">HeyGen 预设数字人</option>
-                    <option value="image-presenter">AI 商品图数字人</option>
-                  </select>
+                  />
+                  <Smartphone size={16} />
+                  竖屏 9:16
                 </label>
-                <label>
-                  Avatar
-                  <select defaultValue="business-host">
-                    <option value="business-host">商务主持人</option>
-                    <option value="creator">创作者口播</option>
-                  </select>
-                </label>
-                <label>
-                  Voice
-                  <select defaultValue="heygen-default">
-                    <option value="heygen-default">HeyGen 内置语音</option>
-                    <option value="external">外部音频</option>
-                  </select>
-                </label>
-                <label>
-                  生成语言 / 语音
-                  <select
-                    value={selectedTask.contentLanguage}
+                <label className="checkbox-row compact-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
                     onChange={(event) =>
-                      void updateCurrentTask({
-                        contentLanguage: event.target.value as VideoTask["contentLanguage"]
-                      })
+                      void toggleOutputPreset("landscape-16-9", event.target.checked)
                     }
-                  >
-                    {CONTENT_LANGUAGES.map((language) => (
-                      <option key={language.id} value={language.id}>
-                        {language.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
+                  <Monitor size={16} />
+                  横屏 16:9
                 </label>
-              </div>
+              </fieldset>
+            </div>
+
+            <div className="prompt-grid">
               {selectedTask.avatarMode === "image-presenter" ? (
-                <>
-                  <label>
-                    数字人描述提示词
-                    <textarea
-                      className="compact-textarea"
-                      value={selectedTask.avatarDescriptionPrompt}
-                      aria-label="数字人描述提示词"
-                      onBlur={() =>
-                        void updateCurrentTask({
-                          avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt
-                        })
-                      }
-                      onChange={(event) =>
-                        setSelectedTask((current) => ({
-                          ...current,
-                          avatarDescriptionPrompt: event.target.value
-                        }))
-                      }
-                    />
-                  </label>
-                  <div className="asset-chip-grid">
-                    <div className="asset-chip">
-                      <span>商品图</span>
-                      <strong>{productImageAsset?.relativePath ?? "未上传"}</strong>
-                    </div>
-                    <div className="asset-chip">
-                      <span>人物商品图</span>
-                      <strong>{generatedPresenterAsset?.relativePath ?? "未生成"}</strong>
-                    </div>
-                  </div>
-                  <div className="button-row">
-                    <button
-                      type="button"
-                      disabled={isWorkflowRunning}
-                      onClick={() => void uploadProductImage()}
-                    >
-                      <Upload size={16} />
-                      上传商品图
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isWorkflowRunning}
-                      onClick={() => void generatePresenterImages()}
-                    >
-                      <WandSparkles size={16} />
-                      生成人物商品图
-                    </button>
-                  </div>
-                </>
+                <label>
+                  数字人描述提示词
+                  <textarea
+                    className="compact-textarea"
+                    value={selectedTask.avatarDescriptionPrompt}
+                    aria-label="数字人描述提示词"
+                    onBlur={() =>
+                      void updateCurrentTask({
+                        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt
+                      })
+                    }
+                    onChange={(event) =>
+                      setSelectedTask((current) => ({
+                        ...current,
+                        avatarDescriptionPrompt: event.target.value
+                      }))
+                    }
+                  />
+                </label>
               ) : null}
-              <label className="motion-prompt-field">
+              <label>
                 动作提示词
                 <textarea
                   className="compact-textarea"
@@ -761,55 +699,186 @@ export function App() {
                   }
                 />
               </label>
+            </div>
+
+            {selectedTask.avatarMode === "image-presenter" ? (
+              <div className="image-action-row">
+                <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
+                <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
+                <div className="stacked-actions">
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void uploadProductImage()}
+                  >
+                    <Upload size={16} />
+                    上传商品图
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void generatePresenterImages()}
+                  >
+                    <WandSparkles size={16} />
+                    生成人物商品图
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <div className="style-grid">
+            <section className="compact-block">
+              <h3>字幕样式</h3>
+              <div className="control-grid tight">
+                <label>
+                  位置
+                  <select
+                    value={subtitleStyle.position}
+                    onChange={(event) =>
+                      void updateSubtitleStyle({
+                        position: event.target.value as SubtitleStyle["position"]
+                      })
+                    }
+                  >
+                    <option value="top">顶部</option>
+                    <option value="middle">中部</option>
+                    <option value="bottom">底部</option>
+                  </select>
+                </label>
+                <label>
+                  字号
+                  <input
+                    type="number"
+                    min={20}
+                    max={72}
+                    value={subtitleStyle.fontSize}
+                    onChange={(event) =>
+                      void updateSubtitleStyle({
+                        fontSize: Number(event.target.value)
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  字重
+                  <select
+                    value={subtitleStyle.fontWeight}
+                    onChange={(event) =>
+                      void updateSubtitleStyle({
+                        fontWeight: event.target.value as SubtitleStyle["fontWeight"]
+                      })
+                    }
+                  >
+                    <option value="bold">粗体</option>
+                    <option value="regular">常规</option>
+                  </select>
+                </label>
+                <ColorInput
+                  label="文字"
+                  value={subtitleStyle.textColor}
+                  onChange={(value) => void updateSubtitleStyle({ textColor: value })}
+                />
+                <ColorInput
+                  label="底色"
+                  value={subtitleStyle.backgroundColor}
+                  onChange={(value) => void updateSubtitleStyle({ backgroundColor: value })}
+                />
+              </div>
             </section>
 
-            <section className="compact-block publishing-settings-block">
-              <h3>发布设置</h3>
-              <div className="publishing-options">
-                <div className="publish-option-group">
-                  <span className="publish-option-title">输出预设</span>
-                  <div className="option-row-list">
-                    <label className="checkbox-row compact-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
-                        onChange={(event) =>
-                          void toggleOutputPreset("portrait-9-16", event.target.checked)
+            <section className="compact-block">
+              <h3>封面样式</h3>
+              <div className="control-grid tight">
+                <label>
+                  标题
+                  <input
+                    type="text"
+                    value={coverStyle.title}
+                    onBlur={() => void updateCurrentTask({ coverStyle })}
+                    onChange={(event) =>
+                      setSelectedTask((current) => ({
+                        ...current,
+                        coverStyle: {
+                          ...(current.coverStyle ?? DEFAULT_COVER_STYLE),
+                          title: event.target.value
                         }
-                      />
-                      <Smartphone size={16} />
-                      竖屏 9:16
-                    </label>
-                    <label className="checkbox-row compact-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
-                        onChange={(event) =>
-                          void toggleOutputPreset("landscape-16-9", event.target.checked)
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  副标题
+                  <input
+                    type="text"
+                    value={coverStyle.subtitle}
+                    onBlur={() => void updateCurrentTask({ coverStyle })}
+                    onChange={(event) =>
+                      setSelectedTask((current) => ({
+                        ...current,
+                        coverStyle: {
+                          ...(current.coverStyle ?? DEFAULT_COVER_STYLE),
+                          subtitle: event.target.value
                         }
-                      />
-                      <Monitor size={16} />
-                      横屏 16:9
-                    </label>
-                  </div>
-                </div>
-                <div className="publish-option-group">
-                  <span className="publish-option-title">后期资产</span>
-                  <div className="option-row-list">
-                    <label className="checkbox-row compact-checkbox">
-                      <input type="checkbox" defaultChecked />
-                      字幕
-                    </label>
-                    <label className="checkbox-row compact-checkbox">
-                      <input type="checkbox" />
-                      本地 BGM
-                    </label>
-                    <label className="checkbox-row compact-checkbox">
-                      <input type="checkbox" defaultChecked />
-                      封面
-                    </label>
-                  </div>
-                </div>
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  字体
+                  <select
+                    value={coverStyle.fontFamily}
+                    onChange={(event) => void updateCoverStyle({ fontFamily: event.target.value })}
+                  >
+                    <option value="Microsoft YaHei">微软雅黑</option>
+                    <option value="SimHei">黑体</option>
+                    <option value="Arial">Arial</option>
+                    <option value="Georgia">Georgia</option>
+                  </select>
+                </label>
+                <label>
+                  字号
+                  <input
+                    type="number"
+                    min={32}
+                    max={96}
+                    value={coverStyle.fontSize}
+                    onChange={(event) =>
+                      void updateCoverStyle({
+                        fontSize: Number(event.target.value)
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  字重
+                  <select
+                    value={coverStyle.fontWeight}
+                    onChange={(event) =>
+                      void updateCoverStyle({
+                        fontWeight: event.target.value as CoverStyle["fontWeight"]
+                      })
+                    }
+                  >
+                    <option value="bold">粗体</option>
+                    <option value="regular">常规</option>
+                  </select>
+                </label>
+                <ColorInput
+                  label="文字"
+                  value={coverStyle.textColor}
+                  onChange={(value) => void updateCoverStyle({ textColor: value })}
+                />
+                <ColorInput
+                  label="背景"
+                  value={coverStyle.backgroundColor}
+                  onChange={(value) => void updateCoverStyle({ backgroundColor: value })}
+                />
+                <ColorInput
+                  label="强调"
+                  value={coverStyle.accentColor}
+                  onChange={(value) => void updateCoverStyle({ accentColor: value })}
+                />
               </div>
             </section>
           </div>
@@ -818,112 +887,65 @@ export function App() {
             {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
             <button
               type="button"
-              disabled={isWorkflowRunning}
-              onClick={() => void generateMockScript()}
-            >
-              <WandSparkles size={17} />
-              生成脚本
-            </button>
-            <button
-              type="button"
               className="primary"
               disabled={isWorkflowRunning}
               onClick={() => void runRealWorkflow()}
             >
-              <Play size={17} />
-              完整生成视频
-            </button>
-            <button
-              type="button"
-              disabled={isWorkflowRunning}
-              onClick={() => void renderHeyGenAvatar()}
-            >
-              <Play size={17} />
-              生成 HeyGen 数字人
-            </button>
-            <button
-              type="button"
-              disabled={isWorkflowRunning}
-              onClick={() => void runMockWorkflow()}
-            >
-              <Play size={17} />
-              Mock 检查
-            </button>
-            <button type="button" onClick={() => void openTaskExports()}>
-              <FolderOpen size={17} />
-              打开导出
+              <Play size={18} />
+              一键生成视频
             </button>
           </div>
         </section>
 
         <aside className="preview-pane">
-          <div className="preview-box">
-            <div className="phone-frame">
-              <div className="avatar-placeholder">
-                <strong>
-                  {primaryVariant ? presetLabel(primaryVariant.presetId) : "视频预览"}
-                </strong>
-                <span>
-                  {primaryVariant ? variantStatusLabel(primaryVariant.status) : "等待生成"}
-                </span>
-              </div>
+          <section className="preview-card">
+            <div className="pane-heading">
+              <span>成片预览</span>
+              <button type="button" onClick={() => void openTaskExports()}>
+                <FolderOpen size={16} />
+                打开导出
+              </button>
             </div>
+            <PrimaryPreview
+              presetId={previewPresetId}
+              videoUrl={finishedVideoUrl}
+              imageUrl={generatedPresenterUrl || productImageUrl}
+              subtitleStyle={subtitleStyle}
+              subtitleText={createSubtitleSample(selectedTask)}
+              variantStatus={primaryVariant?.status}
+            />
+          </section>
+
+          <section className="status-strip" aria-label="步骤状态">
+            <span className="status-count">
+              {completeCount}/{steps.length}
+            </span>
+            {steps.map((step) => (
+              <span
+                className={`status-pill ${step.status}`}
+                key={step.id}
+                title={step.errorMessage}
+              >
+                {step.label}
+              </span>
+            ))}
+          </section>
+
+          <div className="preview-asset-grid">
+            <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
+            <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
           </div>
 
-          <section className="status-block">
+          <section className="preview-card">
             <div className="pane-heading">
-              <span>步骤状态</span>
-              <small>
-                {completeCount}/{steps.length}
-              </small>
+              <span>封面预览</span>
+              <small>{coverAssetUrl ? "已生成" : "编辑中"}</small>
             </div>
-            <div className="step-list">
-              {steps.map((step) => (
-                <div className="step-row" key={step.id}>
-                  <span className={`status-light ${step.status}`} />
-                  <span>{step.label}</span>
-                  {isRetryable(step.status) ? (
-                    <button
-                      className="icon-button tiny"
-                      title="重试"
-                      disabled={isWorkflowRunning}
-                      onClick={() => void retryWorkflowStep(step.id)}
-                    >
-                      <RefreshCcw size={14} />
-                    </button>
-                  ) : (
-                    <small>{statusLabel(step.status)}</small>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="export-block">
-            <div>
-              <strong>发布资料包</strong>
-              <span>{selectedTask.publishingPackage.title || "等待合成完成"}</span>
-            </div>
-            <AlertCircle size={18} />
-          </section>
-
-          <section className="artifact-block">
-            <div className="pane-heading">
-              <span>Mock 产物</span>
-              <small>{selectedTask.mediaAssets.length}</small>
-            </div>
-            <div className="asset-list">
-              {visibleAssets.length > 0 ? (
-                visibleAssets.map((asset) => (
-                  <div className="asset-row" key={asset.id}>
-                    <strong>{assetKindLabel(asset.kind)}</strong>
-                    <span>{asset.relativePath}</span>
-                  </div>
-                ))
-              ) : (
-                <p>运行 mock 流程后显示生成的占位文件。</p>
-              )}
-            </div>
+            <CoverPreview
+              style={coverStyle}
+              title={coverStyle.title || createCoverTitle(selectedTask)}
+              presetId={previewPresetId}
+            />
           </section>
         </aside>
       </main>
@@ -1115,6 +1137,147 @@ export function App() {
   );
 }
 
+function AssetPreview({
+  title,
+  url,
+  emptyLabel
+}: {
+  title: string;
+  url: string;
+  emptyLabel: string;
+}) {
+  return (
+    <div className="asset-preview">
+      <span>{title}</span>
+      <div className="asset-preview-media">
+        {url ? <img alt={title} src={url} /> : <strong>{emptyLabel}</strong>}
+      </div>
+    </div>
+  );
+}
+
+function PrimaryPreview({
+  presetId,
+  videoUrl,
+  imageUrl,
+  subtitleStyle,
+  subtitleText,
+  variantStatus
+}: {
+  presetId: OutputPresetId | undefined;
+  videoUrl: string;
+  imageUrl: string;
+  subtitleStyle: SubtitleStyle;
+  subtitleText: string;
+  variantStatus?: VideoTask["outputVariants"][number]["status"];
+}) {
+  const frameClassName = `media-stage ${presetId === "landscape-16-9" ? "landscape" : "portrait"}`;
+
+  return (
+    <div className={frameClassName}>
+      {videoUrl ? (
+        <video controls src={videoUrl} />
+      ) : imageUrl ? (
+        <img alt="预览素材" src={imageUrl} />
+      ) : (
+        <div className="media-placeholder">
+          <strong>{presetId ? presetLabel(presetId) : "视频预览"}</strong>
+          <span>{variantStatus ? variantStatusLabel(variantStatus) : "等待生成"}</span>
+        </div>
+      )}
+      {subtitleStyle.enabled ? (
+        <div
+          className={`subtitle-preview ${subtitleStyle.position}`}
+          style={subtitlePreviewStyle(subtitleStyle)}
+        >
+          {subtitleText}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CoverPreview({
+  style,
+  title,
+  presetId
+}: {
+  style: CoverStyle;
+  title: string;
+  presetId: OutputPresetId | undefined;
+}) {
+  const isLandscape = presetId === "landscape-16-9";
+  const titleFontSize = Math.round(style.fontSize * (isLandscape ? 0.34 : 0.28));
+  const previewStyle: CSSProperties = {
+    backgroundColor: style.backgroundColor,
+    color: style.textColor,
+    fontFamily: style.fontFamily
+  };
+
+  return (
+    <div className={`cover-preview ${isLandscape ? "landscape" : "portrait"}`} style={previewStyle}>
+      <span className="cover-accent" style={{ backgroundColor: style.accentColor }} />
+      <strong
+        style={{
+          fontSize: `${titleFontSize}px`,
+          fontWeight: style.fontWeight === "bold" ? 700 : 400
+        }}
+      >
+        {title}
+      </strong>
+      <small>{style.subtitle}</small>
+      <i style={{ backgroundColor: style.accentColor }} />
+    </div>
+  );
+}
+
+function ColorInput({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="color-control">
+      {label}
+      <input type="color" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function subtitlePreviewStyle(style: SubtitleStyle): CSSProperties {
+  return {
+    color: style.textColor,
+    backgroundColor: style.backgroundColor,
+    fontSize: `${Math.max(12, Math.round(style.fontSize * 0.42))}px`,
+    fontWeight: style.fontWeight === "bold" ? 700 : 400
+  };
+}
+
+function createSubtitleSample(task: VideoTask): string {
+  const line = (task.finalScript || task.sourceScript || "字幕预览")
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .find(Boolean);
+  if (!line) {
+    return "字幕预览";
+  }
+
+  return line.length > 28 ? `${line.slice(0, 28)}...` : line;
+}
+
+function createCoverTitle(task: VideoTask): string {
+  const base =
+    (task.finalScript || task.sourceScript || task.title)
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .find(Boolean) ?? task.title;
+  return base.length > 22 ? `${base.slice(0, 22)}...` : base;
+}
+
 function statusLabel(status: WorkbenchStep["status"]): string {
   const labels: Record<WorkbenchStep["status"], string> = {
     waiting: "等待",
@@ -1127,26 +1290,13 @@ function statusLabel(status: WorkbenchStep["status"]): string {
   return labels[status];
 }
 
-function stepLabel(stepId: GenerationStepId): string {
-  const labels: Record<GenerationStepId, string> = {
-    source: "源文案",
-    script: "原创脚本",
-    avatar: "数字人",
-    subtitles: "字幕",
-    "post-production": "合成",
-    export: "导出"
-  };
-
-  return labels[stepId];
-}
-
 function presetLabel(presetId: OutputPresetId): string {
   return OUTPUT_PRESETS.find((preset) => preset.id === presetId)?.label ?? presetId;
 }
 
 function variantStatusLabel(status: VideoTask["outputVariants"][number]["status"]): string {
   const labels: Record<VideoTask["outputVariants"][number]["status"], string> = {
-    waiting: "等待后续步骤",
+    waiting: "等待生成",
     rendering: "生成中",
     complete: "已生成",
     failed: "需要重试"
@@ -1166,30 +1316,12 @@ function similarityRiskLabel(risk: VideoTask["similarityRisk"]): string {
   return labels[risk];
 }
 
-function assetKindLabel(kind: VideoTask["mediaAssets"][number]["kind"]): string {
-  const labels: Record<VideoTask["mediaAssets"][number]["kind"], string> = {
-    "source-audio": "源音频",
-    "source-video": "源视频",
-    "source-transcript": "源转写",
-    "product-image": "商品图",
-    "generated-presenter-image": "人物商品图",
-    "avatar-video": "数字人视频",
-    "subtitle-file": "字幕",
-    "background-music": "BGM",
-    "cover-image": "封面",
-    "finished-video": "成片",
-    "publishing-package": "发布包"
-  };
-
-  return labels[kind];
-}
-
 function formatTaskMeta(task: VideoTaskSummary): string {
   const presets = task.selectedOutputPresets
     .map((preset) => (preset === "portrait-9-16" ? "竖屏" : "横屏"))
     .join(" + ");
 
-  return `${presets || "未选比例"} · ${task.activeStepLabel}`;
+  return `${presets || "未选比例"} · ${statusLabel(task.status)}`;
 }
 
 interface SettingsDraft extends ServiceConfigurationSettings {

@@ -4,7 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OUTPUT_PRESETS, type VideoTask } from "../../shared/domain";
+import {
+  DEFAULT_COVER_STYLE,
+  DEFAULT_SUBTITLE_STYLE,
+  OUTPUT_PRESETS,
+  type VideoTask
+} from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { ImageProviderUnavailableError } from "./imageProvider";
 import { OpenAiImageProvider } from "./openAiImageProvider";
@@ -37,6 +42,8 @@ function createTask(): VideoTask {
     avatarDescriptionPrompt: "年轻印尼女主播，亲和自然，穿白色衬衫，手拿护肤品。",
     motionPrompt: "手拿商品靠近镜头展示，轻微点头。",
     selectedOutputPresets: ["portrait-9-16"],
+    subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+    coverStyle: DEFAULT_COVER_STYLE,
     steps: [],
     outputVariants: [],
     mediaAssets: [],

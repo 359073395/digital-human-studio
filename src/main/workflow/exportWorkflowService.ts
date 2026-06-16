@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   OUTPUT_PRESETS,
+  type CoverStyle,
   type OutputPreset,
   type OutputPresetId,
   type PublishingPackage,
@@ -37,9 +38,14 @@ export class ExportWorkflowService {
         fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
         fs.copyFileSync(avatarVideoPath, absolutePath);
         this.taskRepository.addMediaAsset(taskId, "finished-video", relativePath);
+
+        const coverPath = `post/cover-${preset.id}.svg`;
+        writeTaskFile(this.paths, taskId, coverPath, createCoverSvg(task, preset));
+        this.taskRepository.addMediaAsset(taskId, "cover-image", coverPath);
         this.taskRepository.updateOutputVariant(taskId, preset.id, {
           status: "complete",
-          finishedVideoPath: relativePath
+          finishedVideoPath: relativePath,
+          coverImagePath: coverPath
         });
       }
 
@@ -167,6 +173,8 @@ function createPublishingManifest(task: VideoTask, publishingPackage: Publishing
       contentLanguage: task.contentLanguage,
       selectedOutputPresets: task.selectedOutputPresets
     },
+    subtitleStyle: task.subtitleStyle,
+    coverStyle: task.coverStyle,
     publishingPackage,
     outputVariants: task.outputVariants,
     mediaAssets: task.mediaAssets
@@ -184,6 +192,36 @@ function requireOutputPreset(presetId: OutputPresetId): OutputPreset {
 
 function absoluteTaskPath(paths: AppPaths, taskId: string, relativePath: string): string {
   return path.join(getTaskDirectory(paths, taskId), ...relativePath.split("/"));
+}
+
+function createCoverSvg(task: VideoTask, preset: OutputPreset): string {
+  const style = task.coverStyle;
+  const title = escapeXml(style.title.trim() || createPublishingTitle(task));
+  const subtitle = escapeXml(style.subtitle.trim());
+  const titleSize = Math.round((style.fontSize / 1080) * preset.width);
+  const subtitleSize = Math.round(titleSize * 0.42);
+  const fontWeight = fontWeightValue(style);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${preset.width}" height="${preset.height}" viewBox="0 0 ${preset.width} ${preset.height}">
+  <rect width="100%" height="100%" fill="${style.backgroundColor}"/>
+  <rect x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.1)}" width="${Math.round(preset.width * 0.84)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
+  <text x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.44)}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${fontWeight}">${title}</text>
+  <text x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.51)}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.78">${subtitle}</text>
+  <rect x="${Math.round(preset.width * 0.08)}" y="${Math.round(preset.height * 0.76)}" width="${Math.round(preset.width * 0.26)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
+</svg>
+`;
+}
+
+function fontWeightValue(style: CoverStyle): string {
+  return style.fontWeight === "bold" ? "700" : "400";
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function writeTaskFile(

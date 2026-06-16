@@ -18,6 +18,10 @@ export type OutputPresetId = "portrait-9-16" | "landscape-16-9";
 
 export type OutputVariantStatus = "waiting" | "rendering" | "complete" | "failed";
 
+export type SubtitlePosition = "top" | "middle" | "bottom";
+
+export type TextWeight = "regular" | "bold";
+
 export type MediaAssetKind =
   | "source-audio"
   | "source-video"
@@ -52,6 +56,26 @@ export interface ContentLanguageOption {
   id: ContentLanguage;
   label: string;
   voiceLocale: string;
+}
+
+export interface SubtitleStyle {
+  enabled: boolean;
+  position: SubtitlePosition;
+  fontSize: number;
+  textColor: string;
+  backgroundColor: string;
+  fontWeight: TextWeight;
+}
+
+export interface CoverStyle {
+  title: string;
+  subtitle: string;
+  fontFamily: string;
+  fontSize: number;
+  textColor: string;
+  backgroundColor: string;
+  accentColor: string;
+  fontWeight: TextWeight;
 }
 
 export interface OutputVariant {
@@ -95,6 +119,8 @@ export interface VideoTask {
   productImageAssetId?: string;
   generatedPresenterImageAssetId?: string;
   selectedOutputPresets: OutputPresetId[];
+  subtitleStyle: SubtitleStyle;
+  coverStyle: CoverStyle;
   steps: GenerationStep[];
   outputVariants: OutputVariant[];
   mediaAssets: MediaAsset[];
@@ -165,6 +191,26 @@ export const DEFAULT_PUBLISHING_PACKAGE: PublishingPackage = {
   description: "",
   tags: [],
   notes: ""
+};
+
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  enabled: true,
+  position: "bottom",
+  fontSize: 34,
+  textColor: "#ffffff",
+  backgroundColor: "#111827",
+  fontWeight: "bold"
+};
+
+export const DEFAULT_COVER_STYLE: CoverStyle = {
+  title: "",
+  subtitle: "数字人口播",
+  fontFamily: "Microsoft YaHei",
+  fontSize: 56,
+  textColor: "#ffffff",
+  backgroundColor: "#152238",
+  accentColor: "#3b82f6",
+  fontWeight: "bold"
 };
 
 export function defaultOutputPresetIds(): OutputPresetId[] {

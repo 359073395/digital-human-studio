@@ -275,13 +275,20 @@ function createMockCoverSvg(task: VideoTask, presetId: OutputPresetId): string {
   const preset = OUTPUT_PRESETS.find((candidate) => candidate.id === presetId);
   const width = preset?.width ?? 1080;
   const height = preset?.height ?? 1920;
-  const title = escapeXml(createPublishingTitle(task));
+  const style = task.coverStyle;
+  const title = escapeXml(style.title.trim() || createPublishingTitle(task));
+  const subtitle = escapeXml(
+    style.subtitle.trim() || `Mock cover · ${preset?.aspectRatio ?? presetId}`
+  );
+  const titleSize = Math.round((style.fontSize / 1080) * width);
+  const subtitleSize = Math.round(titleSize * 0.42);
+  const fontWeight = style.fontWeight === "bold" ? "700" : "400";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect width="100%" height="100%" fill="#172033"/>
-  <rect x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.12)}" width="${Math.round(width * 0.84)}" height="${Math.round(height * 0.76)}" rx="18" fill="#f5f7fb"/>
-  <text x="50%" y="45%" text-anchor="middle" font-family="Arial, sans-serif" font-size="${Math.round(width * 0.055)}" fill="#172033" font-weight="700">${title}</text>
-  <text x="50%" y="55%" text-anchor="middle" font-family="Arial, sans-serif" font-size="${Math.round(width * 0.032)}" fill="#66758b">Mock cover · ${preset?.aspectRatio ?? presetId}</text>
+  <rect width="100%" height="100%" fill="${style.backgroundColor}"/>
+  <rect x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.1)}" width="${Math.round(width * 0.84)}" height="${Math.round(height * 0.012)}" fill="${style.accentColor}"/>
+  <text x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.44)}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${fontWeight}">${title}</text>
+  <text x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.51)}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.78">${subtitle}</text>
 </svg>
 `;
 }

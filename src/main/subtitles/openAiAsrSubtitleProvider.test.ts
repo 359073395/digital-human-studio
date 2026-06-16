@@ -4,7 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OUTPUT_PRESETS, type VideoTask } from "../../shared/domain";
+import {
+  DEFAULT_COVER_STYLE,
+  DEFAULT_SUBTITLE_STYLE,
+  OUTPUT_PRESETS,
+  type VideoTask
+} from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { SubtitleFallbackProviderUnavailableError } from "./subtitleFallbackProvider";
 import { OpenAiAsrSubtitleProvider } from "./openAiAsrSubtitleProvider";
@@ -37,6 +42,8 @@ function createTask(): VideoTask {
     avatarDescriptionPrompt: "",
     motionPrompt: "",
     selectedOutputPresets: ["portrait-9-16"],
+    subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+    coverStyle: DEFAULT_COVER_STYLE,
     steps: [],
     outputVariants: [],
     mediaAssets: [],

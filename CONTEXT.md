@@ -76,6 +76,14 @@ _Avoid_: Forced default, manual-only setting
 The subtitles, background music, title treatment, and cover image added after the digital-human talking-head video is generated.
 _Avoid_: Effects, decorations, optional extras
 
+**Subtitle Style**:
+The task-level visual settings for subtitles, including position, font size, text color, background color, and weight. These settings are user-editable and previewed before export.
+_Avoid_: Subtitle timing, caption file, hard-coded style
+
+**Cover Style**:
+The task-level visual settings used to generate and preview a cover image, including title, subtitle, font, font size, text color, background color, accent color, and weight.
+_Avoid_: Publishing copy, video thumbnail URL, platform cover
+
 **Publishing Package**:
 A local export bundle containing the finished video, cover image, title, description copy, tag suggestions, and publishing notes. The MVP produces one generic publishing package instead of platform-specific copy variants or social platform uploads.
 _Avoid_: Auto publish, platform upload, distribution
@@ -111,6 +119,14 @@ _Avoid_: Restart task, regenerate everything
 **Layered Preview**:
 A preview model where scripts, subtitle style, cover image, avatar output, and finished video are previewed at the stage where each artifact exists. The MVP does not promise real-time preview of the final video while it is still being generated.
 _Avoid_: Live final preview, real-time render preview
+
+**Previewable Media Asset**:
+A local task media file that the desktop app can safely display in the renderer, such as a product image, generated presenter image, cover image, or finished video.
+_Avoid_: Raw file path, database blob, hidden output
+
+**One-Click Video Generation**:
+The primary user-facing action that runs the real API workflow from current task settings through script generation, avatar rendering, subtitles, cover creation, and export. Developer mock checks are not part of this primary user flow.
+_Avoid_: Mock check, partial avatar render, debug workflow
 
 **Output Preset**:
 The selected video orientation, aspect ratio, resolution, and layout-safe defaults for one finished video. A video task may select one or more output presets, with portrait selected by default.

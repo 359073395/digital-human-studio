@@ -1,9 +1,11 @@
 import type {
   AvatarMode,
+  CoverStyle,
   ContentLanguage,
   GenerationStepId,
   MediaAsset,
   OutputPresetId,
+  SubtitleStyle,
   VideoTask,
   VideoTaskSummary
 } from "./domain";
@@ -39,6 +41,7 @@ export interface DigitalHumanStudioAPI {
   runRealWorkflow: (taskId: string) => Promise<VideoTask>;
   runMockWorkflow: (taskId: string) => Promise<VideoTask>;
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
+  resolveTaskAssetUrl: (input: ResolveTaskAssetUrlInput) => Promise<string>;
   openTaskExports: (taskId: string) => Promise<void>;
   listServiceConfigurations: () => Promise<ServiceConfiguration[]>;
   saveServiceConfiguration: (input: SaveServiceConfigurationInput) => Promise<ServiceConfiguration>;
@@ -61,6 +64,7 @@ export const IPC_CHANNELS = {
   runRealWorkflow: "workflow:real-run",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
+  resolveTaskAssetUrl: "assets:resolve-task-url",
   openTaskExports: "workflow:open-exports",
   listServiceConfigurations: "service-configurations:list",
   saveServiceConfiguration: "service-configurations:save",
@@ -84,9 +88,16 @@ export interface UpdateTaskInput {
   productImageAssetId?: MediaAsset["id"] | null;
   generatedPresenterImageAssetId?: MediaAsset["id"] | null;
   selectedOutputPresets?: OutputPresetId[];
+  subtitleStyle?: SubtitleStyle;
+  coverStyle?: CoverStyle;
 }
 
 export interface RetryWorkflowStepInput {
   taskId: string;
   stepId: GenerationStepId;
+}
+
+export interface ResolveTaskAssetUrlInput {
+  taskId: string;
+  relativePath: string;
 }

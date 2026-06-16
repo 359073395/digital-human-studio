@@ -1,11 +1,14 @@
 import crypto from "node:crypto";
 import {
+  DEFAULT_COVER_STYLE,
   DEFAULT_GENERATION_STEPS,
   DEFAULT_PUBLISHING_PACKAGE,
+  DEFAULT_SUBTITLE_STYLE,
   defaultOutputPresetIds,
   isContentLanguage,
   isOutputPresetId,
   type AvatarMode,
+  type CoverStyle,
   type ContentLanguage,
   type GenerationStep,
   type GenerationStepId,
@@ -15,6 +18,7 @@ import {
   type PublishingPackage,
   type SimilarityRisk,
   type StepStatus,
+  type SubtitleStyle,
   type VideoTask,
   type VideoTaskSummary
 } from "../../shared/domain";
@@ -36,6 +40,8 @@ interface TaskRow {
   product_image_asset_id: string | null;
   generated_presenter_image_asset_id: string | null;
   selected_output_presets: string;
+  subtitle_style: string;
+  cover_style: string;
   publishing_package: string;
   created_at: string;
   updated_at: string;
@@ -124,6 +130,8 @@ export class TaskRepository {
     const avatarDescriptionPrompt = "";
     const motionPrompt = "";
     const selectedOutputPresets = defaultOutputPresetIds();
+    const subtitleStyle = DEFAULT_SUBTITLE_STYLE;
+    const coverStyle = DEFAULT_COVER_STYLE;
     const publishingPackage = DEFAULT_PUBLISHING_PACKAGE;
 
     runInTransaction(this.database, () => {
@@ -143,10 +151,12 @@ export class TaskRepository {
             product_image_asset_id,
             generated_presenter_image_asset_id,
             selected_output_presets,
+            subtitle_style,
+            cover_style,
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -162,6 +172,8 @@ export class TaskRepository {
           null,
           null,
           JSON.stringify(selectedOutputPresets),
+          JSON.stringify(subtitleStyle),
+          JSON.stringify(coverStyle),
           JSON.stringify(publishingPackage),
           now,
           now
@@ -239,6 +251,8 @@ export class TaskRepository {
     const selectedOutputPresets = normalizeOutputPresetIds(
       input.selectedOutputPresets ?? existing.selectedOutputPresets
     );
+    const subtitleStyle = normalizeSubtitleStyle(input.subtitleStyle ?? existing.subtitleStyle);
+    const coverStyle = normalizeCoverStyle(input.coverStyle ?? existing.coverStyle);
 
     runInTransaction(this.database, () => {
       this.database
@@ -253,6 +267,8 @@ export class TaskRepository {
                product_image_asset_id = ?,
                generated_presenter_image_asset_id = ?,
                selected_output_presets = ?,
+               subtitle_style = ?,
+               cover_style = ?,
                updated_at = ?
            WHERE id = ?`
         )
@@ -266,6 +282,8 @@ export class TaskRepository {
           productImageAssetId ?? null,
           generatedPresenterImageAssetId ?? null,
           JSON.stringify(selectedOutputPresets),
+          JSON.stringify(subtitleStyle),
+          JSON.stringify(coverStyle),
           now,
           input.taskId
         );
@@ -538,6 +556,8 @@ export class TaskRepository {
       productImageAssetId: row.product_image_asset_id ?? undefined,
       generatedPresenterImageAssetId: row.generated_presenter_image_asset_id ?? undefined,
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
+      subtitleStyle: parseSubtitleStyle(row.subtitle_style),
+      coverStyle: parseCoverStyle(row.cover_style),
       publishingPackage: parsePublishingPackage(row.publishing_package),
       steps: this.listSteps(row.id),
       outputVariants: this.listOutputVariants(row.id),
@@ -642,6 +662,22 @@ function parsePublishingPackage(value: string): PublishingPackage {
   return JSON.parse(value) as PublishingPackage;
 }
 
+function parseSubtitleStyle(value: string | null | undefined): SubtitleStyle {
+  try {
+    return normalizeSubtitleStyle(value ? (JSON.parse(value) as Partial<SubtitleStyle>) : {});
+  } catch {
+    return DEFAULT_SUBTITLE_STYLE;
+  }
+}
+
+function parseCoverStyle(value: string | null | undefined): CoverStyle {
+  try {
+    return normalizeCoverStyle(value ? (JSON.parse(value) as Partial<CoverStyle>) : {});
+  } catch {
+    return DEFAULT_COVER_STYLE;
+  }
+}
+
 function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
   const unique = Array.from(new Set(value.filter(isOutputPresetId)));
   return unique.length > 0 ? unique : defaultOutputPresetIds();
@@ -653,4 +689,54 @@ function normalizeContentLanguage(value: string): ContentLanguage {
 
 function normalizeAvatarMode(value: string): AvatarMode {
   return value === "image-presenter" ? "image-presenter" : "preset-avatar";
+}
+
+function normalizeSubtitleStyle(value: Partial<SubtitleStyle>): SubtitleStyle {
+  return {
+    ...DEFAULT_SUBTITLE_STYLE,
+    ...value,
+    enabled: value.enabled ?? DEFAULT_SUBTITLE_STYLE.enabled,
+    position: isSubtitlePosition(value.position) ? value.position : DEFAULT_SUBTITLE_STYLE.position,
+    fontSize: clampNumber(value.fontSize, 20, 72, DEFAULT_SUBTITLE_STYLE.fontSize),
+    textColor: normalizeColor(value.textColor, DEFAULT_SUBTITLE_STYLE.textColor),
+    backgroundColor: normalizeColor(value.backgroundColor, DEFAULT_SUBTITLE_STYLE.backgroundColor),
+    fontWeight: value.fontWeight === "regular" ? "regular" : DEFAULT_SUBTITLE_STYLE.fontWeight
+  };
+}
+
+function normalizeCoverStyle(value: Partial<CoverStyle>): CoverStyle {
+  return {
+    ...DEFAULT_COVER_STYLE,
+    ...value,
+    title: typeof value.title === "string" ? value.title.slice(0, 80) : DEFAULT_COVER_STYLE.title,
+    subtitle:
+      typeof value.subtitle === "string"
+        ? value.subtitle.slice(0, 80)
+        : DEFAULT_COVER_STYLE.subtitle,
+    fontFamily:
+      typeof value.fontFamily === "string" && value.fontFamily.trim()
+        ? value.fontFamily.trim().slice(0, 48)
+        : DEFAULT_COVER_STYLE.fontFamily,
+    fontSize: clampNumber(value.fontSize, 32, 96, DEFAULT_COVER_STYLE.fontSize),
+    textColor: normalizeColor(value.textColor, DEFAULT_COVER_STYLE.textColor),
+    backgroundColor: normalizeColor(value.backgroundColor, DEFAULT_COVER_STYLE.backgroundColor),
+    accentColor: normalizeColor(value.accentColor, DEFAULT_COVER_STYLE.accentColor),
+    fontWeight: value.fontWeight === "regular" ? "regular" : DEFAULT_COVER_STYLE.fontWeight
+  };
+}
+
+function isSubtitlePosition(value: unknown): value is SubtitleStyle["position"] {
+  return value === "top" || value === "middle" || value === "bottom";
+}
+
+function normalizeColor(value: unknown, fallback: string): string {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.round(value)));
 }

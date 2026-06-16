@@ -10,6 +10,7 @@ import type {
   AppInfo,
   CreateTaskInput,
   DigitalHumanStudioAPI,
+  ResolveTaskAssetUrlInput,
   RetryWorkflowStepInput,
   UpdateTaskInput
 } from "../shared/ipc";
@@ -30,6 +31,7 @@ const IPC_CHANNELS = {
   runRealWorkflow: "workflow:real-run",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
+  resolveTaskAssetUrl: "assets:resolve-task-url",
   openTaskExports: "workflow:open-exports",
   listServiceConfigurations: "service-configurations:list",
   saveServiceConfiguration: "service-configurations:save",
@@ -63,6 +65,8 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.runMockWorkflow, taskId) as Promise<VideoTask>,
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.retryMockWorkflowStep, input) as Promise<VideoTask>,
+  resolveTaskAssetUrl: (input: ResolveTaskAssetUrlInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.resolveTaskAssetUrl, input) as Promise<string>,
   openTaskExports: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.openTaskExports, taskId) as Promise<void>,
   listServiceConfigurations: () =>

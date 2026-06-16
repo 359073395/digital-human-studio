@@ -1,6 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
+import { DEFAULT_COVER_STYLE, DEFAULT_SUBTITLE_STYLE } from "../../shared/domain";
 
 export type TaskDatabase = InstanceType<typeof DatabaseSync>;
+
+const DEFAULT_SUBTITLE_STYLE_JSON = JSON.stringify(DEFAULT_SUBTITLE_STYLE).replaceAll("'", "''");
+const DEFAULT_COVER_STYLE_JSON = JSON.stringify(DEFAULT_COVER_STYLE).replaceAll("'", "''");
 
 const MIGRATIONS = [
   {
@@ -80,6 +84,14 @@ const MIGRATIONS = [
       ALTER TABLE video_tasks ADD COLUMN motion_prompt TEXT NOT NULL DEFAULT '';
       ALTER TABLE video_tasks ADD COLUMN product_image_asset_id TEXT;
       ALTER TABLE video_tasks ADD COLUMN generated_presenter_image_asset_id TEXT;
+    `
+  },
+  {
+    id: 5,
+    name: "add-preview-style-settings",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN subtitle_style TEXT NOT NULL DEFAULT '${DEFAULT_SUBTITLE_STYLE_JSON}';
+      ALTER TABLE video_tasks ADD COLUMN cover_style TEXT NOT NULL DEFAULT '${DEFAULT_COVER_STYLE_JSON}';
     `
   }
 ] as const;
