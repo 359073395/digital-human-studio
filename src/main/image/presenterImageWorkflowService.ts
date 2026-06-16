@@ -32,8 +32,33 @@ export class PresenterImageWorkflowService {
 
     return this.taskRepository.updateTask({
       taskId,
+      generationMode: "product-avatar",
       avatarMode: "image-presenter",
       productImageAssetId: asset.id,
+      generatedPresenterImageAssetId: null
+    });
+  }
+
+  importReferenceImage(taskId: string, sourcePath: string): VideoTask {
+    const extension = normalizeImageExtension(path.extname(sourcePath));
+    const relativePath = `source/reference-image${extension}`;
+    const absolutePath = absoluteTaskPath(this.paths, taskId, relativePath);
+
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.copyFileSync(sourcePath, absolutePath);
+
+    const taskWithAsset = this.taskRepository.addMediaAsset(
+      taskId,
+      "reference-image",
+      relativePath
+    );
+    const asset = requireAsset(taskWithAsset, "reference-image", relativePath);
+
+    return this.taskRepository.updateTask({
+      taskId,
+      generationMode: "image-lipsync",
+      avatarMode: "image-presenter",
+      referenceImageAssetId: asset.id,
       generatedPresenterImageAssetId: null
     });
   }

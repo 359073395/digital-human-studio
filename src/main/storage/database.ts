@@ -1,10 +1,18 @@
 import { DatabaseSync } from "node:sqlite";
-import { DEFAULT_COVER_STYLE, DEFAULT_SUBTITLE_STYLE } from "../../shared/domain";
+import {
+  DEFAULT_COVER_STYLE,
+  DEFAULT_PERSONAL_IP_PROFILE,
+  DEFAULT_SUBTITLE_STYLE
+} from "../../shared/domain";
 
 export type TaskDatabase = InstanceType<typeof DatabaseSync>;
 
 const DEFAULT_SUBTITLE_STYLE_JSON = JSON.stringify(DEFAULT_SUBTITLE_STYLE).replaceAll("'", "''");
 const DEFAULT_COVER_STYLE_JSON = JSON.stringify(DEFAULT_COVER_STYLE).replaceAll("'", "''");
+const DEFAULT_PERSONAL_IP_PROFILE_JSON = JSON.stringify(DEFAULT_PERSONAL_IP_PROFILE).replaceAll(
+  "'",
+  "''"
+);
 
 const MIGRATIONS = [
   {
@@ -92,6 +100,15 @@ const MIGRATIONS = [
     sql: `
       ALTER TABLE video_tasks ADD COLUMN subtitle_style TEXT NOT NULL DEFAULT '${DEFAULT_SUBTITLE_STYLE_JSON}';
       ALTER TABLE video_tasks ADD COLUMN cover_style TEXT NOT NULL DEFAULT '${DEFAULT_COVER_STYLE_JSON}';
+    `
+  },
+  {
+    id: 6,
+    name: "add-generation-mode-and-ip-profile",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN generation_mode TEXT NOT NULL DEFAULT 'preset-avatar';
+      ALTER TABLE video_tasks ADD COLUMN reference_image_asset_id TEXT;
+      ALTER TABLE video_tasks ADD COLUMN personal_ip_profile TEXT NOT NULL DEFAULT '${DEFAULT_PERSONAL_IP_PROFILE_JSON}';
     `
   }
 ] as const;

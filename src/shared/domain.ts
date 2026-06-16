@@ -4,6 +4,14 @@ export type SimilarityRisk = "unknown" | "low" | "medium" | "high";
 
 export type AvatarMode = "preset-avatar" | "image-presenter";
 
+export type VideoGenerationMode =
+  | "preset-avatar"
+  | "product-avatar"
+  | "image-lipsync"
+  | "personal-ip"
+  | "viral-remix"
+  | "mixed-cut";
+
 export type StepStatus = "waiting" | "running" | "complete" | "failed" | "retry-ready";
 
 export type GenerationStepId =
@@ -27,6 +35,7 @@ export type MediaAssetKind =
   | "source-video"
   | "source-transcript"
   | "product-image"
+  | "reference-image"
   | "generated-presenter-image"
   | "avatar-video"
   | "subtitle-file"
@@ -78,6 +87,14 @@ export interface CoverStyle {
   fontWeight: TextWeight;
 }
 
+export interface PersonalIpProfile {
+  name: string;
+  persona: string;
+  tone: string;
+  catchphrases: string;
+  bannedWords: string;
+}
+
 export interface OutputVariant {
   id: string;
   taskId: string;
@@ -113,14 +130,17 @@ export interface VideoTask {
   similarityRisk: SimilarityRisk;
   scriptGenerationNotes: string;
   contentLanguage: ContentLanguage;
+  generationMode: VideoGenerationMode;
   avatarMode: AvatarMode;
   avatarDescriptionPrompt: string;
   motionPrompt: string;
   productImageAssetId?: string;
+  referenceImageAssetId?: string;
   generatedPresenterImageAssetId?: string;
   selectedOutputPresets: OutputPresetId[];
   subtitleStyle: SubtitleStyle;
   coverStyle: CoverStyle;
+  personalIpProfile: PersonalIpProfile;
   steps: GenerationStep[];
   outputVariants: OutputVariant[];
   mediaAssets: MediaAsset[];
@@ -213,6 +233,14 @@ export const DEFAULT_COVER_STYLE: CoverStyle = {
   fontWeight: "bold"
 };
 
+export const DEFAULT_PERSONAL_IP_PROFILE: PersonalIpProfile = {
+  name: "",
+  persona: "",
+  tone: "",
+  catchphrases: "",
+  bannedWords: ""
+};
+
 export function defaultOutputPresetIds(): OutputPresetId[] {
   return OUTPUT_PRESETS.filter((preset) => preset.defaultSelected).map((preset) => preset.id);
 }
@@ -223,4 +251,15 @@ export function isOutputPresetId(value: string): value is OutputPresetId {
 
 export function isContentLanguage(value: string): value is ContentLanguage {
   return CONTENT_LANGUAGES.some((language) => language.id === value);
+}
+
+export function isVideoGenerationMode(value: string): value is VideoGenerationMode {
+  return (
+    value === "preset-avatar" ||
+    value === "product-avatar" ||
+    value === "image-lipsync" ||
+    value === "personal-ip" ||
+    value === "viral-remix" ||
+    value === "mixed-cut"
+  );
 }

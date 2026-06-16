@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_COVER_STYLE,
+  DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE,
   OUTPUT_PRESETS,
   type VideoTask
@@ -38,12 +39,14 @@ function createTask(): VideoTask {
     similarityRisk: "low",
     scriptGenerationNotes: "",
     contentLanguage: "id-ID",
+    generationMode: "product-avatar",
     avatarMode: "image-presenter",
     avatarDescriptionPrompt: "年轻印尼女主播，亲和自然，穿白色衬衫，手拿护肤品。",
     motionPrompt: "手拿商品靠近镜头展示，轻微点头。",
     selectedOutputPresets: ["portrait-9-16"],
     subtitleStyle: DEFAULT_SUBTITLE_STYLE,
     coverStyle: DEFAULT_COVER_STYLE,
+    personalIpProfile: DEFAULT_PERSONAL_IP_PROFILE,
     steps: [],
     outputVariants: [],
     mediaAssets: [],

@@ -26,6 +26,7 @@ const IPC_CHANNELS = {
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
   uploadProductImage: "source:upload-product-image",
+  uploadReferenceImage: "source:upload-reference-image",
   generatePresenterImages: "image:generate-presenter-images",
   renderHeyGenAvatar: "avatar:render-heygen",
   runRealWorkflow: "workflow:real-run",
@@ -55,6 +56,8 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.transcribeSource, taskId) as Promise<SourceTranscriptionResult>,
   uploadProductImage: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadProductImage, taskId) as Promise<VideoTask>,
+  uploadReferenceImage: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadReferenceImage, taskId) as Promise<VideoTask>,
   generatePresenterImages: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.generatePresenterImages, taskId) as Promise<VideoTask>,
   renderHeyGenAvatar: (taskId: string) =>

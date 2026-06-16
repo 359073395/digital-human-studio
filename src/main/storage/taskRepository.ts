@@ -2,11 +2,13 @@ import crypto from "node:crypto";
 import {
   DEFAULT_COVER_STYLE,
   DEFAULT_GENERATION_STEPS,
+  DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_PUBLISHING_PACKAGE,
   DEFAULT_SUBTITLE_STYLE,
   defaultOutputPresetIds,
   isContentLanguage,
   isOutputPresetId,
+  isVideoGenerationMode,
   type AvatarMode,
   type CoverStyle,
   type ContentLanguage,
@@ -15,10 +17,12 @@ import {
   type MediaAsset,
   type OutputPresetId,
   type OutputVariant,
+  type PersonalIpProfile,
   type PublishingPackage,
   type SimilarityRisk,
   type StepStatus,
   type SubtitleStyle,
+  type VideoGenerationMode,
   type VideoTask,
   type VideoTaskSummary
 } from "../../shared/domain";
@@ -34,14 +38,17 @@ interface TaskRow {
   similarity_risk: SimilarityRisk;
   script_generation_notes: string;
   content_language: ContentLanguage;
+  generation_mode: VideoGenerationMode;
   avatar_mode: AvatarMode;
   avatar_description_prompt: string;
   motion_prompt: string;
   product_image_asset_id: string | null;
+  reference_image_asset_id: string | null;
   generated_presenter_image_asset_id: string | null;
   selected_output_presets: string;
   subtitle_style: string;
   cover_style: string;
+  personal_ip_profile: string;
   publishing_package: string;
   created_at: string;
   updated_at: string;
@@ -126,12 +133,14 @@ export class TaskRepository {
     const similarityRisk: SimilarityRisk = "unknown";
     const scriptGenerationNotes = "";
     const contentLanguage: ContentLanguage = "zh-CN";
+    const generationMode: VideoGenerationMode = "preset-avatar";
     const avatarMode: AvatarMode = "preset-avatar";
     const avatarDescriptionPrompt = "";
     const motionPrompt = "";
     const selectedOutputPresets = defaultOutputPresetIds();
     const subtitleStyle = DEFAULT_SUBTITLE_STYLE;
     const coverStyle = DEFAULT_COVER_STYLE;
+    const personalIpProfile = DEFAULT_PERSONAL_IP_PROFILE;
     const publishingPackage = DEFAULT_PUBLISHING_PACKAGE;
 
     runInTransaction(this.database, () => {
@@ -145,18 +154,21 @@ export class TaskRepository {
             similarity_risk,
             script_generation_notes,
             content_language,
+            generation_mode,
             avatar_mode,
             avatar_description_prompt,
             motion_prompt,
             product_image_asset_id,
+            reference_image_asset_id,
             generated_presenter_image_asset_id,
             selected_output_presets,
             subtitle_style,
             cover_style,
+            personal_ip_profile,
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -166,14 +178,17 @@ export class TaskRepository {
           similarityRisk,
           scriptGenerationNotes,
           contentLanguage,
+          generationMode,
           avatarMode,
           avatarDescriptionPrompt,
           motionPrompt,
           null,
           null,
+          null,
           JSON.stringify(selectedOutputPresets),
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
+          JSON.stringify(personalIpProfile),
           JSON.stringify(publishingPackage),
           now,
           now
@@ -233,7 +248,11 @@ export class TaskRepository {
     const contentLanguage = normalizeContentLanguage(
       input.contentLanguage ?? existing.contentLanguage
     );
-    const avatarMode = normalizeAvatarMode(input.avatarMode ?? existing.avatarMode);
+    const generationMode = normalizeGenerationMode(input.generationMode ?? existing.generationMode);
+    const avatarMode = normalizeAvatarModeForGenerationMode(
+      generationMode,
+      input.avatarMode ?? existing.avatarMode
+    );
     const avatarDescriptionPrompt =
       input.avatarDescriptionPrompt === undefined
         ? existing.avatarDescriptionPrompt
@@ -244,6 +263,10 @@ export class TaskRepository {
       input.productImageAssetId === undefined
         ? existing.productImageAssetId
         : input.productImageAssetId;
+    const referenceImageAssetId =
+      input.referenceImageAssetId === undefined
+        ? existing.referenceImageAssetId
+        : input.referenceImageAssetId;
     const generatedPresenterImageAssetId =
       input.generatedPresenterImageAssetId === undefined
         ? existing.generatedPresenterImageAssetId
@@ -253,6 +276,9 @@ export class TaskRepository {
     );
     const subtitleStyle = normalizeSubtitleStyle(input.subtitleStyle ?? existing.subtitleStyle);
     const coverStyle = normalizeCoverStyle(input.coverStyle ?? existing.coverStyle);
+    const personalIpProfile = normalizePersonalIpProfile(
+      input.personalIpProfile ?? existing.personalIpProfile
+    );
 
     runInTransaction(this.database, () => {
       this.database
@@ -261,14 +287,17 @@ export class TaskRepository {
            SET title = ?,
                source_script = ?,
                content_language = ?,
+               generation_mode = ?,
                avatar_mode = ?,
                avatar_description_prompt = ?,
                motion_prompt = ?,
                product_image_asset_id = ?,
+               reference_image_asset_id = ?,
                generated_presenter_image_asset_id = ?,
                selected_output_presets = ?,
                subtitle_style = ?,
                cover_style = ?,
+               personal_ip_profile = ?,
                updated_at = ?
            WHERE id = ?`
         )
@@ -276,14 +305,17 @@ export class TaskRepository {
           title,
           sourceScript,
           contentLanguage,
+          generationMode,
           avatarMode,
           avatarDescriptionPrompt,
           motionPrompt,
           productImageAssetId ?? null,
+          referenceImageAssetId ?? null,
           generatedPresenterImageAssetId ?? null,
           JSON.stringify(selectedOutputPresets),
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
+          JSON.stringify(personalIpProfile),
           now,
           input.taskId
         );
@@ -550,14 +582,17 @@ export class TaskRepository {
       similarityRisk: row.similarity_risk,
       scriptGenerationNotes: row.script_generation_notes,
       contentLanguage: normalizeContentLanguage(row.content_language),
+      generationMode: normalizeGenerationMode(row.generation_mode),
       avatarMode: normalizeAvatarMode(row.avatar_mode),
       avatarDescriptionPrompt: row.avatar_description_prompt,
       motionPrompt: row.motion_prompt,
       productImageAssetId: row.product_image_asset_id ?? undefined,
+      referenceImageAssetId: row.reference_image_asset_id ?? undefined,
       generatedPresenterImageAssetId: row.generated_presenter_image_asset_id ?? undefined,
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
       subtitleStyle: parseSubtitleStyle(row.subtitle_style),
       coverStyle: parseCoverStyle(row.cover_style),
+      personalIpProfile: parsePersonalIpProfile(row.personal_ip_profile),
       publishingPackage: parsePublishingPackage(row.publishing_package),
       steps: this.listSteps(row.id),
       outputVariants: this.listOutputVariants(row.id),
@@ -678,6 +713,16 @@ function parseCoverStyle(value: string | null | undefined): CoverStyle {
   }
 }
 
+function parsePersonalIpProfile(value: string | null | undefined): PersonalIpProfile {
+  try {
+    return normalizePersonalIpProfile(
+      value ? (JSON.parse(value) as Partial<PersonalIpProfile>) : {}
+    );
+  } catch {
+    return DEFAULT_PERSONAL_IP_PROFILE;
+  }
+}
+
 function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
   const unique = Array.from(new Set(value.filter(isOutputPresetId)));
   return unique.length > 0 ? unique : defaultOutputPresetIds();
@@ -689,6 +734,21 @@ function normalizeContentLanguage(value: string): ContentLanguage {
 
 function normalizeAvatarMode(value: string): AvatarMode {
   return value === "image-presenter" ? "image-presenter" : "preset-avatar";
+}
+
+function normalizeGenerationMode(value: string): VideoGenerationMode {
+  return isVideoGenerationMode(value) ? value : "preset-avatar";
+}
+
+function normalizeAvatarModeForGenerationMode(
+  generationMode: VideoGenerationMode,
+  avatarMode: AvatarMode
+): AvatarMode {
+  if (generationMode === "product-avatar" || generationMode === "image-lipsync") {
+    return "image-presenter";
+  }
+
+  return normalizeAvatarMode(avatarMode);
 }
 
 function normalizeSubtitleStyle(value: Partial<SubtitleStyle>): SubtitleStyle {
@@ -725,6 +785,20 @@ function normalizeCoverStyle(value: Partial<CoverStyle>): CoverStyle {
   };
 }
 
+function normalizePersonalIpProfile(value: Partial<PersonalIpProfile>): PersonalIpProfile {
+  return {
+    name: normalizeShortText(value.name, DEFAULT_PERSONAL_IP_PROFILE.name, 60),
+    persona: normalizeLongText(value.persona, DEFAULT_PERSONAL_IP_PROFILE.persona, 800),
+    tone: normalizeLongText(value.tone, DEFAULT_PERSONAL_IP_PROFILE.tone, 500),
+    catchphrases: normalizeLongText(
+      value.catchphrases,
+      DEFAULT_PERSONAL_IP_PROFILE.catchphrases,
+      500
+    ),
+    bannedWords: normalizeLongText(value.bannedWords, DEFAULT_PERSONAL_IP_PROFILE.bannedWords, 500)
+  };
+}
+
 function isSubtitlePosition(value: unknown): value is SubtitleStyle["position"] {
   return value === "top" || value === "middle" || value === "bottom";
 }
@@ -739,4 +813,12 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   }
 
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function normalizeShortText(value: unknown, fallback: string, maxLength: number): string {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : fallback;
+}
+
+function normalizeLongText(value: unknown, fallback: string, maxLength: number): string {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : fallback;
 }

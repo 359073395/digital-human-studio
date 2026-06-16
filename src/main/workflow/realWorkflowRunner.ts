@@ -26,12 +26,22 @@ export class RealWorkflowRunner {
     }
 
     task = this.requireTask(taskId);
-    if (task.avatarMode === "image-presenter" && !this.hasGeneratedPresenterImages(task)) {
+    if (task.generationMode === "product-avatar" && !this.hasGeneratedPresenterImages(task)) {
       task = await this.presenterImageWorkflowService.generatePresenterImages(taskId);
       const avatarStep = task.steps.find((step) => step.id === "avatar");
       if (avatarStep?.status === "retry-ready" || avatarStep?.status === "failed") {
         return task;
       }
+    }
+
+    task = this.requireTask(taskId);
+    if (task.generationMode === "image-lipsync" && !this.hasReferenceImage(task)) {
+      return this.taskRepository.updateStepStatus(
+        taskId,
+        "avatar",
+        "retry-ready",
+        "请先上传人物图片。"
+      );
     }
 
     task = await this.avatarWorkflowService.renderHeyGenAvatar(taskId);
@@ -64,6 +74,15 @@ export class RealWorkflowRunner {
         (asset) =>
           asset.kind === "generated-presenter-image" &&
           asset.relativePath.includes(`generated-presenter-${presetId}.`)
+      )
+    );
+  }
+
+  private hasReferenceImage(task: VideoTask): boolean {
+    return Boolean(
+      task.referenceImageAssetId &&
+      task.mediaAssets.some(
+        (asset) => asset.id === task.referenceImageAssetId && asset.kind === "reference-image"
       )
     );
   }

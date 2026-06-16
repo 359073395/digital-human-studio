@@ -227,6 +227,32 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return presenterImageWorkflowService.importProductImage(taskId, result.filePaths[0]);
   });
 
+  ipcMain.handle(IPC_CHANNELS.uploadReferenceImage, async (_event, taskId: string) => {
+    const referenceImageDialogOptions: OpenDialogOptions = {
+      title: "选择人物图片",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "图片",
+          extensions: ["png", "jpg", "jpeg", "webp"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, referenceImageDialogOptions)
+      : await dialog.showOpenDialog(referenceImageDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return presenterImageWorkflowService.importReferenceImage(taskId, result.filePaths[0]);
+  });
+
   ipcMain.handle(IPC_CHANNELS.generatePresenterImages, (_event, taskId: string) =>
     presenterImageWorkflowService.generatePresenterImages(taskId)
   );

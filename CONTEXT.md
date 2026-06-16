@@ -32,6 +32,10 @@ _Avoid_: MVP video, finished video
 A single attempt to produce one finished video from one source script and one set of generation settings. The MVP interface focuses on one active video task at a time.
 _Avoid_: Batch job, project, campaign
 
+**Video Generation Mode**:
+The top-level category selected for a video task. It controls which input materials the user sees and how generation services interpret the task. The MVP modes are preset avatar talking-head, product avatar, image lip-sync, personal IP video, and viral structure remix. Mixed-cut video is shown as a future disabled mode.
+_Avoid_: Workflow step, output preset, provider setting
+
 **Task List**:
 The persistent collection of video tasks managed by the application. The MVP does not expose batch generation as a primary workflow, but the product language treats each video as a task in a list.
 _Avoid_: Batch queue, playlist, spreadsheet
@@ -47,6 +51,10 @@ _Avoid_: Voice clone path, custom voice mode
 **Viral Structure Reuse**:
 The script workflow that preserves the reference script's abstract mechanics, such as hook function, information order, emotional curve, and CTA placement, while generating original expression.
 _Avoid_: 1:1 rewrite, plagiarism rewrite, duplicate-safe rewrite
+
+**Viral Structure Remix**:
+The video generation mode called "爆款视频复刻" in the Chinese interface. It accepts a viral reference script as source material, keeps only reusable mechanics, and generates a new script with original wording, examples, persona, and claims.
+_Avoid_: Copying a viral video, creator imitation, protected expression reuse
 
 **Original Expression**:
 New wording, sentence rhythm, examples, proof, and creator voice generated for the user's own product or topic. It must not preserve the reference script's identifiable expression.
@@ -151,6 +159,18 @@ _Avoid_: Cropped render, reused render, aspect-ratio conversion
 **Avatar Mode**:
 The task-level choice that decides whether a video uses a HeyGen preset avatar or an AI-generated product presenter image as the visual speaker source.
 _Avoid_: Provider switch, style preset, output preset
+
+**Product Avatar Video**:
+A video generation mode where the user uploads a product image, generates a presenter image holding or wearing the product, and then sends that image to HeyGen for lip-synced video generation.
+_Avoid_: Preset avatar video, mixed-cut video, product-only image
+
+**Image Lip-Sync Video**:
+A video generation mode where the user uploads a reference person image and HeyGen animates that image with lip synchronization for the generated script.
+_Avoid_: Product avatar video, static image narration, custom digital twin
+
+**Personal IP Video**:
+A video generation mode that applies a reusable creator profile, persona, tone, catchphrases, and banned words to script generation while still using the selected avatar provider for video rendering.
+_Avoid_: Account profile, trained voice, creator clone
 
 **AI Product Image Presenter**:
 A generated presenter image that shows a person holding, wearing, or presenting a product image supplied by the user, then becomes the source image for HeyGen image-based lip-sync video.

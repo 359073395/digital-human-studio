@@ -14,7 +14,9 @@ export class MockScriptProvider implements ScriptProvider {
       notes: "Mock LLM 已按结构复用、表达改写、前 5 秒改写的规则生成脚本。",
       promptPreview: buildScriptGenerationPrompt({
         sourceScript,
-        contentLanguage: task.contentLanguage
+        contentLanguage: task.contentLanguage,
+        generationMode: task.generationMode,
+        personalIpProfile: task.personalIpProfile
       })
     };
   }

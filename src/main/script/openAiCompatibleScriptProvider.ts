@@ -50,7 +50,9 @@ export class OpenAiCompatibleScriptProvider implements ScriptProvider {
 
     const promptPreview = buildScriptGenerationPrompt({
       sourceScript: task.sourceScript,
-      contentLanguage: task.contentLanguage
+      contentLanguage: task.contentLanguage,
+      generationMode: task.generationMode,
+      personalIpProfile: task.personalIpProfile
     });
 
     const response = await fetch(buildChatCompletionUrl(configuration), {

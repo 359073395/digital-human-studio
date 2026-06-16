@@ -5,7 +5,9 @@ import type {
   GenerationStepId,
   MediaAsset,
   OutputPresetId,
+  PersonalIpProfile,
   SubtitleStyle,
+  VideoGenerationMode,
   VideoTask,
   VideoTaskSummary
 } from "./domain";
@@ -36,6 +38,7 @@ export interface DigitalHumanStudioAPI {
   generateScript: (taskId: string) => Promise<VideoTask>;
   transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
   uploadProductImage: (taskId: string) => Promise<VideoTask>;
+  uploadReferenceImage: (taskId: string) => Promise<VideoTask>;
   generatePresenterImages: (taskId: string) => Promise<VideoTask>;
   renderHeyGenAvatar: (taskId: string) => Promise<VideoTask>;
   runRealWorkflow: (taskId: string) => Promise<VideoTask>;
@@ -59,6 +62,7 @@ export const IPC_CHANNELS = {
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
   uploadProductImage: "source:upload-product-image",
+  uploadReferenceImage: "source:upload-reference-image",
   generatePresenterImages: "image:generate-presenter-images",
   renderHeyGenAvatar: "avatar:render-heygen",
   runRealWorkflow: "workflow:real-run",
@@ -82,14 +86,17 @@ export interface UpdateTaskInput {
   title?: string;
   sourceScript?: string;
   contentLanguage?: ContentLanguage;
+  generationMode?: VideoGenerationMode;
   avatarMode?: AvatarMode;
   avatarDescriptionPrompt?: string;
   motionPrompt?: string;
   productImageAssetId?: MediaAsset["id"] | null;
+  referenceImageAssetId?: MediaAsset["id"] | null;
   generatedPresenterImageAssetId?: MediaAsset["id"] | null;
   selectedOutputPresets?: OutputPresetId[];
   subtitleStyle?: SubtitleStyle;
   coverStyle?: CoverStyle;
+  personalIpProfile?: PersonalIpProfile;
 }
 
 export interface RetryWorkflowStepInput {

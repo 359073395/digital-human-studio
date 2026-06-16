@@ -13,11 +13,14 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   CONTENT_LANGUAGES,
   DEFAULT_COVER_STYLE,
+  DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE,
   OUTPUT_PRESETS,
   type CoverStyle,
   type OutputPresetId,
+  type PersonalIpProfile,
   type SubtitleStyle,
+  type VideoGenerationMode,
   type VideoTask,
   type VideoTaskSummary
 } from "../shared/domain";
@@ -40,12 +43,14 @@ const fallbackTask: VideoTask = {
   similarityRisk: "low",
   scriptGenerationNotes: "本地预览脚本。",
   contentLanguage: "zh-CN",
+  generationMode: "preset-avatar",
   avatarMode: "preset-avatar",
   avatarDescriptionPrompt: "",
   motionPrompt: "",
   selectedOutputPresets: ["portrait-9-16"],
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
   coverStyle: DEFAULT_COVER_STYLE,
+  personalIpProfile: DEFAULT_PERSONAL_IP_PROFILE,
   publishingPackage: {
     title: "",
     description: "",
@@ -85,14 +90,55 @@ type EditableTaskPatch = Partial<
     | "title"
     | "sourceScript"
     | "contentLanguage"
+    | "generationMode"
     | "avatarMode"
     | "avatarDescriptionPrompt"
     | "motionPrompt"
     | "selectedOutputPresets"
     | "subtitleStyle"
     | "coverStyle"
+    | "personalIpProfile"
   >
 >;
+
+const GENERATION_MODE_TABS: Array<{
+  id: VideoGenerationMode;
+  label: string;
+  description: string;
+  disabled?: boolean;
+}> = [
+  {
+    id: "preset-avatar",
+    label: "预设数字人口播",
+    description: "HeyGen Avatar + 脚本"
+  },
+  {
+    id: "product-avatar",
+    label: "商品带货数字人",
+    description: "商品图 + 人物商品图"
+  },
+  {
+    id: "image-lipsync",
+    label: "图片口型同步",
+    description: "人物图 + 对口型"
+  },
+  {
+    id: "personal-ip",
+    label: "个人IP视频",
+    description: "固定人设和语气"
+  },
+  {
+    id: "viral-remix",
+    label: "爆款视频复刻",
+    description: "复刻结构，原创表达"
+  },
+  {
+    id: "mixed-cut",
+    label: "混剪视频",
+    description: "后续加入素材混剪",
+    disabled: true
+  }
+];
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -112,6 +158,8 @@ export function App() {
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
+  const sourceScriptLabel =
+    selectedTask.generationMode === "viral-remix" ? "参考爆款文案" : "源文案";
   const primaryVariant =
     selectedTask.outputVariants.find((variant) =>
       selectedTask.selectedOutputPresets.includes(variant.presetId)
@@ -119,6 +167,9 @@ export function App() {
   const productImageAsset = selectedTask.mediaAssets.find(
     (asset) => asset.id === selectedTask.productImageAssetId
   );
+  const referenceImageAsset =
+    selectedTask.mediaAssets.find((asset) => asset.id === selectedTask.referenceImageAssetId) ??
+    selectedTask.mediaAssets.find((asset) => asset.kind === "reference-image");
   const generatedPresenterAsset =
     selectedTask.mediaAssets.find(
       (asset) =>
@@ -135,6 +186,7 @@ export function App() {
         new Set(
           [
             productImageAsset?.relativePath,
+            referenceImageAsset?.relativePath,
             generatedPresenterAsset?.relativePath,
             ...selectedTask.outputVariants.flatMap((variant) => [
               variant.finishedVideoPath,
@@ -143,7 +195,12 @@ export function App() {
           ].filter((path): path is string => Boolean(path))
         )
       ),
-    [generatedPresenterAsset?.relativePath, productImageAsset?.relativePath, selectedTask]
+    [
+      generatedPresenterAsset?.relativePath,
+      productImageAsset?.relativePath,
+      referenceImageAsset?.relativePath,
+      selectedTask
+    ]
   );
   const previewPathSignature = previewRelativePaths.join("|");
   const finishedVideoUrl = primaryVariant?.finishedVideoPath
@@ -154,6 +211,9 @@ export function App() {
     : "";
   const productImageUrl = productImageAsset?.relativePath
     ? assetUrls[productImageAsset.relativePath]
+    : "";
+  const referenceImageUrl = referenceImageAsset?.relativePath
+    ? assetUrls[referenceImageAsset.relativePath]
     : "";
   const generatedPresenterUrl = generatedPresenterAsset?.relativePath
     ? assetUrls[generatedPresenterAsset.relativePath]
@@ -332,12 +392,14 @@ export function App() {
         taskId: selectedTask.id,
         sourceScript: selectedTask.sourceScript,
         contentLanguage: selectedTask.contentLanguage,
+        generationMode: selectedTask.generationMode,
         avatarMode: selectedTask.avatarMode,
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
         selectedOutputPresets: selectedTask.selectedOutputPresets,
         subtitleStyle,
-        coverStyle
+        coverStyle,
+        personalIpProfile: selectedTask.personalIpProfile
       });
       const task = await api.runRealWorkflow(selectedTask.id);
       const failedStep = task.steps.find(
@@ -378,6 +440,28 @@ export function App() {
     }
   }
 
+  async function uploadReferenceImage() {
+    const api = requireDesktopRuntime("上传人物图");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择人物图片...");
+
+    try {
+      const task = await api.uploadReferenceImage(selectedTask.id);
+      setActionMessage(
+        task.referenceImageAssetId ? "人物图片已导入，可在右侧预览" : "未选择人物图片，任务保持不变"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "人物图片导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
   async function generatePresenterImages() {
     const api = requireDesktopRuntime("生成人物商品图");
     if (!api) {
@@ -390,6 +474,7 @@ export function App() {
     try {
       await api.updateTask({
         taskId: selectedTask.id,
+        generationMode: "product-avatar",
         avatarMode: "image-presenter",
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
@@ -422,6 +507,26 @@ export function App() {
     });
   }
 
+  async function changeGenerationMode(mode: VideoGenerationMode) {
+    if (mode === "mixed-cut") {
+      setActionMessage("混剪视频会在后续版本加入。");
+      return;
+    }
+
+    const nextAvatarMode =
+      mode === "product-avatar" || mode === "image-lipsync" ? "image-presenter" : "preset-avatar";
+
+    setSelectedTask((current) => ({
+      ...current,
+      generationMode: mode,
+      avatarMode: nextAvatarMode
+    }));
+    await updateCurrentTask({
+      generationMode: mode,
+      avatarMode: nextAvatarMode
+    });
+  }
+
   async function updateSubtitleStyle(patch: Partial<SubtitleStyle>) {
     const nextStyle = { ...subtitleStyle, ...patch };
     setSelectedTask((current) => ({
@@ -431,7 +536,7 @@ export function App() {
         ...patch
       }
     }));
-    await updateCurrentTask({ subtitleStyle: nextStyle });
+    void updateCurrentTask({ subtitleStyle: nextStyle });
   }
 
   async function updateCoverStyle(patch: Partial<CoverStyle>) {
@@ -443,7 +548,22 @@ export function App() {
         ...patch
       }
     }));
-    await updateCurrentTask({ coverStyle: nextStyle });
+    void updateCurrentTask({ coverStyle: nextStyle });
+  }
+
+  async function updatePersonalIpProfile(patch: Partial<PersonalIpProfile>) {
+    const nextProfile = {
+      ...(selectedTask.personalIpProfile ?? DEFAULT_PERSONAL_IP_PROFILE),
+      ...patch
+    };
+    setSelectedTask((current) => ({
+      ...current,
+      personalIpProfile: {
+        ...(current.personalIpProfile ?? DEFAULT_PERSONAL_IP_PROFILE),
+        ...patch
+      }
+    }));
+    await updateCurrentTask({ personalIpProfile: nextProfile });
   }
 
   async function openTaskExports() {
@@ -562,15 +682,31 @@ export function App() {
         </aside>
 
         <section className="editor-pane">
+          <nav className="mode-tabs" aria-label="视频生成类别">
+            {GENERATION_MODE_TABS.map((mode) => (
+              <button
+                className={selectedTask.generationMode === mode.id ? "active" : ""}
+                disabled={Boolean(mode.disabled)}
+                key={mode.id}
+                type="button"
+                onClick={() => void changeGenerationMode(mode.id)}
+                title={mode.description}
+              >
+                <strong>{mode.label}</strong>
+                <span>{mode.description}</span>
+              </button>
+            ))}
+          </nav>
+
           <div className="script-grid">
             <section className="field-block">
               <div className="section-title">
                 <Upload size={16} />
-                <h2>源文案</h2>
+                <h2>{sourceScriptLabel}</h2>
               </div>
               <textarea
                 value={selectedTask.sourceScript}
-                aria-label="源文案"
+                aria-label={sourceScriptLabel}
                 onBlur={() => void updateCurrentTask({ sourceScript: selectedTask.sourceScript })}
                 onChange={(event) =>
                   setSelectedTask((current) => ({
@@ -602,22 +738,8 @@ export function App() {
           </div>
 
           <section className="compact-block generation-settings-block">
-            <h3>生成设置</h3>
+            <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
             <div className="control-grid">
-              <label>
-                模式
-                <select
-                  value={selectedTask.avatarMode}
-                  onChange={(event) =>
-                    void updateCurrentTask({
-                      avatarMode: event.target.value as VideoTask["avatarMode"]
-                    })
-                  }
-                >
-                  <option value="preset-avatar">HeyGen 预设数字人</option>
-                  <option value="image-presenter">AI 商品图数字人</option>
-                </select>
-              </label>
               <label>
                 生成语言 / 语音
                 <select
@@ -663,7 +785,7 @@ export function App() {
             </div>
 
             <div className="prompt-grid">
-              {selectedTask.avatarMode === "image-presenter" ? (
+              {selectedTask.generationMode === "product-avatar" ? (
                 <label>
                   数字人描述提示词
                   <textarea
@@ -684,6 +806,66 @@ export function App() {
                   />
                 </label>
               ) : null}
+              {selectedTask.generationMode === "personal-ip" ? (
+                <>
+                  <label>
+                    IP 名称
+                    <input
+                      type="text"
+                      value={selectedTask.personalIpProfile.name}
+                      onChange={(event) =>
+                        void updatePersonalIpProfile({ name: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    固定语气
+                    <input
+                      type="text"
+                      value={selectedTask.personalIpProfile.tone}
+                      onChange={(event) =>
+                        void updatePersonalIpProfile({ tone: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    人设描述
+                    <textarea
+                      className="compact-textarea"
+                      value={selectedTask.personalIpProfile.persona}
+                      onChange={(event) =>
+                        void updatePersonalIpProfile({ persona: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    口头禅
+                    <textarea
+                      className="compact-textarea"
+                      value={selectedTask.personalIpProfile.catchphrases}
+                      onChange={(event) =>
+                        void updatePersonalIpProfile({ catchphrases: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    禁用词
+                    <textarea
+                      className="compact-textarea"
+                      value={selectedTask.personalIpProfile.bannedWords}
+                      onChange={(event) =>
+                        void updatePersonalIpProfile({ bannedWords: event.target.value })
+                      }
+                    />
+                  </label>
+                </>
+              ) : null}
+              {selectedTask.generationMode === "viral-remix" ? (
+                <div className="mode-note">
+                  <strong>爆款视频复刻</strong>
+                  <span>保留爆款结构、钩子功能、情绪曲线和 CTA，生成时改写为新的表达。</span>
+                </div>
+              ) : null}
               <label>
                 动作提示词
                 <textarea
@@ -701,7 +883,7 @@ export function App() {
               </label>
             </div>
 
-            {selectedTask.avatarMode === "image-presenter" ? (
+            {selectedTask.generationMode === "product-avatar" ? (
               <div className="image-action-row">
                 <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
                 <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
@@ -725,7 +907,39 @@ export function App() {
                 </div>
               </div>
             ) : null}
+            {selectedTask.generationMode === "image-lipsync" ? (
+              <div className="image-action-row single">
+                <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
+                <div className="mode-note">
+                  <strong>图片口型同步</strong>
+                  <span>上传一张人物图，HeyGen 会用这张图对脚本做口型同步。</span>
+                </div>
+                <div className="stacked-actions">
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void uploadReferenceImage()}
+                  >
+                    <Upload size={16} />
+                    上传人物图
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
+
+          <div className="primary-actions">
+            {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
+            <button
+              type="button"
+              className="primary"
+              disabled={isWorkflowRunning}
+              onClick={() => void runRealWorkflow()}
+            >
+              <Play size={18} />
+              一键生成视频
+            </button>
+          </div>
 
           <div className="style-grid">
             <section className="compact-block">
@@ -795,16 +1009,7 @@ export function App() {
                   <input
                     type="text"
                     value={coverStyle.title}
-                    onBlur={() => void updateCurrentTask({ coverStyle })}
-                    onChange={(event) =>
-                      setSelectedTask((current) => ({
-                        ...current,
-                        coverStyle: {
-                          ...(current.coverStyle ?? DEFAULT_COVER_STYLE),
-                          title: event.target.value
-                        }
-                      }))
-                    }
+                    onChange={(event) => void updateCoverStyle({ title: event.target.value })}
                   />
                 </label>
                 <label>
@@ -812,16 +1017,7 @@ export function App() {
                   <input
                     type="text"
                     value={coverStyle.subtitle}
-                    onBlur={() => void updateCurrentTask({ coverStyle })}
-                    onChange={(event) =>
-                      setSelectedTask((current) => ({
-                        ...current,
-                        coverStyle: {
-                          ...(current.coverStyle ?? DEFAULT_COVER_STYLE),
-                          subtitle: event.target.value
-                        }
-                      }))
-                    }
+                    onChange={(event) => void updateCoverStyle({ subtitle: event.target.value })}
                   />
                 </label>
                 <label>
@@ -882,19 +1078,6 @@ export function App() {
               </div>
             </section>
           </div>
-
-          <div className="primary-actions">
-            {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
-            <button
-              type="button"
-              className="primary"
-              disabled={isWorkflowRunning}
-              onClick={() => void runRealWorkflow()}
-            >
-              <Play size={18} />
-              一键生成视频
-            </button>
-          </div>
         </section>
 
         <aside className="preview-pane">
@@ -909,7 +1092,7 @@ export function App() {
             <PrimaryPreview
               presetId={previewPresetId}
               videoUrl={finishedVideoUrl}
-              imageUrl={generatedPresenterUrl || productImageUrl}
+              imageUrl={generatedPresenterUrl || referenceImageUrl || productImageUrl}
               subtitleStyle={subtitleStyle}
               subtitleText={createSubtitleSample(selectedTask)}
               variantStatus={primaryVariant?.status}
@@ -933,6 +1116,7 @@ export function App() {
 
           <div className="preview-asset-grid">
             <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
+            <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
             <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
           </div>
 
@@ -1292,6 +1476,19 @@ function statusLabel(status: WorkbenchStep["status"]): string {
 
 function presetLabel(presetId: OutputPresetId): string {
   return OUTPUT_PRESETS.find((preset) => preset.id === presetId)?.label ?? presetId;
+}
+
+function generationModeLabel(mode: VideoGenerationMode): string {
+  const labels: Record<VideoGenerationMode, string> = {
+    "preset-avatar": "预设数字人口播",
+    "product-avatar": "商品带货数字人",
+    "image-lipsync": "图片口型同步",
+    "personal-ip": "个人IP视频",
+    "viral-remix": "爆款视频复刻",
+    "mixed-cut": "混剪视频"
+  };
+
+  return labels[mode];
 }
 
 function variantStatusLabel(status: VideoTask["outputVariants"][number]["status"]): string {

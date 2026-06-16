@@ -181,6 +181,18 @@ function findGeneratedPresenterImagePath(
     return undefined;
   }
 
+  if (task.generationMode === "image-lipsync") {
+    const referenceAsset = task.referenceImageAssetId
+      ? task.mediaAssets.find((asset) => asset.id === task.referenceImageAssetId)
+      : task.mediaAssets.find((asset) => asset.kind === "reference-image");
+
+    if (!referenceAsset) {
+      throw new Error("请先上传人物图片。");
+    }
+
+    return absoluteTaskPath(paths, taskId, referenceAsset.relativePath);
+  }
+
   const matchingAsset =
     task.mediaAssets.find(
       (asset) =>
