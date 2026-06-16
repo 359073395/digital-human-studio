@@ -20,6 +20,12 @@ class ReverseCipher implements SecretCipher {
   }
 }
 
+class FailingDecryptCipher extends ReverseCipher {
+  override async decrypt(): Promise<string> {
+    throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString.");
+  }
+}
+
 let tempDir: string;
 
 beforeEach(() => {
@@ -51,5 +57,17 @@ describe("CredentialStore", () => {
 
     expect(store.hasCredential("llm")).toBe(false);
     expect(await store.readCredential("llm")).toBeNull();
+  });
+
+  it("returns a recoverable message when a saved credential cannot be decrypted", async () => {
+    const credentialFilePath = path.join(tempDir, "credentials.json");
+    const writableStore = new CredentialStore(credentialFilePath, new ReverseCipher());
+    await writableStore.saveCredential("image", "image-key");
+
+    const failingStore = new CredentialStore(credentialFilePath, new FailingDecryptCipher());
+
+    await expect(failingStore.readCredential("image")).rejects.toThrow(
+      "本机已保存的 图片生成（OpenAI 兼容） API Key 无法解密"
+    );
   });
 });

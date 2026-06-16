@@ -610,53 +610,55 @@ export function App() {
           </div>
 
           <div className="settings-grid">
-            <section className="compact-block">
+            <section className="compact-block avatar-settings-block">
               <h3>数字人</h3>
-              <label>
-                模式
-                <select
-                  value={selectedTask.avatarMode}
-                  onChange={(event) =>
-                    void updateCurrentTask({
-                      avatarMode: event.target.value as VideoTask["avatarMode"]
-                    })
-                  }
-                >
-                  <option value="preset-avatar">HeyGen 预设数字人</option>
-                  <option value="image-presenter">AI 商品图数字人</option>
-                </select>
-              </label>
-              <label>
-                Avatar
-                <select defaultValue="business-host">
-                  <option value="business-host">商务主持人</option>
-                  <option value="creator">创作者口播</option>
-                </select>
-              </label>
-              <label>
-                Voice
-                <select defaultValue="heygen-default">
-                  <option value="heygen-default">HeyGen 内置语音</option>
-                  <option value="external">外部音频</option>
-                </select>
-              </label>
-              <label>
-                生成语言 / 语音
-                <select
-                  value={selectedTask.contentLanguage}
-                  onChange={(event) =>
-                    void updateCurrentTask({
-                      contentLanguage: event.target.value as VideoTask["contentLanguage"]
-                    })
-                  }
-                >
-                  {CONTENT_LANGUAGES.map((language) => (
-                    <option key={language.id} value={language.id}>
-                      {language.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="avatar-settings-grid">
+                <label>
+                  模式
+                  <select
+                    value={selectedTask.avatarMode}
+                    onChange={(event) =>
+                      void updateCurrentTask({
+                        avatarMode: event.target.value as VideoTask["avatarMode"]
+                      })
+                    }
+                  >
+                    <option value="preset-avatar">HeyGen 预设数字人</option>
+                    <option value="image-presenter">AI 商品图数字人</option>
+                  </select>
+                </label>
+                <label>
+                  Avatar
+                  <select defaultValue="business-host">
+                    <option value="business-host">商务主持人</option>
+                    <option value="creator">创作者口播</option>
+                  </select>
+                </label>
+                <label>
+                  Voice
+                  <select defaultValue="heygen-default">
+                    <option value="heygen-default">HeyGen 内置语音</option>
+                    <option value="external">外部音频</option>
+                  </select>
+                </label>
+                <label>
+                  生成语言 / 语音
+                  <select
+                    value={selectedTask.contentLanguage}
+                    onChange={(event) =>
+                      void updateCurrentTask({
+                        contentLanguage: event.target.value as VideoTask["contentLanguage"]
+                      })
+                    }
+                  >
+                    {CONTENT_LANGUAGES.map((language) => (
+                      <option key={language.id} value={language.id}>
+                        {language.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               {selectedTask.avatarMode === "image-presenter" ? (
                 <>
                   <label>
@@ -678,13 +680,15 @@ export function App() {
                       }
                     />
                   </label>
-                  <div className="asset-chip">
-                    <span>商品图</span>
-                    <strong>{productImageAsset?.relativePath ?? "未上传"}</strong>
-                  </div>
-                  <div className="asset-chip">
-                    <span>人物商品图</span>
-                    <strong>{generatedPresenterAsset?.relativePath ?? "未生成"}</strong>
+                  <div className="asset-chip-grid">
+                    <div className="asset-chip">
+                      <span>商品图</span>
+                      <strong>{productImageAsset?.relativePath ?? "未上传"}</strong>
+                    </div>
+                    <div className="asset-chip">
+                      <span>人物商品图</span>
+                      <strong>{generatedPresenterAsset?.relativePath ?? "未生成"}</strong>
+                    </div>
                   </div>
                   <div className="button-row">
                     <button
@@ -706,7 +710,7 @@ export function App() {
                   </div>
                 </>
               ) : null}
-              <label>
+              <label className="motion-prompt-field">
                 动作提示词
                 <textarea
                   className="compact-textarea"
@@ -723,46 +727,54 @@ export function App() {
               </label>
             </section>
 
-            <section className="compact-block">
-              <h3>输出预设</h3>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
-                  onChange={(event) =>
-                    void toggleOutputPreset("portrait-9-16", event.target.checked)
-                  }
-                />
-                <Smartphone size={16} />
-                竖屏 9:16
-              </label>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
-                  onChange={(event) =>
-                    void toggleOutputPreset("landscape-16-9", event.target.checked)
-                  }
-                />
-                <Monitor size={16} />
-                横屏 16:9
-              </label>
-            </section>
-
-            <section className="compact-block">
-              <h3>后期资产</h3>
-              <label className="checkbox-row">
-                <input type="checkbox" defaultChecked />
-                字幕
-              </label>
-              <label className="checkbox-row">
-                <input type="checkbox" />
-                本地 BGM
-              </label>
-              <label className="checkbox-row">
-                <input type="checkbox" defaultChecked />
-                封面
-              </label>
+            <section className="compact-block publishing-settings-block">
+              <h3>发布设置</h3>
+              <div className="publishing-options">
+                <div className="publish-option-group">
+                  <span className="publish-option-title">输出预设</span>
+                  <div className="option-row-list">
+                    <label className="checkbox-row compact-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
+                        onChange={(event) =>
+                          void toggleOutputPreset("portrait-9-16", event.target.checked)
+                        }
+                      />
+                      <Smartphone size={16} />
+                      竖屏 9:16
+                    </label>
+                    <label className="checkbox-row compact-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
+                        onChange={(event) =>
+                          void toggleOutputPreset("landscape-16-9", event.target.checked)
+                        }
+                      />
+                      <Monitor size={16} />
+                      横屏 16:9
+                    </label>
+                  </div>
+                </div>
+                <div className="publish-option-group">
+                  <span className="publish-option-title">后期资产</span>
+                  <div className="option-row-list">
+                    <label className="checkbox-row compact-checkbox">
+                      <input type="checkbox" defaultChecked />
+                      字幕
+                    </label>
+                    <label className="checkbox-row compact-checkbox">
+                      <input type="checkbox" />
+                      本地 BGM
+                    </label>
+                    <label className="checkbox-row compact-checkbox">
+                      <input type="checkbox" defaultChecked />
+                      封面
+                    </label>
+                  </div>
+                </div>
+              </div>
             </section>
           </div>
 

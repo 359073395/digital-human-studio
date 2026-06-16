@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ProviderId } from "../../shared/serviceConfig";
+import { getProviderDefinition, type ProviderId } from "../../shared/serviceConfig";
 
 export interface SecretCipher {
   encrypt: (value: string) => Promise<string>;
@@ -54,7 +54,11 @@ export class CredentialStore {
       throw new Error("当前系统不可用安全存储，无法读取 API Key。");
     }
 
-    return this.cipher.decrypt(record.encryptedValue);
+    try {
+      return await this.cipher.decrypt(record.encryptedValue);
+    } catch (error) {
+      throw new Error(buildCredentialDecryptMessage(providerId), { cause: error });
+    }
   }
 
   async clearCredential(providerId: ProviderId): Promise<void> {
@@ -87,4 +91,9 @@ export class CredentialStore {
 
 export function createCredentialFilePath(appDataDir: string): string {
   return path.join(appDataDir, "credentials", "credentials.json");
+}
+
+function buildCredentialDecryptMessage(providerId: ProviderId): string {
+  const label = getProviderDefinition(providerId).label;
+  return `本机已保存的 ${label} API Key 无法解密。请在设置里重新输入并保存新的 API Key；如果仍失败，请先清除该服务凭据后再保存。`;
 }

@@ -82,10 +82,10 @@ button:disabled {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(210px, 230px) minmax(0, 1fr) minmax(280px, 300px);
-  gap: 14px;
+  grid-template-columns: minmax(168px, 190px) minmax(0, 1fr) minmax(260px, 280px);
+  gap: 10px;
   min-height: 0;
-  padding: 14px;
+  padding: 10px;
   overflow: hidden;
 }
 
@@ -100,16 +100,16 @@ button:disabled {
 
 .task-pane,
 .preview-pane {
-  padding: 14px;
+  padding: 10px;
 }
 
 .editor-pane {
   display: grid;
   grid-template-rows: auto auto auto auto;
   align-content: start;
-  gap: 14px;
+  gap: 12px;
   overflow: auto;
-  padding: 14px;
+  padding: 12px;
 }
 
 .pane-heading,
@@ -155,18 +155,25 @@ button:disabled {
 .task-list,
 .step-list {
   display: grid;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .task-row {
   display: grid;
-  grid-template-columns: 10px 1fr;
-  gap: 10px;
+  grid-template-columns: 8px 1fr;
+  gap: 8px;
   width: 100%;
-  min-height: 62px;
-  padding: 10px;
+  min-height: 48px;
+  padding: 8px;
   text-align: left;
+}
+
+.task-row strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-row.active {
@@ -182,9 +189,9 @@ button:disabled {
 .task-row small,
 .step-row small,
 .export-block span {
-  margin-top: 4px;
+  margin-top: 3px;
   color: #66758b;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .task-dot {
@@ -242,7 +249,60 @@ button:disabled {
 }
 
 .settings-grid {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: minmax(420px, 1fr) minmax(220px, 260px);
+  align-items: start;
+}
+
+.avatar-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.avatar-settings-grid label {
+  margin-top: 0;
+}
+
+.asset-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.asset-chip-grid .asset-chip {
+  margin-top: 0;
+}
+
+.publishing-settings-block {
+  align-self: start;
+  padding: 10px;
+}
+
+.publishing-options,
+.publish-option-group,
+.option-row-list {
+  display: grid;
+}
+
+.publishing-options {
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.publish-option-group {
+  gap: 6px;
+}
+
+.publish-option-title {
+  color: #66758b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.option-row-list {
+  gap: 6px;
 }
 
 .field-block,
@@ -359,6 +419,17 @@ label {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.compact-checkbox {
+  min-height: 28px;
+  margin-top: 0;
+  padding: 4px 7px;
+  border: 1px solid #e3e8f0;
+  border-radius: 6px;
+  background: #fbfcff;
+  color: #314258;
+  font-size: 12px;
 }
 
 .checkbox-row input {
