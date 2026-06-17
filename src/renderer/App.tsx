@@ -19,11 +19,13 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   CONTENT_LANGUAGES,
   DEFAULT_COVER_STYLE,
+  DEFAULT_CREATIVE_WORKFLOW,
   DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE,
   OUTPUT_PRESETS,
   type CoverStyle,
+  type CreativeWorkflow,
   type FrameTitleStyle,
   type OutputPresetId,
   type PersonalIpProfile,
@@ -66,6 +68,7 @@ const fallbackTask: VideoTask = {
   subtitleStyle: DEFAULT_SUBTITLE_STYLE,
   coverStyle: DEFAULT_COVER_STYLE,
   personalIpProfile: DEFAULT_PERSONAL_IP_PROFILE,
+  creativeWorkflow: DEFAULT_CREATIVE_WORKFLOW,
   publishingPackage: {
     title: "",
     description: "",
@@ -120,6 +123,7 @@ type EditableTaskPatch = Partial<
     | "coverStyle"
     | "customFontFamily"
     | "personalIpProfile"
+    | "creativeWorkflow"
   >
 >;
 
@@ -157,10 +161,142 @@ const GENERATION_MODE_TABS: Array<{
   {
     id: "mixed-cut",
     label: "混剪视频",
-    description: "后续加入素材混剪",
-    disabled: true
+    description: "素材混剪 + 生视频预留"
   }
 ];
+
+type CreativeWorkflowFieldId = keyof CreativeWorkflow;
+
+interface CreativeWorkflowFieldConfig {
+  id: CreativeWorkflowFieldId;
+  label: string;
+  placeholder: string;
+  wide?: boolean;
+}
+
+interface CreativeWorkflowModeConfig {
+  title: string;
+  templateActionLabel: string;
+  fields: CreativeWorkflowFieldConfig[];
+}
+
+const CREATIVE_WORKFLOW_MODE_CONFIG: Record<VideoGenerationMode, CreativeWorkflowModeConfig> = {
+  "preset-avatar": {
+    title: "AI 口播流水线",
+    templateActionLabel: "生成口播流程",
+    fields: [
+      {
+        id: "dailyPipeline",
+        label: "日更流程",
+        placeholder: "选题、参考、文案、数字人、字幕封面、发布复盘的执行顺序。"
+      },
+      {
+        id: "storyboard",
+        label: "口播分镜",
+        placeholder: "按 0-5 秒、5-15 秒、15-30 秒拆解口播节奏、画面标题和 CTA。"
+      }
+    ]
+  },
+  "product-avatar": {
+    title: "选品卖点与带货分镜",
+    templateActionLabel: "生成带货分镜",
+    fields: [
+      {
+        id: "sellingPoints",
+        label: "选品/卖点",
+        placeholder: "目标人群、核心痛点、产品证明、价格/优惠、禁用或需核对词。"
+      },
+      {
+        id: "storyboard",
+        label: "带货分镜",
+        placeholder: "开头钩子、产品出镜、场景演示、利益点递进、成交 CTA。"
+      },
+      {
+        id: "aiVideoPrompt",
+        label: "人物商品图/生视频提示词",
+        placeholder: "人物拿产品、换衣服、商品展示姿势、字幕安全区、背景和镜头动作。",
+        wide: true
+      }
+    ]
+  },
+  "image-lipsync": {
+    title: "图片口型同步方案",
+    templateActionLabel: "生成口型同步方案",
+    fields: [
+      {
+        id: "aiVideoPrompt",
+        label: "人物图生成提示词",
+        placeholder: "人物形象、服装、商品/道具、正脸清晰、嘴部无遮挡、适合 HeyGen 对口型。"
+      },
+      {
+        id: "storyboard",
+        label: "口型同步分镜",
+        placeholder: "单图口播时的表情、动作提示、画面标题、字幕区和封面建议。"
+      }
+    ]
+  },
+  "personal-ip": {
+    title: "个人 IP 日更流水线",
+    templateActionLabel: "生成日更流程",
+    fields: [
+      {
+        id: "dailyPipeline",
+        label: "日更流水线",
+        placeholder: "每日选题、参考分析、文案改写、口播生成、字幕封面、发布复盘。"
+      },
+      {
+        id: "referenceAnalysis",
+        label: "账号/参考拆解",
+        placeholder: "保留选题机制、冲突、证明方式和情绪节奏；替换表达和人物标签。"
+      },
+      {
+        id: "storyboard",
+        label: "IP 口播分镜",
+        placeholder: "固定开场、个人观点、案例/证明、行动建议和收尾 CTA。",
+        wide: true
+      }
+    ]
+  },
+  "viral-remix": {
+    title: "爆款拉片复刻",
+    templateActionLabel: "生成拉片模板",
+    fields: [
+      {
+        id: "referenceAnalysis",
+        label: "拉片分析",
+        placeholder: "拆钩子任务、信息顺序、情绪曲线、证明类型、CTA 位置和相似风险。"
+      },
+      {
+        id: "storyboard",
+        label: "复刻分镜",
+        placeholder: "只复用结构和节奏，改掉原句、口头禅、具体镜头签名和创作者表达。",
+        wide: true
+      }
+    ]
+  },
+  "mixed-cut": {
+    title: "混剪/生视频预留",
+    templateActionLabel: "生成混剪计划",
+    fields: [
+      {
+        id: "mixedCutPlan",
+        label: "素材混剪计划",
+        placeholder: "素材清单、B-roll、产品特写、屏幕录制、节奏点和版权来源。"
+      },
+      {
+        id: "storyboard",
+        label: "故事板",
+        placeholder: "Image2 故事板、生视频镜头、口播母版和混剪落点。"
+      },
+      {
+        id: "aiVideoPrompt",
+        label: "生视频提示词",
+        placeholder: "Seedance/类似平台后续接入前，先沉淀镜头提示词和参考图要求。",
+        wide: true
+      }
+    ]
+  }
+};
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -185,6 +321,7 @@ export function App() {
   const frameTitleStyle = selectedTask.frameTitleStyle ?? DEFAULT_FRAME_TITLE_STYLE;
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
+  const creativeWorkflow = selectedTask.creativeWorkflow ?? DEFAULT_CREATIVE_WORKFLOW;
   const exportDirectoryLabel = selectedTask.exportDirectory?.trim() || "未选择保存目录";
   const sourceScriptLabel =
     selectedTask.generationMode === "viral-remix" ? "爆款参考文案" : "参考文案";
@@ -545,7 +682,8 @@ export function App() {
         frameTitleStyle,
         subtitleStyle,
         coverStyle,
-        personalIpProfile: taskForRun.personalIpProfile
+        personalIpProfile: taskForRun.personalIpProfile,
+        creativeWorkflow: taskForRun.creativeWorkflow ?? creativeWorkflow
       });
       const task = await api.runRealWorkflow(taskForRun.id);
       const failedStep = task.steps.find(
@@ -670,7 +808,8 @@ export function App() {
         frameTitleStyle,
         subtitleStyle,
         coverStyle,
-        personalIpProfile: selectedTask.personalIpProfile
+        personalIpProfile: selectedTask.personalIpProfile,
+        creativeWorkflow
       });
       const task = await api.generateScript(selectedTask.id);
       setActionMessage("文案已生成，可以直接修改价格、词语和表达后再生成视频");
@@ -735,7 +874,8 @@ export function App() {
         selectedOutputPresets: selectedTask.selectedOutputPresets,
         frameTitleStyle,
         subtitleStyle,
-        coverStyle
+        coverStyle,
+        creativeWorkflow
       });
       const task = await api.generatePresenterImages(selectedTask.id);
       const avatarStep = task.steps.find((step) => step.id === "avatar");
@@ -763,11 +903,6 @@ export function App() {
   }
 
   async function changeGenerationMode(mode: VideoGenerationMode) {
-    if (mode === "mixed-cut") {
-      setActionMessage("混剪视频会在后续版本加入。");
-      return;
-    }
-
     const nextAvatarMode =
       mode === "product-avatar" || mode === "image-lipsync" ? "image-presenter" : "preset-avatar";
 
@@ -873,6 +1008,43 @@ export function App() {
       }
     }));
     await updateCurrentTask({ personalIpProfile: nextProfile });
+  }
+
+  function editCreativeWorkflowDraft(patch: Partial<CreativeWorkflow>) {
+    setSelectedTask((current) => ({
+      ...current,
+      creativeWorkflow: {
+        ...(current.creativeWorkflow ?? DEFAULT_CREATIVE_WORKFLOW),
+        ...patch
+      }
+    }));
+  }
+
+  async function updateCreativeWorkflow(patch: Partial<CreativeWorkflow>) {
+    const nextWorkflow = {
+      ...creativeWorkflow,
+      ...patch
+    };
+    setSelectedTask((current) => ({
+      ...current,
+      creativeWorkflow: {
+        ...(current.creativeWorkflow ?? DEFAULT_CREATIVE_WORKFLOW),
+        ...patch
+      }
+    }));
+    await updateCurrentTask({ creativeWorkflow: nextWorkflow });
+  }
+
+  async function applyCreativeWorkflowTemplate() {
+    const nextWorkflow = createDefaultCreativeWorkflow(selectedTask);
+    setSelectedTask((current) => ({
+      ...current,
+      creativeWorkflow: nextWorkflow
+    }));
+    await updateCurrentTask({ creativeWorkflow: nextWorkflow });
+    setActionMessage(
+      `${generationModeLabel(selectedTask.generationMode)}创作模板已填入，可继续编辑。`
+    );
   }
 
   async function openTaskExports() {
@@ -1106,6 +1278,15 @@ export function App() {
             </section>
           </div>
 
+          <CreativeWorkflowPanel
+            disabled={isWorkflowRunning}
+            mode={selectedTask.generationMode}
+            onApplyTemplate={() => void applyCreativeWorkflowTemplate()}
+            onCommit={(patch) => void updateCreativeWorkflow(patch)}
+            onDraftChange={editCreativeWorkflowDraft}
+            workflow={creativeWorkflow}
+          />
+
           <section className="compact-block generation-settings-block">
             <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
             <div className="control-grid mode-settings-grid">
@@ -1317,6 +1498,14 @@ export function App() {
                 <div className="mode-note">
                   <strong>爆款视频复刻</strong>
                   <span>保留爆款结构、钩子功能、情绪曲线和 CTA，生成时改写为新的表达。</span>
+                </div>
+              ) : null}
+              {selectedTask.generationMode === "mixed-cut" ? (
+                <div className="mode-note">
+                  <strong>混剪视频</strong>
+                  <span>
+                    当前先生成数字人口播母版和混剪计划，素材混剪/生视频 API 作为后续 Provider 接入。
+                  </span>
                 </div>
               ) : null}
               <label>
@@ -1674,6 +1863,58 @@ export function App() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function CreativeWorkflowPanel({
+  disabled,
+  mode,
+  onApplyTemplate,
+  onCommit,
+  onDraftChange,
+  workflow
+}: {
+  disabled: boolean;
+  mode: VideoGenerationMode;
+  onApplyTemplate: () => void;
+  onCommit: (patch: Partial<CreativeWorkflow>) => void;
+  onDraftChange: (patch: Partial<CreativeWorkflow>) => void;
+  workflow: CreativeWorkflow;
+}) {
+  const config = CREATIVE_WORKFLOW_MODE_CONFIG[mode];
+
+  return (
+    <section className="compact-block creative-workflow-block">
+      <div className="creative-workflow-header">
+        <div className="section-title">
+          <FileSearch size={16} />
+          <h2>创作流水线</h2>
+          <span>{config.title}</span>
+        </div>
+        <button type="button" disabled={disabled} onClick={onApplyTemplate}>
+          <WandSparkles size={15} />
+          {config.templateActionLabel}
+        </button>
+      </div>
+      <div className="workflow-card-grid">
+        {config.fields.map((field) => {
+          const value = workflow[field.id] ?? "";
+
+          return (
+            <label className={field.wide ? "workflow-card wide" : "workflow-card"} key={field.id}>
+              <span>{field.label}</span>
+              <textarea
+                className="workflow-textarea"
+                value={value}
+                placeholder={field.placeholder}
+                onBlur={(event) => onCommit(workflowPatch(field.id, event.currentTarget.value))}
+                onChange={(event) => onDraftChange(workflowPatch(field.id, event.target.value))}
+              />
+            </label>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -2236,6 +2477,166 @@ function createCoverTitle(task: VideoTask): string {
       .map((value) => value.trim())
       .find(Boolean) ?? task.title;
   return base.length > 22 ? `${base.slice(0, 22)}...` : base;
+}
+
+function workflowPatch(fieldId: CreativeWorkflowFieldId, value: string): Partial<CreativeWorkflow> {
+  return {
+    [fieldId]: value
+  };
+}
+
+function createDefaultCreativeWorkflow(task: VideoTask): CreativeWorkflow {
+  const base = task.creativeWorkflow ?? DEFAULT_CREATIVE_WORKFLOW;
+  const source = createWorkflowSourceSummary(task);
+  const originalityRule =
+    "相似控制：只复用选题机制、钩子任务、信息顺序、情绪曲线、证明类型和 CTA 位置；必须更换原句、口头禅、具体案例、镜头签名、创作者人设和视觉表达。";
+
+  if (task.generationMode === "viral-remix") {
+    return {
+      ...base,
+      referenceAnalysis: [
+        "拉片维度：",
+        "1. 前 5 秒：拆钩子任务，不保留原句。",
+        "2. 中段结构：记录痛点、反差、证明、解决方案的出现顺序。",
+        "3. 画面节奏：标注快慢、字幕重点和转场点，但更换具体镜头。",
+        "4. 收尾 CTA：保留行动位置，换成当前账号自己的表达。",
+        originalityRule,
+        source
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      storyboard: [
+        "0-5 秒：用同类冲突开场，换成新话术和新场景。",
+        "5-15 秒：给出一个具体问题或误区，用自己的案例承接。",
+        "15-30 秒：展示解决路径、产品/方法证明或对比。",
+        "30 秒后：收束到一个明确 CTA，避免复用原视频标志性句子。"
+      ].join("\n")
+    };
+  }
+
+  if (task.generationMode === "product-avatar") {
+    return {
+      ...base,
+      sellingPoints: [
+        "选品/卖点：",
+        "目标人群：正在被一个具体问题困扰的人。",
+        "核心痛点：先写用户场景，再写产品能解决什么。",
+        "证明材料：材质、功能、前后对比、真实使用场景，价格和优惠需人工核对。",
+        "成交理由：减少犹豫、降低试错成本、明确适用人群。"
+      ].join("\n"),
+      storyboard: [
+        "0-5 秒：痛点钩子 + 商品自然出镜。",
+        "5-12 秒：数字人拿产品说明一个核心卖点。",
+        "12-25 秒：切使用场景/细节特写/对比证明。",
+        "25 秒后：强调适合谁、怎么选、下单 CTA。"
+      ].join("\n"),
+      aiVideoPrompt: [
+        "人物商品图：数字人自然手持商品，商品正面清晰，人物看向镜头，嘴部无遮挡，画面留出下方字幕安全区。",
+        "换衣/场景：服装与产品类目匹配，背景干净，避免遮挡产品包装。",
+        "动作提示：轻微点头、抬手展示商品、把商品靠近镜头，动作幅度不要挡住嘴型。"
+      ].join("\n")
+    };
+  }
+
+  if (task.generationMode === "image-lipsync") {
+    return {
+      ...base,
+      aiVideoPrompt: [
+        "人物图生成：正脸半身，嘴部无遮挡，眼神看镜头，光线均匀。",
+        "商品/换装：如有商品图，人物自然手持或靠近商品；服装风格与账号定位一致。",
+        "口型同步：背景不抢画面，脸部清晰，保留下方字幕和上方标题空间。"
+      ].join("\n"),
+      storyboard: [
+        "单图口播：用稳定正脸作为主体。",
+        "画面标题：放在 15%-25% 区间，强调核心利益点。",
+        "字幕：放在 72%-86% 区间，避免遮挡嘴部和商品。",
+        "动作提示：轻微表情变化、自然点头、不要大幅转头。"
+      ].join("\n")
+    };
+  }
+
+  if (task.generationMode === "personal-ip") {
+    return {
+      ...base,
+      dailyPipeline: [
+        "个人 IP 日更流水线：",
+        "1. 选题：从评论、竞品、热点里选一个单点问题。",
+        "2. 拉片：只拆结构和节奏，不复制表达。",
+        "3. 改写：保留自己的观点、人设、口头表达和禁用词规则。",
+        "4. 生成：数字人口播 + 字幕 + 封面。",
+        "5. 复盘：记录完播、点击、评论问题，作为明天选题。"
+      ].join("\n"),
+      referenceAnalysis: [
+        "账号拆解：记录开头冲突、观点强度、案例类型、信任建立方式和 CTA。",
+        "保留：观点密度、节奏和互动位置。",
+        "替换：人设标签、经历、口头禅、案例和表达方式。",
+        source
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      storyboard: [
+        "0-5 秒：固定 IP 视角开场，直接抛问题或反常识。",
+        "5-20 秒：给一个清晰判断和一个具体例子。",
+        "20-40 秒：展开方法或产品/服务逻辑。",
+        "收尾：用账号固定 CTA，但不要套用参考作者的标志性句子。"
+      ].join("\n")
+    };
+  }
+
+  if (task.generationMode === "mixed-cut") {
+    return {
+      ...base,
+      mixedCutPlan: [
+        "素材混剪计划：",
+        "主线：先生成数字人口播母版。",
+        "素材：产品特写、使用场景、屏幕录制、买家问题、前后对比，必须使用自有或授权素材。",
+        "节奏：每 2-4 秒一个信息点，重要卖点配字幕强调。",
+        "后续 Provider：预留 Seedance/类似生视频 API 或本地剪辑器接入。"
+      ].join("\n"),
+      storyboard: [
+        "镜头 1：开头痛点或反差。",
+        "镜头 2：数字人口播给出核心判断。",
+        "镜头 3：B-roll 证明卖点或展示过程。",
+        "镜头 4：回到数字人 CTA。",
+        "镜头 5：封面/标题复用视频第一帧或生成图。"
+      ].join("\n"),
+      aiVideoPrompt: [
+        "生视频提示词：真实产品场景、清晰主体、镜头稳定、可用于竖屏和横屏裁切。",
+        "故事板图片：每个镜头先生成参考图，再进入生视频。",
+        "字幕安全区：下方 72%-86%，标题区 12%-24%。"
+      ].join("\n")
+    };
+  }
+
+  return {
+    ...base,
+    dailyPipeline: [
+      "AI 口播流程：",
+      "1. 粘贴原视频链接或参考文案。",
+      "2. 提取/粘贴后先分析钩子、节奏和证明方式。",
+      "3. 一键 AI 生成可编辑文案，人工核对价格和敏感词。",
+      "4. 选择 HeyGen 数字人和输出比例。",
+      "5. 在预览里调字幕、标题、封面，再一键输出。"
+    ].join("\n"),
+    storyboard: [
+      "0-5 秒：直接说用户痛点或反常识。",
+      "5-20 秒：解释为什么用户之前做错了。",
+      "20-40 秒：给出产品/方法的核心解决路径。",
+      "收尾：一句明确行动 CTA。"
+    ].join("\n")
+  };
+}
+
+function createWorkflowSourceSummary(task: VideoTask): string {
+  const url = task.originalVideoUrl?.trim() ? `参考链接：${task.originalVideoUrl.trim()}` : "";
+  const script = (task.sourceScript || task.finalScript || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ");
+  const excerpt = script.length > 120 ? `${script.slice(0, 120)}...` : script;
+
+  return [url, excerpt ? `参考片段：${excerpt}` : ""].filter(Boolean).join("\n");
 }
 
 function presetLabel(presetId: OutputPresetId): string {

@@ -1,6 +1,7 @@
 import type {
   AvatarMode,
   CoverStyle,
+  CreativeWorkflow,
   ContentLanguage,
   FrameTitleStyle,
   GenerationStepId,
@@ -113,6 +114,7 @@ export interface UpdateTaskInput {
   subtitleStyle?: SubtitleStyle;
   coverStyle?: CoverStyle;
   personalIpProfile?: PersonalIpProfile;
+  creativeWorkflow?: CreativeWorkflow;
 }
 
 export interface HeyGenAvatarLook {

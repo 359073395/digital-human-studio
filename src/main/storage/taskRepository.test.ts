@@ -46,6 +46,14 @@ describe("TaskRepository", () => {
     expect(task.avatarDescriptionPrompt).toBe("");
     expect(task.motionPrompt).toBe("");
     expect(task.exportDirectory).toBe("");
+    expect(task.creativeWorkflow).toEqual({
+      referenceAnalysis: "",
+      sellingPoints: "",
+      storyboard: "",
+      dailyPipeline: "",
+      aiVideoPrompt: "",
+      mixedCutPlan: ""
+    });
     expect(task.steps).toHaveLength(6);
     expect(task.outputVariants).toHaveLength(1);
 
@@ -158,6 +166,12 @@ describe("TaskRepository", () => {
         ...task.coverStyle,
         fontFamily: "DHS Custom Font",
         verticalPercent: 48
+      },
+      creativeWorkflow: {
+        ...task.creativeWorkflow,
+        referenceAnalysis: "拆解爆款钩子和节奏。",
+        sellingPoints: "目标人群、痛点、证明和 CTA。",
+        storyboard: "0-5 秒钩子，5-20 秒证明，最后 CTA。"
       }
     });
 
@@ -173,6 +187,9 @@ describe("TaskRepository", () => {
     expect(updated.frameTitleStyle.fontFamily).toBe("DHS Custom Font");
     expect(updated.coverStyle.fontFamily).toBe("DHS Custom Font");
     expect(updated.coverStyle.verticalPercent).toBe(48);
+    expect(updated.creativeWorkflow.referenceAnalysis).toBe("拆解爆款钩子和节奏。");
+    expect(updated.creativeWorkflow.sellingPoints).toBe("目标人群、痛点、证明和 CTA。");
+    expect(updated.creativeWorkflow.storyboard).toBe("0-5 秒钩子，5-20 秒证明，最后 CTA。");
   });
 
   it("persists media assets, output metadata, and publishing package", () => {

@@ -16,7 +16,8 @@ export class MockScriptProvider implements ScriptProvider {
         sourceScript,
         contentLanguage: task.contentLanguage,
         generationMode: task.generationMode,
-        personalIpProfile: task.personalIpProfile
+        personalIpProfile: task.personalIpProfile,
+        creativeWorkflow: task.creativeWorkflow
       })
     };
   }

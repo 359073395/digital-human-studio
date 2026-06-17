@@ -110,6 +110,15 @@ export interface PersonalIpProfile {
   bannedWords: string;
 }
 
+export interface CreativeWorkflow {
+  referenceAnalysis: string;
+  sellingPoints: string;
+  storyboard: string;
+  dailyPipeline: string;
+  aiVideoPrompt: string;
+  mixedCutPlan: string;
+}
+
 export interface OutputVariant {
   id: string;
   taskId: string;
@@ -162,6 +171,7 @@ export interface VideoTask {
   subtitleStyle: SubtitleStyle;
   coverStyle: CoverStyle;
   personalIpProfile: PersonalIpProfile;
+  creativeWorkflow: CreativeWorkflow;
   steps: GenerationStep[];
   outputVariants: OutputVariant[];
   mediaAssets: MediaAsset[];
@@ -275,6 +285,15 @@ export const DEFAULT_PERSONAL_IP_PROFILE: PersonalIpProfile = {
   tone: "",
   catchphrases: "",
   bannedWords: ""
+};
+
+export const DEFAULT_CREATIVE_WORKFLOW: CreativeWorkflow = {
+  referenceAnalysis: "",
+  sellingPoints: "",
+  storyboard: "",
+  dailyPipeline: "",
+  aiVideoPrompt: "",
+  mixedCutPlan: ""
 };
 
 export function defaultOutputPresetIds(): OutputPresetId[] {

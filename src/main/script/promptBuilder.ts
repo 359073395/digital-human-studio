@@ -1,10 +1,16 @@
-import type { ContentLanguage, PersonalIpProfile, VideoGenerationMode } from "../../shared/domain";
+import type {
+  ContentLanguage,
+  CreativeWorkflow,
+  PersonalIpProfile,
+  VideoGenerationMode
+} from "../../shared/domain";
 
 export interface ScriptPromptInput {
   sourceScript: string;
   contentLanguage: ContentLanguage;
   generationMode?: VideoGenerationMode;
   personalIpProfile?: PersonalIpProfile;
+  creativeWorkflow?: CreativeWorkflow;
 }
 
 export function buildScriptGenerationPrompt(input: ScriptPromptInput): string {
@@ -19,6 +25,7 @@ export function buildScriptGenerationPrompt(input: ScriptPromptInput): string {
     "Do not write for plagiarism detection evasion. Write original expression for a real creator.",
     `Output language: ${languageName}.`,
     ...modeLines,
+    ...creativeWorkflowInstructionLines(input.creativeWorkflow),
     "",
     "Reference source script:",
     input.sourceScript.trim()
@@ -67,4 +74,35 @@ function generationModeInstructionLines(input: ScriptPromptInput): string[] {
   }
 
   return ["Mode: preset avatar talking-head video."];
+}
+
+function creativeWorkflowInstructionLines(workflow: CreativeWorkflow | undefined): string[] {
+  if (!workflow) {
+    return [];
+  }
+
+  const lines = [
+    workflow.referenceAnalysis
+      ? `Reference analysis to reuse as mechanics:\n${workflow.referenceAnalysis}`
+      : "",
+    workflow.sellingPoints
+      ? `Product selling points and selection notes:\n${workflow.sellingPoints}`
+      : "",
+    workflow.storyboard
+      ? `Storyboard or shot plan to align the script with:\n${workflow.storyboard}`
+      : "",
+    workflow.dailyPipeline ? `Personal IP daily production plan:\n${workflow.dailyPipeline}` : "",
+    workflow.aiVideoPrompt
+      ? `AI video or image prompt constraints:\n${workflow.aiVideoPrompt}`
+      : "",
+    workflow.mixedCutPlan ? `Mixed-cut and B-roll plan:\n${workflow.mixedCutPlan}` : ""
+  ].filter(Boolean);
+
+  return lines.length > 0
+    ? [
+        "",
+        "Creative workflow notes. Use them as planning constraints, not as copy to duplicate.",
+        ...lines
+      ]
+    : [];
 }

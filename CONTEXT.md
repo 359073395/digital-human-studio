@@ -36,16 +36,40 @@ _Avoid_: Downloaded video, scraped transcript, platform import
 The first workflow command that attempts to turn source material into editable reference copy. The MVP routes it through the desktop extraction/transcription service and leaves platform-link downloading as a provider enhancement behind the same button.
 _Avoid_: Mock check, hidden import, final script generation
 
+**Creative Workflow**:
+The task-level planning fields that translate viral references, product selling points, storyboards, daily IP routines, AI image/video prompts, and mixed-cut plans into editable constraints for script generation and video production.
+_Avoid_: Hidden prompt, one-off note, copied reference
+
+**Reference Breakdown**:
+The structured analysis of a reference video's abstract mechanics, such as hook job, pacing, proof type, emotional curve, visual rhythm, and CTA placement. It must not preserve the reference's distinctive wording, creator persona, jokes, or shot signature.
+_Avoid_: Shot-for-shot copy, 1:1 rewrite, creator imitation
+
+**Storyboard Plan**:
+The editable beat-by-beat production plan for a video task. It can guide talking-head scripts, product shots, image lip-sync prompts, or mixed-cut planning before the actual provider integrations run.
+_Avoid_: Final rendered edit, fixed timeline, non-editable template
+
+**Daily IP Pipeline**:
+The repeatable workflow for personal IP videos, covering topic selection, reference breakdown, original script writing, avatar generation, subtitle/cover styling, publishing, and performance review.
+_Avoid_: Creator clone, account automation, rigid script template
+
+**AI Video Prompt**:
+The editable prompt constraints for image generation or future image-to-video providers, including presenter appearance, product handling, clothing, scene, mouth visibility, subtitle-safe space, and camera motion.
+_Avoid_: Final script, avatar ID, subtitle style
+
+**Mixed-Cut Plan**:
+The editable plan for combining a digital-human talking-head base video with B-roll, product close-ups, screen recordings, generated clips, or other authorized materials. In the MVP it is a planning and prompt field; rendering providers are added behind a future provider interface.
+_Avoid_: Built-in stock library, unlicensed clip scraping, completed mixed edit
+
 **Mixed-Cut Video**:
-A future enhancement that combines talking-head footage with additional clips, B-roll, or montage editing. It is not part of the MVP core workflow.
-_Avoid_: MVP video, finished video
+An enabled planning mode that prepares a talking-head base video plus mixed-cut plan, storyboard, and AI video prompts. Full mixed-cut rendering and Seedance-like provider execution remain future provider work.
+_Avoid_: Finished mixed edit, stock clip library, platform scrape
 
 **Video Task**:
 A single attempt to produce one finished video from one source script and one set of generation settings. The MVP interface focuses on one active video task at a time.
 _Avoid_: Batch job, project, campaign
 
 **Video Generation Mode**:
-The top-level category selected for a video task. It controls which input materials the user sees and how generation services interpret the task. The MVP modes are preset avatar talking-head, product avatar, image lip-sync, personal IP video, and viral structure remix. Mixed-cut video is shown as a future disabled mode.
+The top-level category selected for a video task. It controls which input materials the user sees and how generation services interpret the task. The MVP modes are preset avatar talking-head, product avatar, image lip-sync, personal IP video, viral structure remix, and mixed-cut planning.
 _Avoid_: Workflow step, output preset, provider setting
 
 **Task List**:

@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_COVER_STYLE,
+  DEFAULT_CREATIVE_WORKFLOW,
   DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE
@@ -15,6 +16,10 @@ const DEFAULT_FRAME_TITLE_STYLE_JSON = JSON.stringify(DEFAULT_FRAME_TITLE_STYLE)
   "''"
 );
 const DEFAULT_PERSONAL_IP_PROFILE_JSON = JSON.stringify(DEFAULT_PERSONAL_IP_PROFILE).replaceAll(
+  "'",
+  "''"
+);
+const DEFAULT_CREATIVE_WORKFLOW_JSON = JSON.stringify(DEFAULT_CREATIVE_WORKFLOW).replaceAll(
   "'",
   "''"
 );
@@ -138,6 +143,13 @@ const MIGRATIONS = [
     name: "add-export-directory",
     sql: `
       ALTER TABLE video_tasks ADD COLUMN export_directory TEXT NOT NULL DEFAULT '';
+    `
+  },
+  {
+    id: 10,
+    name: "add-creative-workflow",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN creative_workflow TEXT NOT NULL DEFAULT '${DEFAULT_CREATIVE_WORKFLOW_JSON}';
     `
   }
 ] as const;

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   DEFAULT_COVER_STYLE,
+  DEFAULT_CREATIVE_WORKFLOW,
   DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_GENERATION_STEPS,
   DEFAULT_PERSONAL_IP_PROFILE,
@@ -14,6 +15,7 @@ import {
   isVideoGenerationMode,
   type AvatarMode,
   type CoverStyle,
+  type CreativeWorkflow,
   type ContentLanguage,
   type FrameTitleStyle,
   type GenerationStep,
@@ -59,6 +61,7 @@ interface TaskRow {
   frame_title_style: string;
   cover_style: string;
   personal_ip_profile: string;
+  creative_workflow: string;
   publishing_package: string;
   created_at: string;
   updated_at: string;
@@ -158,6 +161,7 @@ export class TaskRepository {
     const subtitleStyle = DEFAULT_SUBTITLE_STYLE;
     const coverStyle = DEFAULT_COVER_STYLE;
     const personalIpProfile = DEFAULT_PERSONAL_IP_PROFILE;
+    const creativeWorkflow = DEFAULT_CREATIVE_WORKFLOW;
     const publishingPackage = DEFAULT_PUBLISHING_PACKAGE;
 
     runInTransaction(this.database, () => {
@@ -188,10 +192,11 @@ export class TaskRepository {
             subtitle_style,
             cover_style,
             personal_ip_profile,
+            creative_workflow,
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -218,6 +223,7 @@ export class TaskRepository {
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
           JSON.stringify(personalIpProfile),
+          JSON.stringify(creativeWorkflow),
           JSON.stringify(publishingPackage),
           now,
           now
@@ -345,6 +351,9 @@ export class TaskRepository {
     const personalIpProfile = normalizePersonalIpProfile(
       input.personalIpProfile ?? existing.personalIpProfile
     );
+    const creativeWorkflow = normalizeCreativeWorkflow(
+      input.creativeWorkflow ?? existing.creativeWorkflow
+    );
 
     runInTransaction(this.database, () => {
       this.database
@@ -368,9 +377,10 @@ export class TaskRepository {
                custom_font_family = ?,
                 selected_output_presets = ?,
                 frame_title_style = ?,
-                subtitle_style = ?,
+               subtitle_style = ?,
                cover_style = ?,
                personal_ip_profile = ?,
+               creative_workflow = ?,
                updated_at = ?
            WHERE id = ?`
         )
@@ -396,6 +406,7 @@ export class TaskRepository {
           JSON.stringify(subtitleStyle),
           JSON.stringify(coverStyle),
           JSON.stringify(personalIpProfile),
+          JSON.stringify(creativeWorkflow),
           now,
           input.taskId
         );
@@ -679,6 +690,7 @@ export class TaskRepository {
       subtitleStyle: parseSubtitleStyle(row.subtitle_style),
       coverStyle: parseCoverStyle(row.cover_style),
       personalIpProfile: parsePersonalIpProfile(row.personal_ip_profile),
+      creativeWorkflow: parseCreativeWorkflow(row.creative_workflow),
       publishingPackage: parsePublishingPackage(row.publishing_package),
       steps: this.listSteps(row.id),
       outputVariants: this.listOutputVariants(row.id),
@@ -817,6 +829,14 @@ function parsePersonalIpProfile(value: string | null | undefined): PersonalIpPro
   }
 }
 
+function parseCreativeWorkflow(value: string | null | undefined): CreativeWorkflow {
+  try {
+    return normalizeCreativeWorkflow(value ? (JSON.parse(value) as Partial<CreativeWorkflow>) : {});
+  } catch {
+    return DEFAULT_CREATIVE_WORKFLOW;
+  }
+}
+
 function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
   const unique = Array.from(new Set(value.filter(isOutputPresetId)));
   return unique.length > 0 ? unique : defaultOutputPresetIds();
@@ -927,6 +947,37 @@ function normalizePersonalIpProfile(value: Partial<PersonalIpProfile>): Personal
       500
     ),
     bannedWords: normalizeLongText(value.bannedWords, DEFAULT_PERSONAL_IP_PROFILE.bannedWords, 500)
+  };
+}
+
+function normalizeCreativeWorkflow(value: Partial<CreativeWorkflow>): CreativeWorkflow {
+  return {
+    referenceAnalysis: normalizeLongText(
+      value.referenceAnalysis,
+      DEFAULT_CREATIVE_WORKFLOW.referenceAnalysis,
+      4000
+    ),
+    sellingPoints: normalizeLongText(
+      value.sellingPoints,
+      DEFAULT_CREATIVE_WORKFLOW.sellingPoints,
+      3000
+    ),
+    storyboard: normalizeLongText(value.storyboard, DEFAULT_CREATIVE_WORKFLOW.storyboard, 5000),
+    dailyPipeline: normalizeLongText(
+      value.dailyPipeline,
+      DEFAULT_CREATIVE_WORKFLOW.dailyPipeline,
+      3000
+    ),
+    aiVideoPrompt: normalizeLongText(
+      value.aiVideoPrompt,
+      DEFAULT_CREATIVE_WORKFLOW.aiVideoPrompt,
+      3000
+    ),
+    mixedCutPlan: normalizeLongText(
+      value.mixedCutPlan,
+      DEFAULT_CREATIVE_WORKFLOW.mixedCutPlan,
+      4000
+    )
   };
 }
 

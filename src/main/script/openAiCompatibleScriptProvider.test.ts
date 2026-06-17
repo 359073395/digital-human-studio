@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_COVER_STYLE,
+  DEFAULT_CREATIVE_WORKFLOW,
   DEFAULT_FRAME_TITLE_STYLE,
   DEFAULT_PERSONAL_IP_PROFILE,
   DEFAULT_SUBTITLE_STYLE,
@@ -32,6 +33,7 @@ function createTask(): VideoTask {
     subtitleStyle: DEFAULT_SUBTITLE_STYLE,
     coverStyle: DEFAULT_COVER_STYLE,
     personalIpProfile: DEFAULT_PERSONAL_IP_PROFILE,
+    creativeWorkflow: DEFAULT_CREATIVE_WORKFLOW,
     steps: [],
     outputVariants: [],
     mediaAssets: [],
