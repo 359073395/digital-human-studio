@@ -2,6 +2,7 @@ import {
   CheckCircle2,
   FileSearch,
   FolderOpen,
+  KeyRound,
   Link2,
   Monitor,
   Play,
@@ -40,6 +41,7 @@ import type {
   ServiceConfiguration,
   ServiceConfigurationSettings
 } from "../shared/serviceConfig";
+import { defaultServiceSettings } from "../shared/serviceConfig";
 import { countCompleteSteps } from "../shared/workbench";
 
 const now = new Date().toISOString();
@@ -1104,6 +1106,12 @@ export function App() {
 
           <section className="compact-block generation-settings-block">
             <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
+            <FlowApiGuide
+              configurations={serviceConfigurations}
+              task={selectedTask}
+              hasGeneratedPresenterImages={hasGeneratedPresenterImages(selectedTask)}
+              selectedAvatarName={selectedAvatarLook?.name}
+            />
             <div className="control-grid mode-settings-grid">
               <label>
                 生成语言 / 语音
@@ -1695,6 +1703,73 @@ function AssetPreview({
       <span>{title}</span>
       <div className="asset-preview-media">
         {url ? <img alt={title} src={url} /> : <strong>{emptyLabel}</strong>}
+      </div>
+    </div>
+  );
+}
+
+interface FlowApiGuideItem {
+  title: string;
+  providerId?: ProviderId;
+  providerLabel: string;
+  modelLabel: string;
+  detail: string;
+  active: boolean;
+}
+
+function FlowApiGuide({
+  configurations,
+  hasGeneratedPresenterImages,
+  selectedAvatarName,
+  task
+}: {
+  configurations: ServiceConfiguration[];
+  hasGeneratedPresenterImages: boolean;
+  selectedAvatarName?: string;
+  task: VideoTask;
+}) {
+  const items = buildFlowApiGuideItems({
+    configurations,
+    hasGeneratedPresenterImages,
+    selectedAvatarName,
+    task
+  });
+
+  return (
+    <div className="flow-api-guide" aria-label="流程 API 与模型提示">
+      <div className="flow-api-guide-title">
+        <span>
+          <KeyRound size={15} />
+          流程 API / 模型提示
+        </span>
+        <small>只显示是否已配置，不显示 Key 内容</small>
+      </div>
+      <div className="flow-api-guide-grid">
+        {items.map((item) => (
+          <div className={item.active ? "flow-api-card active" : "flow-api-card"} key={item.title}>
+            <div className="flow-api-card-heading">
+              <strong>{item.title}</strong>
+              <span>{item.active ? "本任务会用" : "可选/后续"}</span>
+            </div>
+            <p>{item.detail}</p>
+            <dl>
+              <div>
+                <dt>服务</dt>
+                <dd>{item.providerLabel}</dd>
+              </div>
+              <div>
+                <dt>模型/ID</dt>
+                <dd>{item.modelLabel}</dd>
+              </div>
+              <div>
+                <dt>API Key</dt>
+                <dd>
+                  {item.providerId ? credentialStatus(configurations, item.providerId) : "不需要"}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2299,6 +2374,136 @@ function similarityRiskLabel(risk: VideoTask["similarityRisk"]): string {
   };
 
   return labels[risk];
+}
+
+function buildFlowApiGuideItems(input: {
+  configurations: ServiceConfiguration[];
+  hasGeneratedPresenterImages: boolean;
+  selectedAvatarName?: string;
+  task: VideoTask;
+}): FlowApiGuideItem[] {
+  const { configurations, hasGeneratedPresenterImages, selectedAvatarName, task } = input;
+  const needsImageGeneration =
+    task.generationMode === "product-avatar" && !hasGeneratedPresenterImages;
+
+  return [
+    {
+      title: "1. 提取文案/素材",
+      providerId: "asr",
+      providerLabel: "ASR 转写（OpenAI 兼容）",
+      modelLabel: modelName(configurations, "asr"),
+      detail: "原视频链接先作为入口；本地音/视频转文字、后续平台提取和字幕兜底会用 ASR。",
+      active: Boolean(task.originalVideoUrl?.trim())
+    },
+    {
+      title: "2. 分析并生成文案",
+      providerId: "llm",
+      providerLabel: "大模型（OpenAI 兼容）",
+      modelLabel: modelName(configurations, "llm"),
+      detail: "一键 AI 生成文案会先做拉片/原文案/商品/IP 分析，再生成可编辑脚本。",
+      active: !task.finalScript.trim()
+    },
+    {
+      title: "3. 生成商品人物图",
+      providerId: "image",
+      providerLabel: "图片生成（OpenAI 兼容）",
+      modelLabel: modelName(configurations, "image"),
+      detail: "商品/带货模式中，上传商品图后生成拿产品或换衣服的人物图。",
+      active: needsImageGeneration
+    },
+    {
+      title: "4. 生成口型视频",
+      providerId: "heygen",
+      providerLabel: "HeyGen",
+      modelLabel: heyGenRenderModelLabel(configurations, task, selectedAvatarName),
+      detail: "每个输出比例都会向 HeyGen 生成原生比例视频，默认使用 HeyGen 内置语音。",
+      active: true
+    },
+    {
+      title: "5. 字幕兜底",
+      providerId: "asr",
+      providerLabel: "HeyGen 字幕优先；ASR 兜底",
+      modelLabel: modelName(configurations, "asr"),
+      detail: "优先使用 HeyGen 返回字幕；拿不到或下载失败时再用 ASR 生成 SRT。",
+      active: true
+    },
+    {
+      title: "6. 外部语音",
+      providerId: "tts",
+      providerLabel: "可选 TTS / 外部音频",
+      modelLabel: modelName(configurations, "tts"),
+      detail: "MVP 默认走 HeyGen 内置语音；高级外部音频模式后续接入。",
+      active: false
+    },
+    {
+      title: "7. 输出视频和封面",
+      providerLabel: "本地导出",
+      modelLabel: "不需要模型",
+      detail: "使用已生成视频、字幕样式和封面样式，导出到你选择的保存目录。",
+      active: true
+    }
+  ];
+}
+
+function modelName(configurations: ServiceConfiguration[], providerId: ProviderId): string {
+  const configuration = providerConfiguration(configurations, providerId);
+  const model = configuration?.settings.modelName || defaultServiceSettings(providerId).modelName;
+
+  if (providerId === "heygen") {
+    return heyGenBaseSettingsLabel(configurations);
+  }
+
+  return model?.trim() || "不需要模型名";
+}
+
+function heyGenRenderModelLabel(
+  configurations: ServiceConfiguration[],
+  task: VideoTask,
+  selectedAvatarName: string | undefined
+): string {
+  const configuration = providerConfiguration(configurations, "heygen");
+  const voiceId = configuration?.settings.voiceId?.trim();
+  const modeLabel =
+    task.avatarMode === "image-presenter"
+      ? "图片口型同步"
+      : `Avatar: ${
+          [selectedAvatarName, task.presetAvatarId || configuration?.settings.avatarId]
+            .filter(Boolean)
+            .join(" · ") || "未配置"
+        }`;
+
+  return `${modeLabel}；Voice: ${voiceId || "HeyGen 内置语音"}；${heyGenBaseSettingsLabel(configurations)}`;
+}
+
+function heyGenBaseSettingsLabel(configurations: ServiceConfiguration[]): string {
+  const configuration = providerConfiguration(configurations, "heygen");
+  const resolution =
+    configuration?.settings.resolution || defaultServiceSettings("heygen").resolution;
+  return `分辨率 ${resolution ?? "720p"}`;
+}
+
+function credentialStatus(configurations: ServiceConfiguration[], providerId: ProviderId): string {
+  if (providerId === "tts") {
+    return "默认不需要";
+  }
+
+  const configuration = providerConfiguration(configurations, providerId);
+  if (!configuration) {
+    return "未读取配置";
+  }
+
+  if (configuration.settings.enabled === false) {
+    return "已停用";
+  }
+
+  return configuration.credentialConfigured ? "已配置" : "未配置";
+}
+
+function providerConfiguration(
+  configurations: ServiceConfiguration[],
+  providerId: ProviderId
+): ServiceConfiguration | undefined {
+  return configurations.find((configuration) => configuration.providerId === providerId);
 }
 
 function withApiTroubleshootingHint(message: string): string {

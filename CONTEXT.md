@@ -160,6 +160,10 @@ _Avoid_: Silent export, hidden finalization, mock check
 The local settings that connect the application to external generation services, including avatar, language model, and optional voice providers. The MVP does not include a cloud account system.
 _Avoid_: User account, workspace account, SaaS settings
 
+**Flow API Guide**:
+A compact task-level hint panel that shows which generation stages use which local service configuration, model name, Avatar ID, Voice ID, and API Key status. It may show whether a credential is configured, but it must never reveal the API Key value.
+_Avoid_: Secret display, large methodology panel, separate settings duplicate
+
 **Local Configuration Check**:
 A settings-screen validation that confirms required local fields and credentials are present. It does not make a live provider API request, so real connectivity errors must still surface during generation.
 _Avoid_: API health check, provider uptime check, guaranteed connection

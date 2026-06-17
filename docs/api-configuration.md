@@ -4,6 +4,20 @@ The desktop app stores service settings locally. API keys are saved in the encry
 
 The credential store lives under the app data directory, for example `D:\Codex\2026-06-13\digital-human-studio\data\credentials`. This directory is ignored by Git. Keep it with your project backup if you want the configured accounts to keep working after moving the project to another machine; otherwise you can re-enter keys in the settings modal.
 
+## Workflow Stage Requirements
+
+The generation screen shows a compact flow guide for the active task. It lists whether each stage will use a service, which model or ID is configured, and whether the API Key is present. It never displays the API Key value.
+
+| Stage                                 | Service                             | Required setting                                                               |
+| ------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| Source extraction/material extraction | ASR, OpenAI-compatible              | Base URL, ASR model, API Key when transcription is needed                      |
+| Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                  |
+| Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                 |
+| Lip-synced avatar video               | HeyGen                              | Base URL, API Key, Avatar ID for preset avatars, optional Voice ID, resolution |
+| Subtitle fallback                     | ASR, OpenAI-compatible              | Base URL, ASR model, API Key, only when HeyGen subtitles are unavailable       |
+| External audio                        | Optional TTS or uploaded audio      | Not required for the default MVP path                                          |
+| Export                                | Local desktop app                   | Save directory, no API Key                                                     |
+
 ## OpenAI-Compatible Relay
 
 Use the same relay API key for any OpenAI-compatible services your relay supports.
@@ -53,7 +67,7 @@ HeyGen can be replaced directly from the settings modal:
 
 The MVP stores one active HeyGen configuration at a time.
 
-`完整生成视频` runs the real API workflow and requires a HeyGen account with API credits. `Mock 检查` only validates local task state and placeholder file layout; it does not create publishable MP4 video files.
+`一键输出视频和封面` runs the real API workflow and requires a HeyGen account with API credits. For product/commerce mode, it may also require the image-generation provider before HeyGen rendering starts.
 
 PowerShell setup example:
 
