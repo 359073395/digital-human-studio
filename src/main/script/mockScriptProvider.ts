@@ -11,13 +11,13 @@ export class MockScriptProvider implements ScriptProvider {
     return {
       finalScript,
       similarityRisk: assessSimilarityRisk(sourceScript, finalScript),
-      notes: "Mock LLM 已按结构复用、表达改写、前 5 秒改写的规则生成脚本。",
+      notes: "Mock LLM 已先做拉片/原文案分析，再按结构复用、表达改写、前 5 秒改写的规则生成脚本。",
       promptPreview: buildScriptGenerationPrompt({
         sourceScript,
+        originalVideoUrl: task.originalVideoUrl,
         contentLanguage: task.contentLanguage,
         generationMode: task.generationMode,
-        personalIpProfile: task.personalIpProfile,
-        creativeWorkflow: task.creativeWorkflow
+        personalIpProfile: task.personalIpProfile
       })
     };
   }

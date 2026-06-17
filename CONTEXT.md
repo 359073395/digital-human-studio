@@ -36,40 +36,40 @@ _Avoid_: Downloaded video, scraped transcript, platform import
 The first workflow command that attempts to turn source material into editable reference copy. The MVP routes it through the desktop extraction/transcription service and leaves platform-link downloading as a provider enhancement behind the same button.
 _Avoid_: Mock check, hidden import, final script generation
 
-**Creative Workflow**:
-The task-level planning fields that translate viral references, product selling points, storyboards, daily IP routines, AI image/video prompts, and mixed-cut plans into editable constraints for script generation and video production.
-_Avoid_: Hidden prompt, one-off note, copied reference
+**Internal Method Analysis Engine**:
+The hidden script-generation layer that analyzes source links, source copy, product context, IP profile, or mixed-cut goals before writing the editable final script. It contains the reusable SOP thinking from reference breakdown, product selection-to-commerce, storyboard planning, personal IP planning, AI image/video prompting, and mixed-cut planning without exposing a large methodology form in the interface.
+_Avoid_: Visible workflow block, prompt clutter, direct copy
 
 **Reference Breakdown**:
 The structured analysis of a reference video's abstract mechanics, such as hook job, pacing, proof type, emotional curve, visual rhythm, and CTA placement. It must not preserve the reference's distinctive wording, creator persona, jokes, or shot signature.
 _Avoid_: Shot-for-shot copy, 1:1 rewrite, creator imitation
 
-**Storyboard Plan**:
-The editable beat-by-beat production plan for a video task. It can guide talking-head scripts, product shots, image lip-sync prompts, or mixed-cut planning before the actual provider integrations run.
-_Avoid_: Final rendered edit, fixed timeline, non-editable template
+**Storyboard Generation Method**:
+An internal planning method that converts a script goal into first frame, hook, proof/demo/story, visual action, subtitle emphasis, and edit rhythm. It can guide product shots, image lip-sync prompts, personal IP clips, or future image-to-video providers without becoming a top-level navigation item.
+_Avoid_: Separate video category, final rendered edit, fixed timeline
 
-**Daily IP Pipeline**:
-The repeatable workflow for personal IP videos, covering topic selection, reference breakdown, original script writing, avatar generation, subtitle/cover styling, publishing, and performance review.
-_Avoid_: Creator clone, account automation, rigid script template
+**Personal IP Method**:
+An internal analysis path for personal IP videos. It first infers whether the task is store visit, knowledge output, opinion, daily life, industry insight, experience sharing, or commerce, then chooses an appropriate interaction goal instead of forcing every IP video into product sales.
+_Avoid_: Creator clone, account automation, forced commerce CTA
 
-**AI Video Prompt**:
-The editable prompt constraints for image generation or future image-to-video providers, including presenter appearance, product handling, clothing, scene, mouth visibility, subtitle-safe space, and camera motion.
+**AI Visual Prompt**:
+The user-editable prompt constraints for image generation or future image-to-video providers, including presenter appearance, product handling, clothing, scene, mouth visibility, subtitle-safe space, and camera motion.
 _Avoid_: Final script, avatar ID, subtitle style
 
-**Mixed-Cut Plan**:
-The editable plan for combining a digital-human talking-head base video with B-roll, product close-ups, screen recordings, generated clips, or other authorized materials. In the MVP it is a planning and prompt field; rendering providers are added behind a future provider interface.
-_Avoid_: Built-in stock library, unlicensed clip scraping, completed mixed edit
+**Mixed-Cut Method**:
+An internal planning path for arranging voiceover, subtitles, product images, B-roll, screen recordings, generated visuals, sound cues, and optional digital-human segments. It must not assume a real person or digital human is required.
+_Avoid_: Built-in stock library, unlicensed clip scraping, digital-human-only flow
 
 **Mixed-Cut Video**:
-An enabled planning mode that prepares a talking-head base video plus mixed-cut plan, storyboard, and AI video prompts. Full mixed-cut rendering and Seedance-like provider execution remain future provider work.
-_Avoid_: Finished mixed edit, stock clip library, platform scrape
+A top-level video generation mode for videos assembled from authorized materials, subtitles, voiceover, product imagery, screen recordings, generated visuals, and optional digital-human segments. Full mixed-cut rendering and Seedance-like provider execution remain future provider work.
+_Avoid_: Digital-human-only mode, stock clip library, platform scrape
 
 **Video Task**:
 A single attempt to produce one finished video from one source script and one set of generation settings. The MVP interface focuses on one active video task at a time.
 _Avoid_: Batch job, project, campaign
 
 **Video Generation Mode**:
-The top-level category selected for a video task. It controls which input materials the user sees and how generation services interpret the task. The MVP modes are preset avatar talking-head, product avatar, image lip-sync, personal IP video, viral structure remix, and mixed-cut planning.
+The top-level category selected for a video task. It controls which input materials the user sees and how generation services interpret the task. The MVP modes are preset avatar talking-head, product/commerce video, image lip-sync, personal IP video, viral structure remix, and mixed-cut video.
 _Avoid_: Workflow step, output preset, provider setting
 
 **Task List**:
@@ -232,13 +232,13 @@ _Avoid_: Cropped render, reused render, aspect-ratio conversion
 The task-level choice that decides whether a video uses a HeyGen preset avatar or an AI-generated product presenter image as the visual speaker source.
 _Avoid_: Provider switch, style preset, output preset
 
-**Product Avatar Video**:
-A video generation mode where the user uploads a product image, generates a presenter image holding or wearing the product, and then sends that image to HeyGen for lip-synced video generation.
-_Avoid_: Preset avatar video, mixed-cut video, product-only image
+**Product/Commerce Video**:
+A video generation mode for product selling or product explanation. It may use product images, generated presenter images, B-roll, voiceover, or optional digital-human segments, but the category itself does not require a human presenter.
+_Avoid_: Digital-human-only product mode, mixed-cut video, product-only image
 
 **Image Lip-Sync Video**:
 A video generation mode where the user uploads a reference person image and HeyGen animates that image with lip synchronization for the generated script.
-_Avoid_: Product avatar video, static image narration, custom digital twin
+_Avoid_: Product/commerce video, static image narration, custom digital twin
 
 **Personal IP Video**:
 A video generation mode that applies a reusable creator profile, persona, tone, catchphrases, and banned words to script generation while still using the selected avatar provider for video rendering.
@@ -248,12 +248,12 @@ _Avoid_: Account profile, trained voice, creator clone
 A generated presenter image that shows a person holding, wearing, or presenting a product image supplied by the user, then becomes the source image for HeyGen image-based lip-sync video.
 _Avoid_: Custom digital twin, mixed-cut video, product mockup only
 
-**Digital-Human Description Prompt**:
-The user-editable prompt that describes the presenter's appearance, clothing, scene, and product-holding style for AI product image generation.
+**Presenter/Scene Description Prompt**:
+The user-editable prompt that describes the presenter, product scene, clothing, composition, and product-holding or product-wearing style for AI visual generation.
 _Avoid_: Script prompt, voice prompt, avatar ID
 
 **Motion Prompt**:
-The user-editable prompt that describes how the digital human should move during video generation, such as holding the product toward camera, nodding, pointing, or smiling.
+The user-editable prompt that describes how the presenter or generated video subject should move during video generation, such as holding the product toward camera, nodding, pointing, walking, demonstrating, or smiling.
 _Avoid_: Script, subtitle timing, edit instruction
 
 **Product Image**:

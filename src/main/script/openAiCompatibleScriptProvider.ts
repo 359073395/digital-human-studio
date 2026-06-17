@@ -50,10 +50,10 @@ export class OpenAiCompatibleScriptProvider implements ScriptProvider {
 
     const promptPreview = buildScriptGenerationPrompt({
       sourceScript: task.sourceScript,
+      originalVideoUrl: task.originalVideoUrl,
       contentLanguage: task.contentLanguage,
       generationMode: task.generationMode,
-      personalIpProfile: task.personalIpProfile,
-      creativeWorkflow: task.creativeWorkflow
+      personalIpProfile: task.personalIpProfile
     });
 
     const response = await fetch(buildChatCompletionUrl(configuration), {
@@ -72,6 +72,7 @@ export class OpenAiCompatibleScriptProvider implements ScriptProvider {
             content: [
               "You are a short-form commerce script strategist.",
               "Return only valid JSON with finalScript, similarityRisk, and notes.",
+              "The notes field must summarize the private analysis track and the main originality changes.",
               "Allowed similarityRisk values: low, medium, high, unknown.",
               "Reuse reference mechanics only. Do not copy protected expression."
             ].join(" ")
