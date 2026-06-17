@@ -32,7 +32,7 @@ import {
   type VideoTask,
   type VideoTaskSummary
 } from "../shared/domain";
-import type { HeyGenAvatarLook, UpdateTaskInput } from "../shared/ipc";
+import type { DigitalHumanStudioAPI, HeyGenAvatarLook, UpdateTaskInput } from "../shared/ipc";
 import type {
   ProviderId,
   SaveServiceConfigurationInput,
@@ -49,6 +49,7 @@ const fallbackTask: VideoTask = {
   id: "preview-task",
   title: "护肤品口播样片",
   originalVideoUrl: "",
+  exportDirectory: "",
   sourceScript: "如果你的内容一直有播放，却始终带不动成交，问题可能不在流量。",
   finalScript: "播放量不差却没有订单时，先别急着加预算。真正要改的，往往是前三秒给用户的购买理由。",
   similarityRisk: "low",
@@ -104,6 +105,7 @@ type EditableTaskPatch = Partial<
     VideoTask,
     | "title"
     | "originalVideoUrl"
+    | "exportDirectory"
     | "sourceScript"
     | "finalScript"
     | "contentLanguage"
@@ -183,6 +185,7 @@ export function App() {
   const frameTitleStyle = selectedTask.frameTitleStyle ?? DEFAULT_FRAME_TITLE_STYLE;
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
+  const exportDirectoryLabel = selectedTask.exportDirectory?.trim() || "未选择保存目录";
   const sourceScriptLabel =
     selectedTask.generationMode === "viral-remix" ? "爆款参考文案" : "参考文案";
   const primaryVariant =
@@ -477,9 +480,42 @@ export function App() {
     }
   }
 
+  async function chooseExportDirectory(): Promise<VideoTask | null> {
+    const api = requireDesktopRuntime("选择保存目录");
+    if (!api) {
+      return null;
+    }
+
+    const task = await api.chooseExportDirectory(selectedTask.id);
+    await refreshTaskState(task.id, task);
+    setActionMessage(
+      task.exportDirectory?.trim()
+        ? `保存目录已选择：${task.exportDirectory}`
+        : "已取消选择保存目录"
+    );
+    return task;
+  }
+
   async function runRealWorkflow() {
     const api = requireDesktopRuntime("一键输出视频和封面");
     if (!api) {
+      return;
+    }
+
+    let taskForRun = selectedTask;
+    if (!taskForRun.exportDirectory?.trim()) {
+      setActionMessage("请先选择保存目录，再一键输出视频和封面。");
+      const chosenTask = await chooseExportDirectory();
+      if (!chosenTask?.exportDirectory?.trim()) {
+        return;
+      }
+      taskForRun = chosenTask;
+    }
+
+    const confirmed = window.confirm(
+      "请先在预览中设置字幕和封面。确认后将输出视频、封面、字幕文件和发布资料包；当前版本暂未把字幕烧录进 MP4。是否继续？"
+    );
+    if (!confirmed) {
       return;
     }
 
@@ -487,35 +523,48 @@ export function App() {
     setActionMessage("正在输出视频、封面和字幕文件...");
 
     try {
+      const preflightMessage = await checkOutputServiceConfiguration(api, taskForRun);
+      if (preflightMessage) {
+        setActionMessage(preflightMessage);
+        return;
+      }
+
       await api.updateTask({
-        taskId: selectedTask.id,
-        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
-        sourceScript: selectedTask.sourceScript,
-        finalScript: selectedTask.finalScript,
-        contentLanguage: selectedTask.contentLanguage,
-        generationMode: selectedTask.generationMode,
-        avatarMode: selectedTask.avatarMode,
-        presetAvatarId: selectedTask.presetAvatarId ?? "",
-        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
-        motionPrompt: selectedTask.motionPrompt,
-        selectedOutputPresets: selectedTask.selectedOutputPresets,
+        taskId: taskForRun.id,
+        originalVideoUrl: taskForRun.originalVideoUrl ?? "",
+        exportDirectory: taskForRun.exportDirectory ?? "",
+        sourceScript: taskForRun.sourceScript,
+        finalScript: taskForRun.finalScript,
+        contentLanguage: taskForRun.contentLanguage,
+        generationMode: taskForRun.generationMode,
+        avatarMode: taskForRun.avatarMode,
+        presetAvatarId: taskForRun.presetAvatarId ?? "",
+        avatarDescriptionPrompt: taskForRun.avatarDescriptionPrompt,
+        motionPrompt: taskForRun.motionPrompt,
+        selectedOutputPresets: taskForRun.selectedOutputPresets,
         frameTitleStyle,
         subtitleStyle,
         coverStyle,
-        personalIpProfile: selectedTask.personalIpProfile
+        personalIpProfile: taskForRun.personalIpProfile
       });
-      const task = await api.runRealWorkflow(selectedTask.id);
+      const task = await api.runRealWorkflow(taskForRun.id);
       const failedStep = task.steps.find(
         (step) => step.status === "retry-ready" || step.status === "failed"
       );
       setActionMessage(
         failedStep
-          ? failedStep.errorMessage || `${failedStep.label}未完成`
-          : "视频、封面和字幕文件已输出；当前版本暂未把字幕烧录进 MP4"
+          ? withApiTroubleshootingHint(failedStep.errorMessage || `${failedStep.label}未完成`)
+          : `视频、封面和字幕文件已输出到：${
+              task.publishingPackage.exportDirectory ?? task.exportDirectory ?? "内部导出目录"
+            }；当前版本暂未把字幕烧录进 MP4`
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "一键输出视频和封面失败");
+      setActionMessage(
+        withApiTroubleshootingHint(
+          error instanceof Error ? error.message : "一键输出视频和封面失败"
+        )
+      );
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -1334,6 +1383,17 @@ export function App() {
 
           <div className="primary-actions">
             {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
+            <div className="export-directory-control">
+              <button
+                type="button"
+                disabled={isWorkflowRunning}
+                onClick={() => void chooseExportDirectory()}
+              >
+                <FolderOpen size={16} />
+                选择保存目录
+              </button>
+              <span title={exportDirectoryLabel}>{exportDirectoryLabel}</span>
+            </div>
             <button
               type="button"
               className="primary"
@@ -2235,6 +2295,46 @@ function similarityRiskLabel(risk: VideoTask["similarityRisk"]): string {
   };
 
   return labels[risk];
+}
+
+function withApiTroubleshootingHint(message: string): string {
+  const trimmed = message.trim() || "API 请求失败";
+  return `${trimmed}。如果 API 不通，请打开设置，重新保存对应服务的 Base URL、模型名称和 API Key；“检查”只做本地配置检查，不代表平台接口一定可用。`;
+}
+
+async function checkOutputServiceConfiguration(
+  api: DigitalHumanStudioAPI,
+  task: VideoTask
+): Promise<string> {
+  const providerIds: ProviderId[] = ["heygen"];
+
+  if (!task.finalScript.trim()) {
+    providerIds.push("llm");
+  }
+
+  if (task.generationMode === "product-avatar" && !hasGeneratedPresenterImages(task)) {
+    providerIds.push("image");
+  }
+
+  const results = await Promise.all(
+    providerIds.map((providerId) => api.testServiceConfiguration(providerId))
+  );
+  const failed = results.filter((result) => !result.ok);
+  if (failed.length === 0) {
+    return "";
+  }
+
+  return `生成前配置检查未通过：${failed.map((result) => result.message).join("；")}`;
+}
+
+function hasGeneratedPresenterImages(task: VideoTask): boolean {
+  return task.selectedOutputPresets.every((presetId) =>
+    task.mediaAssets.some(
+      (asset) =>
+        asset.kind === "generated-presenter-image" &&
+        asset.relativePath.includes(`generated-presenter-${presetId}.`)
+    )
+  );
 }
 
 function formatTaskMeta(task: VideoTaskSummary): string {

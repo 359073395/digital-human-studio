@@ -141,6 +141,7 @@ export interface VideoTask {
   id: string;
   title: string;
   originalVideoUrl?: string;
+  exportDirectory?: string;
   sourceScript: string;
   finalScript: string;
   similarityRisk: SimilarityRisk;

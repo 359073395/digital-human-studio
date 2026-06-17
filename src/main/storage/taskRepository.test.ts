@@ -45,6 +45,7 @@ describe("TaskRepository", () => {
     expect(task.avatarMode).toBe("preset-avatar");
     expect(task.avatarDescriptionPrompt).toBe("");
     expect(task.motionPrompt).toBe("");
+    expect(task.exportDirectory).toBe("");
     expect(task.steps).toHaveLength(6);
     expect(task.outputVariants).toHaveLength(1);
 
@@ -138,6 +139,7 @@ describe("TaskRepository", () => {
     const updated = repository.updateTask({
       taskId: task.id,
       originalVideoUrl: "https://example.com/video/123",
+      exportDirectory: path.join(tempDir, "exports"),
       finalScript: "Final edited copy with corrected price.",
       presetAvatarId: "avatar-custom-123",
       customFontFamily: "DHS Custom Font",
@@ -160,6 +162,7 @@ describe("TaskRepository", () => {
     });
 
     expect(updated.originalVideoUrl).toBe("https://example.com/video/123");
+    expect(updated.exportDirectory).toBe(path.join(tempDir, "exports"));
     expect(updated.finalScript).toBe("Final edited copy with corrected price.");
     expect(updated.presetAvatarId).toBe("avatar-custom-123");
     expect(updated.customFontFamily).toBe("DHS Custom Font");

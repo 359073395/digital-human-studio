@@ -124,9 +124,21 @@ _Avoid_: System-wide font install, bundled font library, remote font dependency
 A local export bundle containing the finished video, cover image, title, description copy, tag suggestions, and publishing notes. The MVP produces one generic publishing package instead of platform-specific copy variants or social platform uploads.
 _Avoid_: Auto publish, platform upload, distribution
 
+**Output Save Directory**:
+The user-selected Windows folder where the app copies final videos, cover images, subtitle files, and the publishing manifest after the internal task export succeeds. The app creates a task-named subfolder inside this directory to avoid overwriting previous exports.
+_Avoid_: Internal render cache, task media folder, provider download path
+
+**Explicit Output Confirmation**:
+The confirmation shown before one-click output starts. It reminds users to set subtitle and cover styles in the preview first, because those style choices affect exported cover files and sidecar subtitle assets.
+_Avoid_: Silent export, hidden finalization, mock check
+
 **Service Configuration**:
 The local settings that connect the application to external generation services, including avatar, language model, and optional voice providers. The MVP does not include a cloud account system.
 _Avoid_: User account, workspace account, SaaS settings
+
+**Local Configuration Check**:
+A settings-screen validation that confirms required local fields and credentials are present. It does not make a live provider API request, so real connectivity errors must still surface during generation.
+_Avoid_: API health check, provider uptime check, guaranteed connection
 
 **Local Credential**:
 An API key or service secret saved only on the user's Windows machine. It should be stored through operating-system-backed secure storage rather than as plain text project data.

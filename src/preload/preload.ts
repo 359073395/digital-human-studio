@@ -25,6 +25,7 @@ const IPC_CHANNELS = {
   createTask: "tasks:create",
   deleteTask: "tasks:delete",
   updateTask: "tasks:update",
+  chooseExportDirectory: "workflow:choose-export-directory",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
   uploadProductImage: "source:upload-product-image",
@@ -56,6 +57,8 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.deleteTask, taskId) as Promise<VideoTaskSummary[]>,
   updateTask: (input: UpdateTaskInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.updateTask, input) as Promise<VideoTask>,
+  chooseExportDirectory: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.chooseExportDirectory, taskId) as Promise<VideoTask>,
   generateScript: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.generateScript, taskId) as Promise<VideoTask>,
   transcribeSource: (taskId: string) =>

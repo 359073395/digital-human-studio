@@ -124,7 +124,7 @@ describe("ServiceConfigurationRepository", () => {
 
     expect(repository.testConfiguration("heygen")).toMatchObject({
       ok: true,
-      message: "HeyGen 本地配置检查通过"
+      message: "HeyGen 本地配置检查通过（未发起真实 API 请求，真实连通性以生成时返回为准）"
     });
   });
 });

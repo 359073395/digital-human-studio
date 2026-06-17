@@ -37,6 +37,7 @@ export interface DigitalHumanStudioAPI {
   createTask: (input?: CreateTaskInput) => Promise<VideoTask>;
   deleteTask: (taskId: string) => Promise<VideoTaskSummary[]>;
   updateTask: (input: UpdateTaskInput) => Promise<VideoTask>;
+  chooseExportDirectory: (taskId: string) => Promise<VideoTask>;
   generateScript: (taskId: string) => Promise<VideoTask>;
   transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
   uploadProductImage: (taskId: string) => Promise<VideoTask>;
@@ -64,6 +65,7 @@ export const IPC_CHANNELS = {
   createTask: "tasks:create",
   deleteTask: "tasks:delete",
   updateTask: "tasks:update",
+  chooseExportDirectory: "workflow:choose-export-directory",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
   uploadProductImage: "source:upload-product-image",
@@ -92,6 +94,7 @@ export interface UpdateTaskInput {
   taskId: string;
   title?: string;
   originalVideoUrl?: string;
+  exportDirectory?: string;
   sourceScript?: string;
   finalScript?: string;
   contentLanguage?: ContentLanguage;

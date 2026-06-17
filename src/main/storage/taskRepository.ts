@@ -38,6 +38,7 @@ interface TaskRow {
   id: string;
   title: string;
   original_video_url: string;
+  export_directory: string;
   source_script: string;
   final_script: string;
   similarity_risk: SimilarityRisk;
@@ -139,6 +140,7 @@ export class TaskRepository {
     const now = new Date().toISOString();
     const title = input.title?.trim() || "未命名视频任务";
     const originalVideoUrl = "";
+    const exportDirectory = "";
     const sourceScript = input.sourceScript?.trim() || "";
     const finalScript = "";
     const similarityRisk: SimilarityRisk = "unknown";
@@ -165,6 +167,7 @@ export class TaskRepository {
             id,
             title,
             original_video_url,
+            export_directory,
             source_script,
             final_script,
             similarity_risk,
@@ -188,12 +191,13 @@ export class TaskRepository {
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
           title,
           originalVideoUrl,
+          exportDirectory,
           sourceScript,
           finalScript,
           similarityRisk,
@@ -286,6 +290,10 @@ export class TaskRepository {
       input.originalVideoUrl === undefined
         ? (existing.originalVideoUrl ?? "")
         : input.originalVideoUrl.trim();
+    const exportDirectory =
+      input.exportDirectory === undefined
+        ? (existing.exportDirectory ?? "")
+        : input.exportDirectory.trim();
     const sourceScript =
       input.sourceScript === undefined ? existing.sourceScript : input.sourceScript.trim();
     const finalScript =
@@ -344,6 +352,7 @@ export class TaskRepository {
           `UPDATE video_tasks
            SET title = ?,
                original_video_url = ?,
+               export_directory = ?,
                source_script = ?,
                final_script = ?,
                content_language = ?,
@@ -368,6 +377,7 @@ export class TaskRepository {
         .run(
           title,
           originalVideoUrl,
+          exportDirectory,
           sourceScript,
           finalScript,
           contentLanguage,
@@ -648,6 +658,7 @@ export class TaskRepository {
       id: row.id,
       title: row.title,
       originalVideoUrl: row.original_video_url ?? "",
+      exportDirectory: row.export_directory ?? "",
       sourceScript: row.source_script,
       finalScript: row.final_script,
       similarityRisk: row.similarity_risk,

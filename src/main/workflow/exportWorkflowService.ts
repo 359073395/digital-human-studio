@@ -57,22 +57,37 @@ export class ExportWorkflowService {
       this.taskRepository.updateStepStatus(taskId, "post-production", "complete");
       this.taskRepository.updateStepStatus(taskId, "export", "running");
 
-      const manifestPath = "exports/publishing-package/manifest.json";
+      const internalExportDirectory = "exports/publishing-package";
+      const internalPublishingPackage = {
+        ...publishingPackage,
+        exportDirectory: internalExportDirectory
+      };
+      const manifestPath = `${internalExportDirectory}/manifest.json`;
       writeTaskFile(
         this.paths,
         taskId,
         manifestPath,
         JSON.stringify(
-          createPublishingManifest(this.requireTask(taskId), publishingPackage),
+          createPublishingManifest(this.requireTask(taskId), internalPublishingPackage),
           null,
           2
         )
       );
       this.taskRepository.addMediaAsset(taskId, "publishing-package", manifestPath);
-      this.taskRepository.updatePublishingPackage(taskId, {
-        ...publishingPackage,
-        exportDirectory: "exports/publishing-package"
-      });
+      this.taskRepository.updatePublishingPackage(taskId, internalPublishingPackage);
+
+      const externalExportDirectory = copyToSelectedExportDirectory(
+        this.paths,
+        taskId,
+        this.requireTask(taskId),
+        publishingPackage
+      );
+      if (externalExportDirectory) {
+        this.taskRepository.updatePublishingPackage(taskId, {
+          ...publishingPackage,
+          exportDirectory: externalExportDirectory
+        });
+      }
 
       return this.taskRepository.updateStepStatus(taskId, "export", "complete");
     } catch (error) {
@@ -185,6 +200,116 @@ function createPublishingManifest(task: VideoTask, publishingPackage: Publishing
     outputVariants: task.outputVariants,
     mediaAssets: task.mediaAssets
   };
+}
+
+function copyToSelectedExportDirectory(
+  paths: AppPaths,
+  taskId: string,
+  task: VideoTask,
+  publishingPackage: PublishingPackage
+): string | undefined {
+  const selectedDirectory = task.exportDirectory?.trim();
+  if (!selectedDirectory) {
+    return undefined;
+  }
+
+  const targetDirectory = path.join(
+    path.resolve(selectedDirectory),
+    `${safeFileName(task.title)}-${formatTimestamp(new Date())}`
+  );
+  fs.mkdirSync(targetDirectory, { recursive: true });
+
+  for (const variant of task.outputVariants) {
+    if (!task.selectedOutputPresets.includes(variant.presetId)) {
+      continue;
+    }
+
+    if (variant.finishedVideoPath) {
+      copyTaskAsset(
+        paths,
+        taskId,
+        variant.finishedVideoPath,
+        path.join(targetDirectory, "videos", path.basename(variant.finishedVideoPath))
+      );
+    }
+
+    if (variant.coverImagePath) {
+      copyTaskAsset(
+        paths,
+        taskId,
+        variant.coverImagePath,
+        path.join(targetDirectory, "covers", path.basename(variant.coverImagePath))
+      );
+    }
+  }
+
+  const copiedSubtitlePaths = new Set<string>();
+  for (const asset of task.mediaAssets) {
+    if (asset.kind !== "subtitle-file" || copiedSubtitlePaths.has(asset.relativePath)) {
+      continue;
+    }
+
+    copiedSubtitlePaths.add(asset.relativePath);
+    copyTaskAsset(
+      paths,
+      taskId,
+      asset.relativePath,
+      path.join(targetDirectory, "subtitles", path.basename(asset.relativePath))
+    );
+  }
+
+  fs.writeFileSync(
+    path.join(targetDirectory, "manifest.json"),
+    JSON.stringify(
+      createPublishingManifest(task, {
+        ...publishingPackage,
+        exportDirectory: targetDirectory
+      }),
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  return targetDirectory;
+}
+
+function copyTaskAsset(
+  paths: AppPaths,
+  taskId: string,
+  relativePath: string,
+  targetPath: string
+): void {
+  const sourcePath = absoluteTaskPath(paths, taskId, relativePath);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`导出文件不存在：${relativePath}`);
+  }
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(sourcePath, targetPath);
+}
+
+function safeFileName(value: string): string {
+  const invalidCharacters = new Set(["<", ">", ":", '"', "/", "\\", "|", "?", "*"]);
+  const normalized = Array.from(value.trim())
+    .map((character) =>
+      invalidCharacters.has(character) || character.charCodeAt(0) < 32 ? "-" : character
+    )
+    .join("");
+  return (normalized || "video-task").slice(0, 60);
+}
+
+function formatTimestamp(value: Date): string {
+  const pad = (input: number) => String(input).padStart(2, "0");
+  return [
+    value.getFullYear(),
+    pad(value.getMonth() + 1),
+    pad(value.getDate()),
+    "-",
+    pad(value.getHours()),
+    pad(value.getMinutes()),
+    pad(value.getSeconds())
+  ].join("");
 }
 
 function requireOutputPreset(presetId: OutputPresetId): OutputPreset {

@@ -17,7 +17,12 @@ import { HeyGenAvatarCatalog } from "./avatar/heyGenAvatarCatalog";
 import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
 import { OpenAiImageProvider } from "./image/openAiImageProvider";
 import { PresenterImageWorkflowService } from "./image/presenterImageWorkflowService";
-import { createAppPaths, ensureAppPaths, getTaskMediaDirectory } from "./storage/appPaths";
+import {
+  createAppPaths,
+  ensureAppPaths,
+  getTaskDirectory,
+  getTaskMediaDirectory
+} from "./storage/appPaths";
 import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
 import { OpenAiCompatibleScriptProvider } from "./script/openAiCompatibleScriptProvider";
@@ -212,6 +217,31 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     taskRepository.updateTask(input)
   );
 
+  ipcMain.handle(IPC_CHANNELS.chooseExportDirectory, async (_event, taskId: string) => {
+    const task = taskRepository.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found.`);
+    }
+
+    const exportDirectoryDialogOptions: OpenDialogOptions = {
+      title: "选择保存目录",
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: task.exportDirectory || app.getPath("videos")
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, exportDirectoryDialogOptions)
+      : await dialog.showOpenDialog(exportDirectoryDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      return task;
+    }
+
+    return taskRepository.updateTask({
+      taskId,
+      exportDirectory: result.filePaths[0]
+    });
+  });
+
   ipcMain.handle(IPC_CHANNELS.generateScript, (_event, taskId: string) =>
     scriptWorkflowService.generateScript(taskId)
   );
@@ -330,7 +360,10 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.openTaskExports, async (_event, taskId: string) => {
-    const exportsDirectory = getTaskMediaDirectory(appPaths, taskId, "exports");
+    const task = taskRepository.getTask(taskId);
+    const exportsDirectory = task?.publishingPackage.exportDirectory
+      ? resolveExportDirectory(appPaths, taskId, task.publishingPackage.exportDirectory)
+      : getTaskMediaDirectory(appPaths, taskId, "exports");
     await shell.openPath(exportsDirectory);
   });
 
@@ -415,6 +448,18 @@ function resolveTaskAssetPath(
   }
 
   return absolutePath;
+}
+
+function resolveExportDirectory(
+  appPaths: ReturnType<typeof createAppPaths>,
+  taskId: string,
+  exportDirectory: string
+): string {
+  if (path.isAbsolute(exportDirectory)) {
+    return exportDirectory;
+  }
+
+  return path.join(getTaskDirectory(appPaths, taskId), ...exportDirectory.split("/"));
 }
 
 app.whenReady().then(() => {

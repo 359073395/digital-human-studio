@@ -76,6 +76,56 @@ describe("ExportWorkflowService", () => {
     ).toContain("data:image/jpeg;base64");
   });
 
+  it("copies final outputs into the selected export directory", () => {
+    const service = new ExportWorkflowService(repository, appPaths);
+    const selectedExportDirectory = path.join(tempDir, "selected-exports");
+    const task = repository.createTask({
+      title: "External Export Test",
+      sourceScript: "Source script."
+    });
+    repository.updateTask({
+      taskId: task.id,
+      exportDirectory: selectedExportDirectory
+    });
+    repository.updateFinalScript(task.id, "Final script.");
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const avatarPath = path.join(taskDirectory, "avatar", "avatar-portrait-9-16.mp4");
+    fs.mkdirSync(path.dirname(avatarPath), { recursive: true });
+    fs.writeFileSync(avatarPath, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    repository.addMediaAsset(task.id, "avatar-video", "avatar/avatar-portrait-9-16.mp4");
+
+    const subtitlePath = path.join(
+      taskDirectory,
+      "subtitles",
+      "provider-subtitles-portrait-9-16.srt"
+    );
+    fs.mkdirSync(path.dirname(subtitlePath), { recursive: true });
+    fs.writeFileSync(subtitlePath, "1\n00:00:00,000 --> 00:00:01,000\nFinal script.");
+    repository.addMediaAsset(
+      task.id,
+      "subtitle-file",
+      "subtitles/provider-subtitles-portrait-9-16.srt"
+    );
+
+    const exported = service.exportTask(task.id);
+    const externalDirectory = exported.publishingPackage.exportDirectory;
+
+    expect(externalDirectory).toBeDefined();
+    expect(externalDirectory?.startsWith(selectedExportDirectory)).toBe(true);
+    expect(
+      fs.existsSync(path.join(externalDirectory ?? "", "videos", "finished-portrait-9-16.mp4"))
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(externalDirectory ?? "", "covers", "cover-portrait-9-16.svg"))
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(externalDirectory ?? "", "subtitles", "provider-subtitles-portrait-9-16.srt")
+      )
+    ).toBe(true);
+    expect(fs.existsSync(path.join(externalDirectory ?? "", "manifest.json"))).toBe(true);
+  });
+
   it("rejects mock placeholder avatar files", () => {
     const service = new ExportWorkflowService(repository, appPaths);
     const task = repository.createTask({

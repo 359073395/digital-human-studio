@@ -50,6 +50,12 @@ export class RealWorkflowRunner {
       return this.requireTask(taskId);
     }
 
+    if (task.steps.find((step) => step.id === "subtitles")?.status !== "complete") {
+      this.taskRepository.updateStepStatus(taskId, "post-production", "waiting");
+      this.taskRepository.updateStepStatus(taskId, "export", "waiting");
+      return this.requireTask(taskId);
+    }
+
     return this.exportWorkflowService.exportTask(taskId);
   }
 

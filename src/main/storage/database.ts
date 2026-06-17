@@ -132,6 +132,13 @@ const MIGRATIONS = [
     sql: `
       ALTER TABLE video_tasks ADD COLUMN frame_title_style TEXT NOT NULL DEFAULT '${DEFAULT_FRAME_TITLE_STYLE_JSON}';
     `
+  },
+  {
+    id: 9,
+    name: "add-export-directory",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN export_directory TEXT NOT NULL DEFAULT '';
+    `
   }
 ] as const;
 

@@ -107,7 +107,7 @@ export class ServiceConfigurationRepository {
     return {
       providerId,
       ok: true,
-      message: `${definition.label} 本地配置检查通过`
+      message: `${definition.label} 本地配置检查通过（未发起真实 API 请求，真实连通性以生成时返回为准）`
     };
   }
 }

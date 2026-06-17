@@ -774,6 +774,7 @@ label {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 0;
   border-top: 1px solid #edf1f6;
@@ -789,6 +790,33 @@ label {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
+}
+
+.export-directory-control {
+  display: grid;
+  grid-template-columns: auto minmax(150px, 260px);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.export-directory-control button {
+  min-height: 36px;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.export-directory-control span {
+  min-width: 0;
+  overflow: hidden;
+  color: #46576d;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .primary-actions .primary {
