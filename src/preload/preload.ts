@@ -28,6 +28,10 @@ const IPC_CHANNELS = {
   chooseExportDirectory: "workflow:choose-export-directory",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
+  downloadOriginalVideo: "source:download-original-video",
+  uploadSourceVideo: "source:upload-source-video",
+  uploadMixedCutMaterial: "source:upload-mixed-cut-material",
+  analyzeSourceVisuals: "source:analyze-visuals",
   uploadProductImage: "source:upload-product-image",
   uploadReferenceImage: "source:upload-reference-image",
   uploadCustomFont: "source:upload-custom-font",
@@ -63,6 +67,14 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.generateScript, taskId) as Promise<VideoTask>,
   transcribeSource: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.transcribeSource, taskId) as Promise<SourceTranscriptionResult>,
+  downloadOriginalVideo: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.downloadOriginalVideo, taskId) as Promise<VideoTask>,
+  uploadSourceVideo: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadSourceVideo, taskId) as Promise<VideoTask>,
+  uploadMixedCutMaterial: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadMixedCutMaterial, taskId) as Promise<VideoTask>,
+  analyzeSourceVisuals: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.analyzeSourceVisuals, taskId) as Promise<VideoTask>,
   uploadProductImage: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadProductImage, taskId) as Promise<VideoTask>,
   uploadReferenceImage: (taskId: string) =>

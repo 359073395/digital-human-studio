@@ -36,6 +36,18 @@ _Avoid_: Downloaded video, scraped transcript, platform import
 The first workflow command that attempts to turn source material into editable reference copy. The MVP routes it through the desktop extraction/transcription service and leaves platform-link downloading as a provider enhancement behind the same button.
 _Avoid_: Mock check, hidden import, final script generation
 
+**Original Video Download**:
+An attempt to save a directly accessible video or audio URL into the task's local source media folder. Platform short links, login pages, and anti-hotlink pages may fail and should tell the user to manually upload the video instead of pretending the download worked.
+_Avoid_: Platform scraping, login bypass, fake download success
+
+**Source Media Upload**:
+A local file import for original video or audio references. It lets viral remix and source-first workflows continue when platform links cannot be downloaded directly.
+_Avoid_: Cloud upload, platform import, hidden cache
+
+**Visual Analysis Brief**:
+A task media artifact that records first-frame, hook, scene, proof, rhythm, CTA, and originality-risk prompts for the source video or uploaded materials. In the current MVP it is a structured brief that feeds later script generation; future visual models can replace its placeholder observations with frame-level analysis.
+_Avoid_: Final transcript, exact frame detection claim, copied shot plan
+
 **Internal Method Analysis Engine**:
 The hidden script-generation layer that analyzes source links, source copy, product context, IP profile, or mixed-cut goals before writing the editable final script. It contains the reusable SOP thinking from reference breakdown, product selection-to-commerce, storyboard planning, personal IP planning, AI image/video prompting, and mixed-cut planning without exposing a large methodology form in the interface.
 _Avoid_: Visible workflow block, prompt clutter, direct copy
@@ -59,6 +71,10 @@ _Avoid_: Final script, avatar ID, subtitle style
 **Mixed-Cut Method**:
 An internal planning path for arranging voiceover, subtitles, product images, B-roll, screen recordings, generated visuals, sound cues, and optional digital-human segments. It must not assume a real person or digital human is required.
 _Avoid_: Built-in stock library, unlicensed clip scraping, digital-human-only flow
+
+**Mixed-Cut Material Upload**:
+A local import for authorized video, image, and audio assets that can later be arranged into mixed-cut videos. MVP stores and lists these materials; full automated editing remains a provider integration.
+_Avoid_: Unlicensed stock library, platform scraping, finished mixed edit
 
 **Mixed-Cut Video**:
 A top-level video generation mode for videos assembled from authorized materials, subtitles, voiceover, product imagery, screen recordings, generated visuals, and optional digital-human segments. Full mixed-cut rendering and Seedance-like provider execution remain future provider work.

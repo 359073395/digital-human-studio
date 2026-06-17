@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  Download,
   FileSearch,
   FolderOpen,
   KeyRound,
@@ -27,6 +28,7 @@ import {
   OUTPUT_PRESETS,
   type CoverStyle,
   type FrameTitleStyle,
+  type MediaAsset,
   type OutputPresetId,
   type PersonalIpProfile,
   type SubtitleStyle,
@@ -214,6 +216,14 @@ export function App() {
     selectedTask.mediaAssets.find(
       (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
     );
+  const sourceMaterialAssets = selectedTask.mediaAssets.filter((asset) =>
+    ["source-video", "source-audio", "source-transcript", "source-visual-analysis"].includes(
+      asset.kind
+    )
+  );
+  const mixedCutMaterialAssets = selectedTask.mediaAssets.filter(
+    (asset) => asset.kind === "mixed-cut-material"
+  );
   const previewRelativePaths = useMemo(
     () =>
       Array.from(
@@ -648,6 +658,81 @@ export function App() {
     }
   }
 
+  async function downloadOriginalVideo() {
+    const api = requireDesktopRuntime("下载原视频");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在尝试下载原视频...");
+
+    try {
+      await api.updateTask({
+        taskId: selectedTask.id,
+        originalVideoUrl: selectedTask.originalVideoUrl ?? ""
+      });
+      const task = await api.downloadOriginalVideo(selectedTask.id);
+      setActionMessage("原视频已下载并保存到当前任务素材中");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "原视频下载失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function uploadSourceVideo() {
+    const api = requireDesktopRuntime("上传原视频");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择原视频或原音频...");
+
+    try {
+      const task = await api.uploadSourceVideo(selectedTask.id);
+      const imported = task.mediaAssets.some(
+        (asset) => asset.kind === "source-video" || asset.kind === "source-audio"
+      );
+      setActionMessage(imported ? "原视频/原音频已导入，可继续提取文案或画面分析" : "未选择原视频");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "原视频导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function uploadMixedCutMaterial() {
+    const api = requireDesktopRuntime("上传混剪素材");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择混剪素材...");
+
+    try {
+      const beforeCount = mixedCutMaterialAssets.length;
+      const task = await api.uploadMixedCutMaterial(selectedTask.id);
+      const afterCount = task.mediaAssets.filter(
+        (asset) => asset.kind === "mixed-cut-material"
+      ).length;
+      setActionMessage(
+        afterCount > beforeCount
+          ? `已导入 ${afterCount - beforeCount} 个混剪素材`
+          : "未选择混剪素材"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "混剪素材导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
   async function generateScriptOnly() {
     const api = requireDesktopRuntime("一键AI生成文案");
     if (!api) {
@@ -711,6 +796,32 @@ export function App() {
       }
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "一键提取文案失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function analyzeSourceVisuals() {
+    const api = requireDesktopRuntime("画面分析");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在生成画面分析 brief...");
+
+    try {
+      await api.updateTask({
+        taskId: selectedTask.id,
+        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
+        sourceScript: selectedTask.sourceScript,
+        generationMode: selectedTask.generationMode
+      });
+      const task = await api.analyzeSourceVisuals(selectedTask.id);
+      setActionMessage("画面分析已生成，后续一键 AI 生成文案会自动参考这份分析");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "画面分析失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -1015,14 +1126,6 @@ export function App() {
                 <Link2 size={16} />
                 原视频链接
               </span>
-              <button
-                type="button"
-                disabled={isWorkflowRunning}
-                onClick={() => void extractSourceCopy()}
-              >
-                <FileSearch size={16} />
-                一键提取文案
-              </button>
             </div>
             <div className="source-link-row">
               <input
@@ -1043,6 +1146,45 @@ export function App() {
                 }
               />
             </div>
+            <div className="source-action-row">
+              <button
+                type="button"
+                disabled={isWorkflowRunning}
+                onClick={() => void downloadOriginalVideo()}
+              >
+                <Download size={16} />
+                下载原视频
+              </button>
+              <button
+                type="button"
+                disabled={isWorkflowRunning}
+                onClick={() => void uploadSourceVideo()}
+              >
+                <Upload size={16} />
+                上传原视频
+              </button>
+              <button
+                type="button"
+                disabled={isWorkflowRunning}
+                onClick={() => void extractSourceCopy()}
+              >
+                <FileSearch size={16} />
+                提取文案
+              </button>
+              <button
+                type="button"
+                disabled={isWorkflowRunning}
+                onClick={() => void analyzeSourceVisuals()}
+              >
+                <WandSparkles size={16} />
+                画面分析
+              </button>
+            </div>
+            <AssetList
+              assets={sourceMaterialAssets}
+              emptyLabel="还没有原视频、转写或画面分析素材"
+              title="源素材"
+            />
           </section>
 
           <div className="script-grid">
@@ -1347,6 +1489,70 @@ export function App() {
                 />
               </label>
             </div>
+
+            {selectedTask.generationMode === "viral-remix" ? (
+              <div className="mode-material-card">
+                <div>
+                  <strong>爆款参考素材</strong>
+                  <span>上传参考视频后，可先提取文案和生成画面分析，再做结构复刻。</span>
+                </div>
+                <div className="source-action-row compact">
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void uploadSourceVideo()}
+                  >
+                    <Upload size={16} />
+                    上传参考视频
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void analyzeSourceVisuals()}
+                  >
+                    <WandSparkles size={16} />
+                    画面分析
+                  </button>
+                </div>
+                <AssetList
+                  assets={sourceMaterialAssets}
+                  emptyLabel="还没有参考视频或分析产物"
+                  title="参考素材"
+                />
+              </div>
+            ) : null}
+
+            {selectedTask.generationMode === "mixed-cut" ? (
+              <div className="mode-material-card">
+                <div>
+                  <strong>混剪素材</strong>
+                  <span>可上传视频、音频、图片素材；完整自动混剪 Provider 后续接入。</span>
+                </div>
+                <div className="source-action-row compact">
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void uploadMixedCutMaterial()}
+                  >
+                    <Upload size={16} />
+                    上传混剪素材
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void analyzeSourceVisuals()}
+                  >
+                    <WandSparkles size={16} />
+                    画面分析
+                  </button>
+                </div>
+                <AssetList
+                  assets={mixedCutMaterialAssets}
+                  emptyLabel="还没有混剪素材"
+                  title="素材列表"
+                />
+              </div>
+            ) : null}
 
             {selectedTask.generationMode === "product-avatar" ? (
               <div className="image-action-row">
@@ -1704,6 +1910,39 @@ function AssetPreview({
       <div className="asset-preview-media">
         {url ? <img alt={title} src={url} /> : <strong>{emptyLabel}</strong>}
       </div>
+    </div>
+  );
+}
+
+function AssetList({
+  assets,
+  emptyLabel,
+  title
+}: {
+  assets: MediaAsset[];
+  emptyLabel: string;
+  title: string;
+}) {
+  const visibleAssets = [...assets].reverse().slice(0, 6);
+
+  return (
+    <div className="asset-list">
+      <div className="asset-list-heading">
+        <strong>{title}</strong>
+        <span>{assets.length} 个</span>
+      </div>
+      {visibleAssets.length > 0 ? (
+        <ul>
+          {visibleAssets.map((asset) => (
+            <li key={asset.id}>
+              <span>{assetKindLabel(asset.kind)}</span>
+              <strong title={asset.relativePath}>{assetFileName(asset.relativePath)}</strong>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>{emptyLabel}</p>
+      )}
     </div>
   );
 }
@@ -2376,6 +2615,32 @@ function similarityRiskLabel(risk: VideoTask["similarityRisk"]): string {
   return labels[risk];
 }
 
+function assetKindLabel(kind: MediaAsset["kind"]): string {
+  const labels: Record<MediaAsset["kind"], string> = {
+    "source-audio": "原音频",
+    "source-video": "原视频",
+    "source-transcript": "文案",
+    "source-visual-analysis": "画面分析",
+    "product-image": "商品图",
+    "reference-image": "人物图",
+    "mixed-cut-material": "混剪素材",
+    "custom-font": "字体",
+    "generated-presenter-image": "人物商品图",
+    "avatar-video": "数字人视频",
+    "subtitle-file": "字幕",
+    "background-music": "BGM",
+    "cover-image": "封面",
+    "finished-video": "成品视频",
+    "publishing-package": "发布包"
+  };
+
+  return labels[kind];
+}
+
+function assetFileName(relativePath: string): string {
+  return relativePath.split("/").filter(Boolean).pop() ?? relativePath;
+}
+
 function buildFlowApiGuideItems(input: {
   configurations: ServiceConfiguration[];
   hasGeneratedPresenterImages: boolean;
@@ -2385,6 +2650,11 @@ function buildFlowApiGuideItems(input: {
   const { configurations, hasGeneratedPresenterImages, selectedAvatarName, task } = input;
   const needsImageGeneration =
     task.generationMode === "product-avatar" && !hasGeneratedPresenterImages;
+  const hasSourceMedia = task.mediaAssets.some((asset) =>
+    ["source-video", "source-audio", "source-transcript", "source-visual-analysis"].includes(
+      asset.kind
+    )
+  );
 
   return [
     {
@@ -2393,7 +2663,7 @@ function buildFlowApiGuideItems(input: {
       providerLabel: "ASR 转写（OpenAI 兼容）",
       modelLabel: modelName(configurations, "asr"),
       detail: "原视频链接先作为入口；本地音/视频转文字、后续平台提取和字幕兜底会用 ASR。",
-      active: Boolean(task.originalVideoUrl?.trim())
+      active: Boolean(task.originalVideoUrl?.trim()) || hasSourceMedia
     },
     {
       title: "2. 分析并生成文案",

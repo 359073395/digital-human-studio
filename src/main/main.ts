@@ -29,6 +29,7 @@ import { OpenAiCompatibleScriptProvider } from "./script/openAiCompatibleScriptP
 import { SafeStorageCipher } from "./storage/safeStorageCipher";
 import { ScriptWorkflowService } from "./script/scriptWorkflowService";
 import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
+import { SourceAssetService } from "./source/sourceAssetService";
 import { OpenAiAsrSubtitleProvider } from "./subtitles/openAiAsrSubtitleProvider";
 import { TaskRepository } from "./storage/taskRepository";
 import { ExportWorkflowService } from "./workflow/exportWorkflowService";
@@ -107,6 +108,7 @@ interface MainRepositories {
   heyGenAvatarCatalog: HeyGenAvatarCatalog;
   avatarWorkflowService: AvatarWorkflowService;
   presenterImageWorkflowService: PresenterImageWorkflowService;
+  sourceAssetService: SourceAssetService;
   realWorkflowRunner: RealWorkflowRunner;
   appPaths: ReturnType<typeof createAppPaths>;
 }
@@ -148,6 +150,7 @@ function createRepositories(): MainRepositories {
     appPaths,
     new OpenAiImageProvider(serviceConfigurationRepository, credentialStore)
   );
+  const sourceAssetService = new SourceAssetService(taskRepository, appPaths);
   const exportWorkflowService = new ExportWorkflowService(taskRepository, appPaths);
   const realWorkflowRunner = new RealWorkflowRunner(
     taskRepository,
@@ -166,6 +169,7 @@ function createRepositories(): MainRepositories {
     heyGenAvatarCatalog,
     avatarWorkflowService,
     presenterImageWorkflowService,
+    sourceAssetService,
     realWorkflowRunner,
     appPaths
   };
@@ -181,6 +185,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     realWorkflowRunner,
     scriptWorkflowService,
     serviceConfigurationRepository,
+    sourceAssetService,
     taskRepository
   } = repositories;
 
@@ -248,6 +253,82 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.transcribeSource, (_event, taskId: string) =>
     scriptWorkflowService.transcribeSource(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.downloadOriginalVideo, (_event, taskId: string) =>
+    sourceAssetService.downloadOriginalVideo(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.uploadSourceVideo, async (_event, taskId: string) => {
+    const sourceVideoDialogOptions: OpenDialogOptions = {
+      title: "选择原视频或原音频",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "视频/音频",
+          extensions: ["mp4", "mov", "m4v", "webm", "mkv", "avi", "mp3", "wav", "m4a", "aac", "ogg"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, sourceVideoDialogOptions)
+      : await dialog.showOpenDialog(sourceVideoDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return sourceAssetService.importSourceVideo(taskId, result.filePaths[0]);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.uploadMixedCutMaterial, async (_event, taskId: string) => {
+    const materialDialogOptions: OpenDialogOptions = {
+      title: "选择混剪素材",
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        {
+          name: "视频/音频/图片",
+          extensions: [
+            "mp4",
+            "mov",
+            "m4v",
+            "webm",
+            "mkv",
+            "avi",
+            "mp3",
+            "wav",
+            "m4a",
+            "aac",
+            "ogg",
+            "png",
+            "jpg",
+            "jpeg",
+            "webp"
+          ]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, materialDialogOptions)
+      : await dialog.showOpenDialog(materialDialogOptions);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return sourceAssetService.importMixedCutMaterials(taskId, result.filePaths);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.analyzeSourceVisuals, (_event, taskId: string) =>
+    sourceAssetService.analyzeSourceVisuals(taskId)
   );
 
   ipcMain.handle(IPC_CHANNELS.uploadProductImage, async (_event, taskId: string) => {

@@ -41,6 +41,10 @@ export interface DigitalHumanStudioAPI {
   chooseExportDirectory: (taskId: string) => Promise<VideoTask>;
   generateScript: (taskId: string) => Promise<VideoTask>;
   transcribeSource: (taskId: string) => Promise<SourceTranscriptionResult>;
+  downloadOriginalVideo: (taskId: string) => Promise<VideoTask>;
+  uploadSourceVideo: (taskId: string) => Promise<VideoTask>;
+  uploadMixedCutMaterial: (taskId: string) => Promise<VideoTask>;
+  analyzeSourceVisuals: (taskId: string) => Promise<VideoTask>;
   uploadProductImage: (taskId: string) => Promise<VideoTask>;
   uploadReferenceImage: (taskId: string) => Promise<VideoTask>;
   uploadCustomFont: (taskId: string) => Promise<VideoTask>;
@@ -69,6 +73,10 @@ export const IPC_CHANNELS = {
   chooseExportDirectory: "workflow:choose-export-directory",
   generateScript: "script:generate",
   transcribeSource: "source:transcribe",
+  downloadOriginalVideo: "source:download-original-video",
+  uploadSourceVideo: "source:upload-source-video",
+  uploadMixedCutMaterial: "source:upload-mixed-cut-material",
+  analyzeSourceVisuals: "source:analyze-visuals",
   uploadProductImage: "source:upload-product-image",
   uploadReferenceImage: "source:upload-reference-image",
   uploadCustomFont: "source:upload-custom-font",

@@ -20,6 +20,7 @@ export class ScriptWorkflowService {
   async generateScript(taskId: string) {
     const task = this.requireTask(taskId);
     const sourceScript = task.sourceScript || defaultSourceScript(task.contentLanguage);
+    const sourceBrief = buildSourceBrief(this.paths, task, sourceScript);
 
     this.taskRepository.updateStepStatus(taskId, "source", "complete");
     this.taskRepository.updateStepStatus(taskId, "script", "running");
@@ -34,7 +35,7 @@ export class ScriptWorkflowService {
 
       const result = await this.generateWithFallback({
         ...task,
-        sourceScript
+        sourceScript: sourceBrief
       });
 
       writeTaskFile(
@@ -122,4 +123,34 @@ function writeTaskFile(
   const absolutePath = path.join(getTaskDirectory(paths, taskId), ...relativePath.split("/"));
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   fs.writeFileSync(absolutePath, content, "utf8");
+}
+
+function buildSourceBrief(paths: AppPaths, task: VideoTask, sourceScript: string): string {
+  const visualAnalysis = readLatestVisualAnalysis(paths, task);
+  if (!visualAnalysis) {
+    return sourceScript;
+  }
+
+  return [sourceScript, "", "Reference visual analysis brief:", visualAnalysis]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function readLatestVisualAnalysis(paths: AppPaths, task: VideoTask): string {
+  const asset = [...task.mediaAssets]
+    .reverse()
+    .find((candidate) => candidate.kind === "source-visual-analysis");
+  if (!asset) {
+    return "";
+  }
+
+  const absolutePath = path.join(
+    getTaskDirectory(paths, task.id),
+    ...asset.relativePath.split("/")
+  );
+  try {
+    return fs.readFileSync(absolutePath, "utf8").slice(0, 5000);
+  } catch {
+    return "";
+  }
 }
