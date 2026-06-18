@@ -14,7 +14,7 @@ The generation screen shows a compact flow guide for the active task. It lists w
 | Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                  |
 | Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                 |
 | Lip-synced avatar video               | HeyGen                              | Base URL, API Key, Avatar ID for preset avatars, optional Voice ID, resolution |
-| Subtitle fallback                     | ASR, OpenAI-compatible              | Base URL, ASR model, API Key, only when HeyGen subtitles are unavailable       |
+| Subtitle fallback                     | ASR or reusable LLM audio support   | Real `audio/transcriptions` support, only when HeyGen subtitles are unavailable |
 | External audio                        | Optional TTS or uploaded audio      | Not required for the default MVP path                                          |
 | Export                                | Local desktop app                   | Save directory, no API Key                                                     |
 
@@ -34,8 +34,10 @@ Configure these providers in the app settings:
   - API Key: relay key.
 - `ASR 转写（OpenAI 兼容）`
   - Base URL: relay address, usually ending in `/v1`.
-  - Model name: transcription model supported by the relay.
+  - Model name: transcription model supported by the relay. ASR is optional in the MVP; leave it disabled if you want the app to test whether the LLM model can also handle audio transcription.
   - API Key: relay key.
+
+When ASR is disabled, the settings test does not guess from the model name. It reuses the saved LLM Base URL, model, and API Key, sends a tiny generated WAV file to `/audio/transcriptions`, and only reports success if the request works. If the LLM model cannot transcribe audio, enable `ASR 转写（OpenAI 兼容）` and enter a model that your relay exposes for audio transcription.
 
 If the relay uses different keys for chat, image, or ASR, save each provider with its own key.
 
@@ -61,6 +63,7 @@ Provider-specific overrides are also supported:
 
 HeyGen can be replaced directly from the settings modal:
 
+- Base URL should normally be `https://api.heygen.com`. If the user enters `/v1`, `/v2`, or `/v3`, the app normalizes it back to the HeyGen API root before calling v3 endpoints.
 - Enter a new HeyGen API Key and save to replace the previous key.
 - Leave the API Key field empty and save to keep the previous key.
 - When switching HeyGen accounts, also update Avatar ID and Voice ID because they are account-specific.

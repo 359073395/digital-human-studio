@@ -1485,6 +1485,13 @@ label {
   font-size: 12px;
 }
 
+.provider-hint {
+  margin: 8px 0 0;
+  color: #66758b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .provider-actions {
   display: flex;
   flex-wrap: wrap;

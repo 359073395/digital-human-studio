@@ -1000,7 +1000,7 @@ export function App() {
 
   async function openSettingsModal() {
     setSettingsOpen(true);
-    await loadServiceConfigurations();
+    void loadServiceConfigurations();
   }
 
   async function loadServiceConfigurations() {
@@ -1010,9 +1010,17 @@ export function App() {
       return;
     }
 
-    const configurations = await window.digitalHumanStudio.listServiceConfigurations();
-    setServiceConfigurations(configurations);
-    setSettingsDraft(createSettingsDraft(configurations));
+    try {
+      const configurations = await window.digitalHumanStudio.listServiceConfigurations();
+      setServiceConfigurations(configurations);
+      setSettingsDraft(createSettingsDraft(configurations));
+    } catch (error) {
+      setSettingsMessage(
+        error instanceof Error
+          ? `设置读取失败：${error.message}`
+          : "设置读取失败，请重启桌面版后重试。"
+      );
+    }
   }
 
   async function saveServiceConfiguration(providerId: ProviderId) {
@@ -1077,6 +1085,8 @@ export function App() {
       });
       setSettingsMessage("凭据已清除");
       await loadServiceConfigurations();
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "凭据清除失败");
     } finally {
       setSettingsBusyProviderId("");
     }
@@ -1804,6 +1814,9 @@ export function App() {
                         {configuration.credentialConfigured ? "已配置凭据" : "未配置凭据"}
                       </span>
                     </div>
+                    <p className="provider-hint">
+                      {providerSettingsHint(configuration.providerId)}
+                    </p>
                     <label>
                       Base URL
                       <input
@@ -2788,6 +2801,14 @@ function buildFlowApiGuideItems(input: {
 
 function modelName(configurations: ServiceConfiguration[], providerId: ProviderId): string {
   const configuration = providerConfiguration(configurations, providerId);
+
+  if (providerId === "asr" && configuration?.settings.enabled === false) {
+    const llmConfiguration = providerConfiguration(configurations, "llm");
+    const llmModel =
+      llmConfiguration?.settings.modelName || defaultServiceSettings("llm").modelName;
+    return `复用大模型：${llmModel?.trim() || "未配置"}（需测试支持）`;
+  }
+
   const model = configuration?.settings.modelName || defaultServiceSettings(providerId).modelName;
 
   if (providerId === "heygen") {
@@ -2833,6 +2854,10 @@ function credentialStatus(configurations: ServiceConfiguration[], providerId: Pr
     return "未读取配置";
   }
 
+  if (providerId === "asr" && configuration.settings.enabled === false) {
+    return "复用大模型配置";
+  }
+
   if (configuration.settings.enabled === false) {
     return "已停用";
   }
@@ -2849,6 +2874,21 @@ function providerConfiguration(
 
 function providerLabel(configurations: ServiceConfiguration[], providerId: ProviderId): string {
   return providerConfiguration(configurations, providerId)?.label ?? providerId;
+}
+
+function providerSettingsHint(providerId: ProviderId): string {
+  switch (providerId) {
+    case "heygen":
+      return "Base URL 填 https://api.heygen.com 即可；如果填了 /v1、/v2 或 /v3，软件会自动纠正。Avatar ID 必须属于当前 HeyGen 账号。";
+    case "asr":
+      return "ASR 是可选兜底：关闭时会实际测试大模型是否支持 audio/transcriptions；不支持时请启用 ASR 并填写转写模型。";
+    case "image":
+      return "用于商品图生成人物拿产品图；模型名填写你的中转支持的图片模型。";
+    case "llm":
+      return "用于分析原文案/拉片结果并生成可编辑脚本；模型名填写你的中转支持的聊天模型。";
+    case "tts":
+      return "MVP 默认走 HeyGen 内置语音；外部 TTS 后续接入。";
+  }
 }
 
 function withApiTroubleshootingHint(message: string): string {

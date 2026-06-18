@@ -10,6 +10,7 @@ import {
   type AvatarRenderInput,
   type AvatarRenderResult
 } from "./avatarProvider";
+import { normalizeHeyGenBaseUrl } from "./heyGenUrls";
 
 interface HeyGenConfigurationReader {
   getConfiguration: (providerId: "heygen") => ServiceConfiguration;
@@ -126,7 +127,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         : undefined;
     const response = await requestJson<HeyGenEnvelope<HeyGenCreateVideoData>>(
       this.fetchImpl,
-      `${normalizeBaseUrl(input.baseUrl)}/v3/videos`,
+      `${normalizeHeyGenBaseUrl(input.baseUrl)}/v3/videos`,
       {
         method: "POST",
         headers: {
@@ -167,7 +168,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     formData.append("file", createImageBlob(imagePath), path.basename(imagePath));
     const response = await requestJson<HeyGenEnvelope<HeyGenAssetUploadData>>(
       this.fetchImpl,
-      `${normalizeBaseUrl(baseUrl)}/v3/assets`,
+      `${normalizeHeyGenBaseUrl(baseUrl)}/v3/assets`,
       {
         method: "POST",
         headers: {
@@ -194,7 +195,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     for (let attempt = 0; attempt < this.maxPollAttempts; attempt += 1) {
       const response = await requestJson<HeyGenEnvelope<HeyGenVideoStatusData>>(
         this.fetchImpl,
-        `${normalizeBaseUrl(input.baseUrl)}/v3/videos/${encodeURIComponent(input.providerVideoId)}`,
+        `${normalizeHeyGenBaseUrl(input.baseUrl)}/v3/videos/${encodeURIComponent(input.providerVideoId)}`,
         {
           method: "GET",
           headers: {
@@ -310,10 +311,6 @@ async function requestJson<T>(fetchImpl: typeof fetch, url: string, init: Reques
     }
     throw error;
   }
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
 }
 
 function createImageBlob(imagePath: string): Blob {

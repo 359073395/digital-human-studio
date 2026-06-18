@@ -18,6 +18,7 @@ import { SubtitleFallbackProviderUnavailableError } from "./subtitleFallbackProv
 import { OpenAiAsrSubtitleProvider } from "./openAiAsrSubtitleProvider";
 
 const TEST_API_KEY = "sk-asr-secret-123456";
+const TEST_LLM_API_KEY = "sk-llm-secret-123456";
 
 let tempDir: string;
 let avatarVideoPath: string;
@@ -83,17 +84,45 @@ function createConfiguration(
   };
 }
 
+function createLlmConfiguration(
+  patch: Partial<ServiceConfiguration["settings"]> = {}
+): ServiceConfiguration {
+  return {
+    providerId: "llm",
+    label: "大模型",
+    kind: "language-model",
+    settings: {
+      baseUrl: "https://api.openai.test/v1",
+      modelName: "gpt-5.5",
+      enabled: true,
+      ...patch
+    },
+    credentialConfigured: true,
+    updatedAt: "2026-06-16T00:00:00.000Z"
+  };
+}
+
 function createProvider(options: {
   configuration?: ServiceConfiguration;
+  llmConfiguration?: ServiceConfiguration;
   apiKey?: string | null;
+  llmApiKey?: string | null;
   fetchImpl: typeof fetch;
 }): OpenAiAsrSubtitleProvider {
   return new OpenAiAsrSubtitleProvider(
     {
-      getConfiguration: () => options.configuration ?? createConfiguration()
+      getConfiguration: (providerId) =>
+        providerId === "llm"
+          ? (options.llmConfiguration ?? createLlmConfiguration())
+          : (options.configuration ?? createConfiguration())
     },
     {
-      readCredential: async () => ("apiKey" in options ? (options.apiKey ?? null) : TEST_API_KEY)
+      readCredential: async (providerId) => {
+        if (providerId === "llm") {
+          return "llmApiKey" in options ? (options.llmApiKey ?? null) : TEST_LLM_API_KEY;
+        }
+        return "apiKey" in options ? (options.apiKey ?? null) : TEST_API_KEY;
+      }
     },
     {
       fetchImpl: options.fetchImpl
@@ -126,19 +155,88 @@ describe("OpenAiAsrSubtitleProvider", () => {
     expect(result.srt).toContain("Halo");
   });
 
-  it("is unavailable when disabled or missing credentials", async () => {
+  it("wraps plain text transcription responses into basic SRT for non-whisper models", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response("Halo dari model transcribe lain");
+    });
+
+    const result = await createProvider({
+      fetchImpl: fetchMock,
+      configuration: createConfiguration({ modelName: "gpt-4o-mini-transcribe" })
+    }).createSubtitleFile({
+      task: createTask(),
+      preset: OUTPUT_PRESETS[0],
+      avatarVideoPath
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const formData = init.body as FormData;
+
+    expect(formData.get("model")).toBe("gpt-4o-mini-transcribe");
+    expect(formData.get("response_format")).toBe("text");
+    expect(result.srt).toContain("00:00:00,000 --> 00:00:10,000");
+    expect(result.srt).toContain("Halo dari model transcribe lain");
+  });
+
+  it("requires an ASR model name when ASR is enabled", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 
     await expect(
       createProvider({
         fetchImpl: fetchMock,
-        configuration: createConfiguration({ enabled: false })
+        configuration: createConfiguration({ modelName: "" })
       }).createSubtitleFile({
         task: createTask(),
         preset: OUTPUT_PRESETS[0],
         avatarVideoPath
       })
     ).rejects.toBeInstanceOf(SubtitleFallbackProviderUnavailableError);
+  });
+
+  it("reuses the LLM configuration when standalone ASR is disabled", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response("Shared LLM transcript");
+    });
+
+    const result = await createProvider({
+      fetchImpl: fetchMock,
+      configuration: createConfiguration({ enabled: false, modelName: "" }),
+      llmConfiguration: createLlmConfiguration({ modelName: "gpt-5.5" })
+    }).createSubtitleFile({
+      task: createTask(),
+      preset: OUTPUT_PRESETS[0],
+      avatarVideoPath
+    });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const formData = init.body as FormData;
+
+    expect(url).toBe("https://api.openai.test/v1/audio/transcriptions");
+    expect(init.headers).toMatchObject({
+      authorization: `Bearer ${TEST_LLM_API_KEY}`
+    });
+    expect(formData.get("model")).toBe("gpt-5.5");
+    expect(result.srt).toContain("Shared LLM transcript");
+  });
+
+  it("prompts for standalone ASR when the shared LLM cannot transcribe audio", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response("unsupported audio", { status: 400, statusText: "Bad Request" });
+    });
+
+    await expect(
+      createProvider({
+        fetchImpl: fetchMock,
+        configuration: createConfiguration({ enabled: false, modelName: "" }),
+        llmConfiguration: createLlmConfiguration({ modelName: "text-only-model" })
+      }).createSubtitleFile({
+        task: createTask(),
+        preset: OUTPUT_PRESETS[0],
+        avatarVideoPath
+      })
+    ).rejects.toThrow("请在设置里启用 ASR 转写并填写支持音频转写的模型");
+  });
+
+  it("is unavailable when enabled but missing ASR credentials", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
 
     await expect(
       createProvider({ fetchImpl: fetchMock, apiKey: null }).createSubtitleFile({

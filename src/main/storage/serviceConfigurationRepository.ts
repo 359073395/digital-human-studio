@@ -9,6 +9,7 @@ import {
   type ServiceConnectionCheck
 } from "../../shared/serviceConfig";
 import { redactSecret } from "../security/redaction";
+import { normalizeHeyGenBaseUrl } from "../avatar/heyGenUrls";
 import type { CredentialStore } from "./credentialStore";
 import type { TaskDatabase } from "./database";
 
@@ -82,6 +83,10 @@ export class ServiceConfigurationRepository {
     const configuration = this.getConfiguration(providerId);
     const definition = getProviderDefinition(providerId);
 
+    if (providerId === "asr" && configuration.settings.enabled === false) {
+      return this.testSharedLlmAudioTranscription();
+    }
+
     if (definition.requiresCredential && !configuration.credentialConfigured) {
       return {
         providerId,
@@ -106,34 +111,104 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    let apiKey: string;
-    try {
-      apiKey = (await this.credentialStore.readCredential(providerId)) ?? "";
-    } catch (error) {
+    const apiKey = await this.readCredentialForCheck(providerId, definition.label);
+    if (!apiKey.ok) {
       return {
         providerId,
         ok: false,
-        message: error instanceof Error ? error.message : `${definition.label} API Key 读取失败`
-      };
-    }
-
-    if (!apiKey) {
-      return {
-        providerId,
-        ok: false,
-        message: `${definition.label} API Key 尚未配置`
+        message: apiKey.message
       };
     }
 
     if (providerId === "heygen") {
-      return this.testHeyGenConnection(configuration, apiKey);
+      return this.testHeyGenConnection(configuration, apiKey.value);
     }
 
     if (providerId === "llm") {
-      return this.testOpenAiCompatibleChat(configuration, apiKey);
+      return this.testOpenAiCompatibleChat(configuration, apiKey.value);
     }
 
-    return this.testDeferredOpenAiCompatibleConnection(configuration, apiKey);
+    if (providerId === "asr" && !configuration.settings.modelName?.trim()) {
+      return {
+        providerId: "asr",
+        ok: false,
+        message: "ASR 已启用但模型名为空。请填写支持音频转写的模型，或关闭 ASR 复用大模型配置。"
+      };
+    }
+
+    if (providerId === "asr") {
+      return this.testOpenAiCompatibleAudioTranscription(configuration, apiKey.value);
+    }
+
+    return this.testDeferredOpenAiCompatibleConnection(configuration, apiKey.value);
+  }
+
+  private async testSharedLlmAudioTranscription(): Promise<ServiceConnectionCheck> {
+    const llmConfiguration = this.getConfiguration("llm");
+    if (llmConfiguration.settings.enabled === false) {
+      return {
+        providerId: "asr",
+        ok: false,
+        message: "ASR 独立配置未启用，且大模型服务未启用，无法判断音频转写能力。"
+      };
+    }
+
+    const apiKey = await this.readCredentialForCheck("llm", "大模型");
+    if (!apiKey.ok) {
+      return {
+        providerId: "asr",
+        ok: false,
+        message: `ASR 独立配置未启用，且${apiKey.message}`
+      };
+    }
+
+    const baseUrl = llmConfiguration.settings.baseUrl || defaultServiceSettings("llm").baseUrl;
+    const modelName = llmConfiguration.settings.modelName?.trim();
+    if (!baseUrl || !modelName) {
+      return {
+        providerId: "asr",
+        ok: false,
+        message: "ASR 独立配置未启用，且大模型 Base URL 或模型名为空，无法判断音频转写能力。"
+      };
+    }
+
+    const result = await testAudioTranscriptionEndpoint(this.fetchImpl, {
+      apiKey: apiKey.value,
+      baseUrl,
+      modelName
+    });
+
+    if (!result.ok) {
+      return {
+        providerId: "asr",
+        ok: false,
+        message: `大模型 ${modelName} 不支持或无法完成音频转写：${result.message}。请启用 ASR 转写并填写支持音频转写的模型。`
+      };
+    }
+
+    return {
+      providerId: "asr",
+      ok: true,
+      message: `ASR 独立配置未启用；已确认大模型 ${modelName} 可以复用完成音频转写。`
+    };
+  }
+
+  private async readCredentialForCheck(
+    providerId: ProviderId,
+    label: string
+  ): Promise<{ ok: true; value: string } | { ok: false; message: string }> {
+    try {
+      const value = (await this.credentialStore.readCredential(providerId)) ?? "";
+      if (!value) {
+        return { ok: false, message: `${label} API Key 尚未配置` };
+      }
+      return { ok: true, value };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : `${label} API Key 读取失败`
+      };
+    }
   }
 
   private async testOpenAiCompatibleChat(
@@ -185,6 +260,51 @@ export class ServiceConfigurationRepository {
       providerId: configuration.providerId,
       ok: true,
       message: `${definition.label} 测试通过，${modelName} 的 chat/completions 可用`
+    };
+  }
+
+  private async testOpenAiCompatibleAudioTranscription(
+    configuration: ServiceConfiguration,
+    apiKey: string
+  ): Promise<ServiceConnectionCheck> {
+    const definition = getProviderDefinition(configuration.providerId);
+    const baseUrl =
+      configuration.settings.baseUrl || defaultServiceSettings(configuration.providerId).baseUrl;
+    if (!baseUrl) {
+      return {
+        providerId: configuration.providerId,
+        ok: false,
+        message: `${definition.label} Base URL 尚未配置`
+      };
+    }
+
+    const modelName = configuration.settings.modelName?.trim();
+    if (!modelName) {
+      return {
+        providerId: configuration.providerId,
+        ok: false,
+        message: `${definition.label} 模型名尚未配置`
+      };
+    }
+
+    const result = await testAudioTranscriptionEndpoint(this.fetchImpl, {
+      apiKey,
+      baseUrl,
+      modelName
+    });
+
+    if (!result.ok) {
+      return {
+        providerId: configuration.providerId,
+        ok: false,
+        message: `${definition.label} 测试失败：${modelName} 不支持或无法完成音频转写：${result.message}`
+      };
+    }
+
+    return {
+      providerId: configuration.providerId,
+      ok: true,
+      message: `${definition.label} 测试通过，${modelName} 可以完成 audio/transcriptions 音频转写`
     };
   }
 
@@ -244,7 +364,7 @@ export class ServiceConfigurationRepository {
         return {
           providerId: configuration.providerId,
           ok: true,
-          message: `${definition.label} API 可连接，但 /models 未列出 ${modelName}。部分中转不会列出图片/ASR模型，实际生成时再验证。`
+          message: `${definition.label} API 可连接，但 /models 未列出 ${modelName}。部分中转不会列出图片模型，实际生成时再验证。`
         };
       }
     }
@@ -271,7 +391,7 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const url = new URL(`${normalizeBaseUrl(baseUrl)}/v3/avatars/looks`);
+    const url = new URL(`${normalizeHeyGenBaseUrl(baseUrl)}/v3/avatars/looks`);
     url.searchParams.set("limit", "1");
     const result = await fetchWithTimeout(this.fetchImpl, url.toString(), {
       method: "GET",
@@ -348,6 +468,60 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function testAudioTranscriptionEndpoint(
+  fetchImpl: typeof fetch,
+  input: {
+    apiKey: string;
+    baseUrl: string;
+    modelName: string;
+  }
+): Promise<FetchTestResult> {
+  const formData = new FormData();
+  formData.append("model", input.modelName);
+  formData.append("response_format", "text");
+  formData.append("language", "en");
+  formData.append("file", createTinyWavBlob(), "asr-test.wav");
+
+  return fetchWithTimeout(fetchImpl, `${normalizeBaseUrl(input.baseUrl)}/audio/transcriptions`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.apiKey}`
+    },
+    body: formData
+  });
+}
+
+function createTinyWavBlob(): Blob {
+  const buffer = createSilentWavBuffer();
+  const bytes = new Uint8Array(buffer.length);
+  bytes.set(buffer);
+  return new Blob([bytes], { type: "audio/wav" });
+}
+
+function createSilentWavBuffer(): Buffer {
+  const sampleRate = 8000;
+  const durationSeconds = 0.1;
+  const samples = Math.floor(sampleRate * durationSeconds);
+  const dataSize = samples * 2;
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  return buffer;
 }
 
 function parseJson(value: string): unknown {

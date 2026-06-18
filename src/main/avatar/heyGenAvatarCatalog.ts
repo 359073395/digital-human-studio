@@ -3,6 +3,7 @@ import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { defaultServiceSettings } from "../../shared/serviceConfig";
 import { redactSecret } from "../security/redaction";
 import { AvatarProviderUnavailableError } from "./avatarProvider";
+import { normalizeHeyGenBaseUrl } from "./heyGenUrls";
 
 interface HeyGenConfigurationReader {
   getConfiguration: (providerId: "heygen") => ServiceConfiguration;
@@ -54,7 +55,7 @@ export class HeyGenAvatarCatalog {
       throw new AvatarProviderUnavailableError("HeyGen Base URL 尚未配置。");
     }
 
-    const url = new URL(`${normalizeBaseUrl(baseUrl)}/v3/avatars/looks`);
+    const url = new URL(`${normalizeHeyGenBaseUrl(baseUrl)}/v3/avatars/looks`);
     url.searchParams.set("limit", String(this.limit));
 
     const response = await requestJson<HeyGenEnvelope<unknown>>(this.fetchImpl, url.toString(), {
@@ -160,8 +161,4 @@ function readString(record: UnknownRecord, keys: string[]): string {
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
 }

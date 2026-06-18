@@ -12,11 +12,11 @@ import {
 } from "./subtitleFallbackProvider";
 
 interface AsrConfigurationReader {
-  getConfiguration: (providerId: "asr") => ServiceConfiguration;
+  getConfiguration: (providerId: "asr" | "llm") => ServiceConfiguration;
 }
 
 interface AsrCredentialReader {
-  readCredential: (providerId: "asr") => Promise<string | null>;
+  readCredential: (providerId: "asr" | "llm") => Promise<string | null>;
 }
 
 interface OpenAiAsrSubtitleProviderOptions {
@@ -24,6 +24,14 @@ interface OpenAiAsrSubtitleProviderOptions {
 }
 
 const OPENAI_AUDIO_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
+
+interface ActiveTranscriptionConfiguration {
+  apiKey: string;
+  baseUrl: string;
+  modelName: string;
+  providerLabel: string;
+  usingSharedLlm: boolean;
+}
 
 export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
   private readonly fetchImpl: typeof fetch;
@@ -37,20 +45,7 @@ export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
   }
 
   async createSubtitleFile(input: SubtitleFallbackInput): Promise<SubtitleFallbackResult> {
-    const configuration = this.configurations.getConfiguration("asr");
-    if (configuration.settings.enabled === false) {
-      throw new SubtitleFallbackProviderUnavailableError("ASR 字幕兜底服务未启用。");
-    }
-
-    const apiKey = await this.credentials.readCredential("asr");
-    if (!apiKey) {
-      throw new SubtitleFallbackProviderUnavailableError("ASR API Key 尚未配置。");
-    }
-
-    const baseUrl = configuration.settings.baseUrl || defaultServiceSettings("asr").baseUrl;
-    if (!baseUrl) {
-      throw new SubtitleFallbackProviderUnavailableError("ASR Base URL 尚未配置。");
-    }
+    const activeConfiguration = await this.resolveTranscriptionConfiguration();
 
     const sizeBytes = fs.statSync(input.avatarVideoPath).size;
     if (sizeBytes > OPENAI_AUDIO_UPLOAD_LIMIT_BYTES) {
@@ -58,8 +53,8 @@ export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
     }
 
     const formData = new FormData();
-    formData.append("model", configuration.settings.modelName || "whisper-1");
-    formData.append("response_format", "srt");
+    formData.append("model", activeConfiguration.modelName);
+    formData.append("response_format", responseFormatForModel(activeConfiguration.modelName));
     formData.append("language", languageCode(input.task.contentLanguage));
     formData.append(
       "file",
@@ -67,10 +62,10 @@ export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
       path.basename(input.avatarVideoPath)
     );
 
-    const response = await this.fetchImpl(`${normalizeBaseUrl(baseUrl)}/audio/transcriptions`, {
+    const response = await this.fetchImpl(`${normalizeBaseUrl(activeConfiguration.baseUrl)}/audio/transcriptions`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${apiKey}`
+        authorization: `Bearer ${activeConfiguration.apiKey}`
       },
       body: formData
     });
@@ -78,16 +73,84 @@ export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
     const responseText = await response.text();
     if (!response.ok) {
       throw new Error(
-        `ASR 字幕生成失败 (${response.status}): ${redactSecret(responseText.slice(0, 800)) || response.statusText}`
+        `${activeConfiguration.providerLabel} 音频转写失败 (${response.status}): ${
+          redactSecret(responseText.slice(0, 800)) || response.statusText
+        }${activeConfiguration.usingSharedLlm ? "。当前复用的大模型配置不能完成音频转写，请在设置里启用 ASR 转写并填写支持音频转写的模型。" : ""}`
       );
     }
 
-    const srt = responseText.trim();
+    const srt = normalizeTranscriptionToSrt(responseText);
     if (!srt) {
       throw new Error("ASR 字幕响应为空。");
     }
 
     return { srt };
+  }
+
+  private async resolveTranscriptionConfiguration(): Promise<ActiveTranscriptionConfiguration> {
+    const asrConfiguration = this.configurations.getConfiguration("asr");
+    const asrModelName = asrConfiguration.settings.modelName?.trim();
+    if (asrConfiguration.settings.enabled !== false) {
+      if (!asrModelName) {
+        throw new SubtitleFallbackProviderUnavailableError(
+          "ASR 已启用但模型名为空。请填写支持音频转写的模型，或关闭 ASR 复用大模型配置。"
+        );
+      }
+
+      const apiKey = await this.credentials.readCredential("asr");
+      if (!apiKey) {
+        throw new SubtitleFallbackProviderUnavailableError(
+          "ASR 已启用但 API Key 尚未配置。可以关闭 ASR 复用大模型配置，或填写 ASR API Key。"
+        );
+      }
+
+      const baseUrl = asrConfiguration.settings.baseUrl || defaultServiceSettings("asr").baseUrl;
+      if (!baseUrl) {
+        throw new SubtitleFallbackProviderUnavailableError("ASR Base URL 尚未配置。");
+      }
+
+      return {
+        apiKey,
+        baseUrl,
+        modelName: asrModelName,
+        providerLabel: "ASR",
+        usingSharedLlm: false
+      };
+    }
+
+    const llmConfiguration = this.configurations.getConfiguration("llm");
+    if (llmConfiguration.settings.enabled === false) {
+      throw new SubtitleFallbackProviderUnavailableError(
+        "ASR 未单独启用，且大模型服务未启用，无法做字幕兜底。"
+      );
+    }
+
+    const apiKey = await this.credentials.readCredential("llm");
+    if (!apiKey) {
+      throw new SubtitleFallbackProviderUnavailableError(
+        "ASR 未单独启用，且大模型 API Key 尚未配置，无法复用大模型做音频转写。"
+      );
+    }
+
+    const modelName = llmConfiguration.settings.modelName?.trim();
+    if (!modelName) {
+      throw new SubtitleFallbackProviderUnavailableError(
+        "ASR 未单独启用，且大模型模型名为空，无法复用大模型做音频转写。"
+      );
+    }
+
+    const baseUrl = llmConfiguration.settings.baseUrl || defaultServiceSettings("llm").baseUrl;
+    if (!baseUrl) {
+      throw new SubtitleFallbackProviderUnavailableError("大模型 Base URL 尚未配置。");
+    }
+
+    return {
+      apiKey,
+      baseUrl,
+      modelName,
+      providerLabel: "大模型复用 ASR",
+      usingSharedLlm: true
+    };
   }
 }
 
@@ -120,6 +183,46 @@ function languageCode(language: ContentLanguage): "zh" | "en" | "id" {
     return "id";
   }
   return "zh";
+}
+
+function responseFormatForModel(modelName: string): "srt" | "text" {
+  return modelName.toLowerCase().includes("whisper") ? "srt" : "text";
+}
+
+function normalizeTranscriptionToSrt(responseText: string): string {
+  const trimmed = responseText.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (looksLikeSrt(trimmed)) {
+    return trimmed;
+  }
+
+  const text = extractTextFromTranscriptionResponse(trimmed);
+  if (!text) {
+    return "";
+  }
+
+  return [
+    "1",
+    "00:00:00,000 --> 00:00:10,000",
+    text.replace(/\s+/g, " ").trim()
+  ].join("\n");
+}
+
+function looksLikeSrt(value: string): boolean {
+  return /\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}/.test(value);
+}
+
+function extractTextFromTranscriptionResponse(value: string): string {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const candidate = parsed.text ?? parsed.transcript;
+    return typeof candidate === "string" ? candidate.trim() : value;
+  } catch {
+    return value;
+  }
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
