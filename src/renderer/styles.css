@@ -1498,6 +1498,28 @@ label {
   font-size: 13px;
 }
 
+.provider-check-result {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #dce3ee;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.provider-check-result.ok {
+  border-color: #b7dfcf;
+  background: #edf8f3;
+  color: #17624f;
+}
+
+.provider-check-result.failed {
+  border-color: #efc2c2;
+  background: #fff3f3;
+  color: #a33a3a;
+}
+
 @media (max-width: 1100px) {
   .topbar {
     gap: 12px;

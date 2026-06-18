@@ -41,6 +41,7 @@ import type {
   ProviderId,
   SaveServiceConfigurationInput,
   ServiceConfiguration,
+  ServiceConnectionCheck,
   ServiceConfigurationSettings
 } from "../shared/serviceConfig";
 import { defaultServiceSettings } from "../shared/serviceConfig";
@@ -176,6 +177,10 @@ export function App() {
   const [taskError, setTaskError] = useState("");
   const [serviceConfigurations, setServiceConfigurations] = useState<ServiceConfiguration[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, SettingsDraft>>({});
+  const [settingsCheckResults, setSettingsCheckResults] = useState<
+    Record<string, ServiceConnectionCheck>
+  >({});
+  const [settingsBusyProviderId, setSettingsBusyProviderId] = useState<ProviderId | "">("");
   const [settingsMessage, setSettingsMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
@@ -1016,6 +1021,7 @@ export function App() {
       return;
     }
 
+    const label = providerLabel(serviceConfigurations, providerId);
     const input: SaveServiceConfigurationInput = {
       providerId,
       settings: {
@@ -1028,9 +1034,32 @@ export function App() {
       },
       apiKey: draft.apiKey || undefined
     };
-    await window.digitalHumanStudio.saveServiceConfiguration(input);
-    setSettingsMessage("配置已保存到本机");
-    await loadServiceConfigurations();
+
+    setSettingsBusyProviderId(providerId);
+    setSettingsMessage(`${label} 正在保存并测试...`);
+    setSettingsCheckResults((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
+
+    try {
+      await window.digitalHumanStudio.saveServiceConfiguration(input);
+      const result = await window.digitalHumanStudio.testServiceConfiguration(providerId);
+      setSettingsCheckResults((current) => ({ ...current, [providerId]: result }));
+      setSettingsMessage(`配置已保存。${result.message}`);
+      await loadServiceConfigurations();
+    } catch (error) {
+      const result: ServiceConnectionCheck = {
+        providerId,
+        ok: false,
+        message: error instanceof Error ? error.message : `${label} 保存或测试失败`
+      };
+      setSettingsCheckResults((current) => ({ ...current, [providerId]: result }));
+      setSettingsMessage(result.message);
+    } finally {
+      setSettingsBusyProviderId("");
+    }
   }
 
   async function clearServiceCredential(providerId: ProviderId) {
@@ -1038,9 +1067,19 @@ export function App() {
       return;
     }
 
-    await window.digitalHumanStudio.clearServiceCredential(providerId);
-    setSettingsMessage("凭据已清除");
-    await loadServiceConfigurations();
+    setSettingsBusyProviderId(providerId);
+    try {
+      await window.digitalHumanStudio.clearServiceCredential(providerId);
+      setSettingsCheckResults((current) => {
+        const next = { ...current };
+        delete next[providerId];
+        return next;
+      });
+      setSettingsMessage("凭据已清除");
+      await loadServiceConfigurations();
+    } finally {
+      setSettingsBusyProviderId("");
+    }
   }
 
   async function testServiceConfiguration(providerId: ProviderId) {
@@ -1049,8 +1088,23 @@ export function App() {
       return;
     }
 
-    const result = await window.digitalHumanStudio.testServiceConfiguration(providerId);
-    setSettingsMessage(result.message);
+    setSettingsBusyProviderId(providerId);
+    setSettingsMessage(`${providerLabel(serviceConfigurations, providerId)} 正在测试...`);
+    try {
+      const result = await window.digitalHumanStudio.testServiceConfiguration(providerId);
+      setSettingsCheckResults((current) => ({ ...current, [providerId]: result }));
+      setSettingsMessage(result.message);
+    } catch (error) {
+      const result: ServiceConnectionCheck = {
+        providerId,
+        ok: false,
+        message: error instanceof Error ? error.message : "服务测试失败"
+      };
+      setSettingsCheckResults((current) => ({ ...current, [providerId]: result }));
+      setSettingsMessage(result.message);
+    } finally {
+      setSettingsBusyProviderId("");
+    }
   }
 
   return (
@@ -1739,6 +1793,8 @@ export function App() {
                   apiKey: "",
                   enabled: true
                 };
+                const checkResult = settingsCheckResults[configuration.providerId];
+                const isBusy = settingsBusyProviderId === configuration.providerId;
 
                 return (
                   <section className="provider-card" key={configuration.providerId}>
@@ -1866,23 +1922,38 @@ export function App() {
                     <div className="provider-actions">
                       <button
                         type="button"
+                        disabled={Boolean(settingsBusyProviderId)}
                         onClick={() => void saveServiceConfiguration(configuration.providerId)}
                       >
-                        保存
+                        {isBusy ? "测试中" : "保存并测试"}
                       </button>
                       <button
                         type="button"
+                        disabled={Boolean(settingsBusyProviderId)}
                         onClick={() => void testServiceConfiguration(configuration.providerId)}
                       >
                         检查
                       </button>
                       <button
                         type="button"
+                        disabled={Boolean(settingsBusyProviderId)}
                         onClick={() => void clearServiceCredential(configuration.providerId)}
                       >
                         清除凭据
                       </button>
                     </div>
+                    {checkResult ? (
+                      <p
+                        className={
+                          checkResult.ok
+                            ? "provider-check-result ok"
+                            : "provider-check-result failed"
+                        }
+                      >
+                        {checkResult.ok ? "测试通过：" : "测试失败："}
+                        {checkResult.message}
+                      </p>
+                    ) : null}
                   </section>
                 );
               })}
@@ -2776,9 +2847,13 @@ function providerConfiguration(
   return configurations.find((configuration) => configuration.providerId === providerId);
 }
 
+function providerLabel(configurations: ServiceConfiguration[], providerId: ProviderId): string {
+  return providerConfiguration(configurations, providerId)?.label ?? providerId;
+}
+
 function withApiTroubleshootingHint(message: string): string {
   const trimmed = message.trim() || "API 请求失败";
-  return `${trimmed}。如果 API 不通，请打开设置，重新保存对应服务的 Base URL、模型名称和 API Key；“检查”只做本地配置检查，不代表平台接口一定可用。`;
+  return `${trimmed}。如果 API 不通，请打开设置，重新保存对应服务的 Base URL、模型名称和 API Key，并查看保存后的测试结果。`;
 }
 
 async function checkOutputServiceConfiguration(

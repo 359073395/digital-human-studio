@@ -26,6 +26,7 @@ class PrefixCipher implements SecretCipher {
 let tempDir: string;
 let database: TaskDatabase;
 let repository: ServiceConfigurationRepository;
+let credentialStore: CredentialStore;
 let credentialFilePath: string;
 
 beforeEach(() => {
@@ -34,10 +35,8 @@ beforeEach(() => {
   database = openTaskDatabase(appPaths.databasePath);
   runMigrations(database);
   credentialFilePath = path.join(tempDir, "credentials.json");
-  repository = new ServiceConfigurationRepository(
-    database,
-    new CredentialStore(credentialFilePath, new PrefixCipher())
-  );
+  credentialStore = new CredentialStore(credentialFilePath, new PrefixCipher());
+  repository = new ServiceConfigurationRepository(database, credentialStore);
 });
 
 afterEach(() => {
@@ -113,8 +112,18 @@ describe("ServiceConfigurationRepository", () => {
     expect(sqliteBytes).not.toContain("heygen-secret");
   });
 
-  it("reports local health check state", async () => {
-    expect(repository.testConfiguration("heygen").ok).toBe(false);
+  it("tests HeyGen credentials with a real API-style request", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({ data: { avatar_looks: [{ id: "avatar-123" }] } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+
+    await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({
+      ok: false,
+      message: "HeyGen API Key 尚未配置"
+    });
 
     await repository.saveConfiguration({
       providerId: "heygen",
@@ -122,9 +131,34 @@ describe("ServiceConfigurationRepository", () => {
       apiKey: "heygen-key"
     });
 
-    expect(repository.testConfiguration("heygen")).toMatchObject({
+    await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({
       ok: true,
-      message: "HeyGen 本地配置检查通过（未发起真实 API 请求，真实连通性以生成时返回为准）"
+      message: "HeyGen 测试通过，API Key 和 Avatar ID 可用于生成前检查"
+    });
+  });
+
+  it("tests OpenAI-compatible providers against the configured model list", async () => {
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer llm-key");
+      return new Response(JSON.stringify({ data: [{ id: "custom-model" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    };
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+    await repository.saveConfiguration({
+      providerId: "llm",
+      settings: {
+        baseUrl: "https://example.test/v1",
+        modelName: "custom-model",
+        enabled: true
+      },
+      apiKey: "llm-key"
+    });
+
+    await expect(repository.testConfiguration("llm")).resolves.toMatchObject({
+      ok: true,
+      message: "大模型（OpenAI 兼容） 测试通过，模型 custom-model 可用"
     });
   });
 });
