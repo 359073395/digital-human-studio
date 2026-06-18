@@ -129,15 +129,20 @@ export class ServiceConfigurationRepository {
       return this.testHeyGenConnection(configuration, apiKey);
     }
 
-    return this.testOpenAiCompatibleConnection(configuration, apiKey);
+    if (providerId === "llm") {
+      return this.testOpenAiCompatibleChat(configuration, apiKey);
+    }
+
+    return this.testDeferredOpenAiCompatibleConnection(configuration, apiKey);
   }
 
-  private async testOpenAiCompatibleConnection(
+  private async testOpenAiCompatibleChat(
     configuration: ServiceConfiguration,
     apiKey: string
   ): Promise<ServiceConnectionCheck> {
     const definition = getProviderDefinition(configuration.providerId);
-    const baseUrl = configuration.settings.baseUrl || defaultServiceSettings(configuration.providerId).baseUrl;
+    const baseUrl =
+      configuration.settings.baseUrl || defaultServiceSettings(configuration.providerId).baseUrl;
     if (!baseUrl) {
       return {
         providerId: configuration.providerId,
@@ -146,12 +151,26 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const modelsUrl = `${normalizeBaseUrl(baseUrl)}/models`;
-    const result = await fetchWithTimeout(this.fetchImpl, modelsUrl, {
-      method: "GET",
+    const modelName = configuration.settings.modelName?.trim();
+    if (!modelName) {
+      return {
+        providerId: configuration.providerId,
+        ok: false,
+        message: `${definition.label} 模型名尚未配置`
+      };
+    }
+
+    const result = await fetchWithTimeout(this.fetchImpl, `${normalizeBaseUrl(baseUrl)}/chat/completions`, {
+      method: "POST",
       headers: {
+        "content-type": "application/json",
         authorization: `Bearer ${apiKey}`
-      }
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1
+      })
     });
 
     if (!result.ok) {
@@ -162,7 +181,60 @@ export class ServiceConfigurationRepository {
       };
     }
 
+    return {
+      providerId: configuration.providerId,
+      ok: true,
+      message: `${definition.label} 测试通过，${modelName} 的 chat/completions 可用`
+    };
+  }
+
+  private async testDeferredOpenAiCompatibleConnection(
+    configuration: ServiceConfiguration,
+    apiKey: string
+  ): Promise<ServiceConnectionCheck> {
+    const definition = getProviderDefinition(configuration.providerId);
+    const baseUrl =
+      configuration.settings.baseUrl || defaultServiceSettings(configuration.providerId).baseUrl;
+    if (!baseUrl) {
+      return {
+        providerId: configuration.providerId,
+        ok: false,
+        message: `${definition.label} Base URL 尚未配置`
+      };
+    }
+
+    const result = await fetchWithTimeout(this.fetchImpl, `${normalizeBaseUrl(baseUrl)}/models`, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${apiKey}`
+      }
+    });
     const modelName = configuration.settings.modelName?.trim();
+
+    if (!result.ok && result.status && [401, 403].includes(result.status)) {
+      return {
+        providerId: configuration.providerId,
+        ok: false,
+        message: `${definition.label} 鉴权失败：${result.message}`
+      };
+    }
+
+    if (!result.ok && !isProbablyUnsupportedModelsEndpoint(result.status)) {
+      return {
+        providerId: configuration.providerId,
+        ok: false,
+        message: `${definition.label} 基础连接失败：${result.message}`
+      };
+    }
+
+    if (!result.ok) {
+      return {
+        providerId: configuration.providerId,
+        ok: true,
+        message: `${definition.label} 已保存。当前中转可能不开放 /models，${modelName || "所填模型"} 会在实际生成时验证。`
+      };
+    }
+
     const modelItems = isRecord(result.json) ? result.json.data : undefined;
     if (modelName && Array.isArray(modelItems)) {
       const found = modelItems.some(
@@ -171,8 +243,8 @@ export class ServiceConfigurationRepository {
       if (!found) {
         return {
           providerId: configuration.providerId,
-          ok: false,
-          message: `${definition.label} API 可连接，但模型列表里没有 ${modelName}`
+          ok: true,
+          message: `${definition.label} API 可连接，但 /models 未列出 ${modelName}。部分中转不会列出图片/ASR模型，实际生成时再验证。`
         };
       }
     }
@@ -181,7 +253,7 @@ export class ServiceConfigurationRepository {
       providerId: configuration.providerId,
       ok: true,
       message: modelName
-        ? `${definition.label} 测试通过，模型 ${modelName} 可用`
+        ? `${definition.label} 测试通过，API 可连接，模型 ${modelName} 已保存`
         : `${definition.label} 测试通过，API 可连接`
     };
   }
@@ -235,6 +307,7 @@ export class ServiceConfigurationRepository {
 interface FetchTestResult {
   ok: boolean;
   message: string;
+  status?: number;
   json?: unknown;
 }
 
@@ -254,6 +327,7 @@ async function fetchWithTimeout(
     if (!response.ok) {
       return {
         ok: false,
+        status: response.status,
         message: `HTTP ${response.status} ${response.statusText || ""} ${redactedText}`.trim()
       };
     }
@@ -299,6 +373,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === "string" ? value : "";
+}
+
+function isProbablyUnsupportedModelsEndpoint(status: number | undefined): boolean {
+  return status === 400 || status === 404 || status === 405;
 }
 
 function sanitizeSettings(settings: ServiceConfigurationSettings): ServiceConfigurationSettings {

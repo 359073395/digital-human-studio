@@ -137,10 +137,13 @@ describe("ServiceConfigurationRepository", () => {
     });
   });
 
-  it("tests OpenAI-compatible providers against the configured model list", async () => {
-    const fetchImpl: typeof fetch = async (_url, init) => {
+  it("tests the LLM provider with the chat completions endpoint used by generation", async () => {
+    const fetchImpl: typeof fetch = async (url, init) => {
+      expect(url).toBe("https://example.test/v1/chat/completions");
+      expect(init?.method).toBe("POST");
       expect((init?.headers as Record<string, string>).authorization).toBe("Bearer llm-key");
-      return new Response(JSON.stringify({ data: [{ id: "custom-model" }] }), {
+      expect(JSON.parse(String(init?.body))).toMatchObject({ model: "custom-model" });
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
         status: 200,
         headers: { "content-type": "application/json" }
       });
@@ -158,7 +161,32 @@ describe("ServiceConfigurationRepository", () => {
 
     await expect(repository.testConfiguration("llm")).resolves.toMatchObject({
       ok: true,
-      message: "大模型（OpenAI 兼容） 测试通过，模型 custom-model 可用"
+      message: "大模型（OpenAI 兼容） 测试通过，custom-model 的 chat/completions 可用"
+    });
+  });
+
+  it("does not fail image checks just because a relay hides the models endpoint", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({ error: "not found" }), {
+        status: 404,
+        statusText: "Not Found",
+        headers: { "content-type": "application/json" }
+      });
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+    await repository.saveConfiguration({
+      providerId: "image",
+      settings: {
+        baseUrl: "https://relay.example/v1",
+        modelName: "gpt-image-2",
+        enabled: true
+      },
+      apiKey: "image-key"
+    });
+
+    await expect(repository.testConfiguration("image")).resolves.toMatchObject({
+      ok: true,
+      message:
+        "图片生成（OpenAI 兼容） 已保存。当前中转可能不开放 /models，gpt-image-2 会在实际生成时验证。"
     });
   });
 });
