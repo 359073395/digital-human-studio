@@ -133,13 +133,13 @@ describe("ServiceConfigurationRepository", () => {
 
     await repository.saveConfiguration({
       providerId: "heygen",
-      settings: { baseUrl: "https://api.heygen.com/v2", avatarId: "avatar-123", enabled: true },
+      settings: { baseUrl: "https://api.heygen.com/v2", avatarId: "", enabled: true },
       apiKey: "heygen-key"
     });
 
     await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({
       ok: true,
-      message: "HeyGen 测试通过，API Key 和 Avatar ID 可用于生成前检查"
+      message: "HeyGen 测试通过，API Key 可连接；预设数字人会在任务里自动读取后选择"
     });
     expect(seenUrls).toContain("https://api.heygen.com/v3/avatars/looks?limit=1");
   });

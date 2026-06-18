@@ -1,6 +1,6 @@
 # API Configuration
 
-The desktop app stores service settings locally. API keys are saved in the encrypted local credential store, while Base URL, model name, Avatar ID, Voice ID, and resolution are saved as non-secret settings.
+The desktop app stores service settings locally. API keys are saved in the encrypted local credential store, while Base URL, model name, optional default Avatar ID, Voice ID, and resolution are saved as non-secret settings.
 
 The credential store lives under the app data directory, for example `D:\Codex\2026-06-13\digital-human-studio\data\credentials`. This directory is ignored by Git. Keep it with your project backup if you want the configured accounts to keep working after moving the project to another machine; otherwise you can re-enter keys in the settings modal.
 
@@ -13,7 +13,7 @@ The generation screen shows a compact flow guide for the active task. It lists w
 | Source extraction/material extraction | ASR, OpenAI-compatible              | Base URL, ASR model, API Key when transcription is needed                      |
 | Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                  |
 | Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                 |
-| Lip-synced avatar video               | HeyGen                              | Base URL, API Key, Avatar ID for preset avatars, optional Voice ID, resolution |
+| Lip-synced avatar video               | HeyGen                              | Base URL, API Key, task-selected preset avatar or optional default Avatar ID, optional Voice ID, resolution |
 | Subtitle fallback                     | ASR or reusable LLM audio support   | Real `audio/transcriptions` support, only when HeyGen subtitles are unavailable |
 | External audio                        | Optional TTS or uploaded audio      | Not required for the default MVP path                                          |
 | Export                                | Local desktop app                   | Save directory, no API Key                                                     |
@@ -66,7 +66,9 @@ HeyGen can be replaced directly from the settings modal:
 - Base URL should normally be `https://api.heygen.com`. If the user enters `/v1`, `/v2`, or `/v3`, the app normalizes it back to the HeyGen API root before calling v3 endpoints.
 - Enter a new HeyGen API Key and save to replace the previous key.
 - Leave the API Key field empty and save to keep the previous key.
-- When switching HeyGen accounts, also update Avatar ID and Voice ID because they are account-specific.
+- Saving or checking a valid HeyGen API Key automatically reads the account's preset avatar list. Choose the avatar in the video task.
+- The settings Avatar ID is only an optional default fallback. You do not need to fill it when configuring the API.
+- When switching HeyGen accounts, refresh the preset avatar list and update Voice ID if you use a specific voice.
 
 The MVP stores one active HeyGen configuration at a time.
 
@@ -77,7 +79,7 @@ PowerShell setup example:
 ```powershell
 $env:DHS_APP_DATA_DIR="D:\Codex\2026-06-13\digital-human-studio\data"
 $env:HEYGEN_API_KEY="your-heygen-key"
-$env:HEYGEN_AVATAR_ID="your-avatar-id"
+$env:HEYGEN_AVATAR_ID="optional-default-avatar-id"
 $env:HEYGEN_VOICE_ID="your-voice-id"
 $env:HEYGEN_RESOLUTION="720p"
 npm run configure:services

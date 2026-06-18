@@ -408,18 +408,10 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    if (!configuration.settings.avatarId?.trim()) {
-      return {
-        providerId: "heygen",
-        ok: false,
-        message: "HeyGen API 可连接，但 Avatar ID 尚未配置"
-      };
-    }
-
     return {
       providerId: "heygen",
       ok: true,
-      message: "HeyGen 测试通过，API Key 和 Avatar ID 可用于生成前检查"
+      message: "HeyGen 测试通过，API Key 可连接；预设数字人会在任务里自动读取后选择"
     };
   }
 }

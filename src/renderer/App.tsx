@@ -1057,6 +1057,9 @@ export function App() {
       setSettingsCheckResults((current) => ({ ...current, [providerId]: result }));
       setSettingsMessage(`配置已保存。${result.message}`);
       await loadServiceConfigurations();
+      if (providerId === "heygen" && result.ok) {
+        void refreshHeyGenAvatarLooks(true);
+      }
     } catch (error) {
       const result: ServiceConnectionCheck = {
         providerId,
@@ -1104,6 +1107,9 @@ export function App() {
       const result = await window.digitalHumanStudio.testServiceConfiguration(providerId);
       setSettingsCheckResults((current) => ({ ...current, [providerId]: result }));
       setSettingsMessage(result.message);
+      if (providerId === "heygen" && result.ok) {
+        void refreshHeyGenAvatarLooks(true);
+      }
     } catch (error) {
       const result: ServiceConnectionCheck = {
         providerId,
@@ -1852,11 +1858,11 @@ export function App() {
                     {configuration.providerId === "heygen" ? (
                       <>
                         <label>
-                          Avatar ID
+                          默认 Avatar ID（可选）
                           <input
                             type="text"
                             value={draft.avatarId ?? ""}
-                            placeholder="当前 HeyGen 账号可用的 Avatar ID"
+                            placeholder="通常不用填；任务里会自动读取并选择预设数字人"
                             onChange={(event) =>
                               setSettingsDraft((current) =>
                                 updateDraft(current, configuration.providerId, {
@@ -2879,7 +2885,7 @@ function providerLabel(configurations: ServiceConfiguration[], providerId: Provi
 function providerSettingsHint(providerId: ProviderId): string {
   switch (providerId) {
     case "heygen":
-      return "Base URL 填 https://api.heygen.com 即可；如果填了 /v1、/v2 或 /v3，软件会自动纠正。Avatar ID 必须属于当前 HeyGen 账号。";
+      return "Base URL 填 https://api.heygen.com 即可；如果填了 /v1、/v2 或 /v3，软件会自动纠正。保存或检查成功后会自动读取当前账号的预设数字人。";
     case "asr":
       return "ASR 是可选兜底：关闭时会实际测试大模型是否支持 audio/transcriptions；不支持时请启用 ASR 并填写转写模型。";
     case "image":
@@ -2901,6 +2907,16 @@ async function checkOutputServiceConfiguration(
   task: VideoTask
 ): Promise<string> {
   const providerIds: ProviderId[] = ["heygen"];
+  const configurations = await api.listServiceConfigurations();
+  const heygenConfiguration = providerConfiguration(configurations, "heygen");
+
+  if (
+    task.avatarMode === "preset-avatar" &&
+    !task.presetAvatarId?.trim() &&
+    !heygenConfiguration?.settings.avatarId?.trim()
+  ) {
+    return "请先在预设数字人选择里刷新并选择一个 HeyGen 数字人。设置里的默认 Avatar ID 是可选项，不需要在配置 API 时填写。";
+  }
 
   if (!task.finalScript.trim()) {
     providerIds.push("llm");

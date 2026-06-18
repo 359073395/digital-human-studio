@@ -18,7 +18,7 @@ Image generation does not run full generation during settings checks because tha
 
 ASR checks must judge actual transcription support. When standalone ASR is enabled, the app sends a tiny generated WAV file to `POST /audio/transcriptions` with the configured ASR model. When standalone ASR is disabled, the app reuses the saved LLM Base URL, model, and API Key for the same tiny transcription probe. A model is only reported as reusable for ASR after that request succeeds.
 
-HeyGen uses the existing `GET /v3/avatars/looks?limit=1` path. The app normalizes HeyGen Base URLs by stripping accidental `/v1`, `/v2`, or `/v3` suffixes before calling v3 endpoints. If the API is reachable but no task-ready Avatar ID is configured, the result reports that separately so generation preflight can still block incomplete HeyGen setup.
+HeyGen uses the existing `GET /v3/avatars/looks?limit=1` path. The app normalizes HeyGen Base URLs by stripping accidental `/v1`, `/v2`, or `/v3` suffixes before calling v3 endpoints. A reachable HeyGen account is considered a successful service configuration even when no default Avatar ID is stored. Avatar selection belongs to the video task: after a successful HeyGen save or check, the renderer refreshes the preset avatar list, and generation preflight blocks only if a preset-avatar task still has neither a task-level avatar nor an optional default Avatar ID.
 
 All returned error bodies are truncated and passed through secret redaction before being shown in the UI.
 
