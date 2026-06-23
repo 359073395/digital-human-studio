@@ -2743,7 +2743,7 @@ export function App() {
                         />
                       </label>
 
-                      {activeSettingsConfiguration.providerId !== "heygen" ? (
+                      {hasModelNameField(activeSettingsConfiguration.providerId) ? (
                         <label>
                           模型名
                           <input
@@ -4462,6 +4462,8 @@ function providerSettingsHint(providerId: ProviderId): string {
   switch (providerId) {
     case "heygen":
       return "Base URL 填 https://api.heygen.com 即可；普通 API 账号选 API Key，会员/OAuth 通道选 Bearer Token。保存或检查成功后会自动读取当前账号的预设数字人。";
+    case "source-parser":
+      return "用于下载原视频：Base URL 默认填 https://jiexi.hyjiexi.eu.org，API Key 放在本机安全存储。点击下载原视频时会创建解析任务、轮询完成并保存到当前任务素材。";
     case "asr":
       return "ASR 是可选兜底：关闭时会实际测试大模型是否支持 audio/transcriptions；不支持时请启用 ASR 并填写转写模型。";
     case "image":
@@ -4479,6 +4481,8 @@ function providerSidebarDescription(providerId: ProviderId): string {
   switch (providerId) {
     case "heygen":
       return "数字人口型同步";
+    case "source-parser":
+      return "抖音/TikTok/YouTube 下载";
     case "llm":
       return "文案分析与生成";
     case "image":
@@ -4621,11 +4625,15 @@ function createEmptySettingsDraft(): SettingsDraft {
 }
 
 function canFetchServiceModels(providerId: ProviderId): boolean {
-  if (providerId === "heygen") {
+  if (providerId === "heygen" || providerId === "source-parser" || providerId === "tts") {
     return false;
   }
 
   return true;
+}
+
+function hasModelNameField(providerId: ProviderId): boolean {
+  return !["heygen", "source-parser", "tts"].includes(providerId);
 }
 
 function needsServiceCredentialField(providerId: ProviderId): boolean {

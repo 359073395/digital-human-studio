@@ -23,6 +23,10 @@ function mergeSettings(current, patch) {
   };
 }
 
+function hasAnyEnv(names) {
+  return names.some((name) => env(name) !== undefined);
+}
+
 async function saveProvider(repository, providerId, settingsPatch, apiKey) {
   const current = repository.getConfiguration(providerId);
   return repository.saveConfiguration({
@@ -52,56 +56,93 @@ async function main() {
   const openAiApiKey = env("OPENAI_COMPAT_API_KEY");
 
   const saved = [];
-  saved.push(
-    await saveProvider(
-      repository,
-      "heygen",
-      {
-        baseUrl: env("HEYGEN_BASE_URL"),
-        avatarId: env("HEYGEN_AVATAR_ID"),
-        voiceId: env("HEYGEN_VOICE_ID"),
-        resolution: env("HEYGEN_RESOLUTION"),
-        enabled: true
-      },
-      env("HEYGEN_API_KEY")
-    )
-  );
-  saved.push(
-    await saveProvider(
-      repository,
-      "llm",
-      {
-        baseUrl: env("LLM_BASE_URL") || openAiBaseUrl,
-        modelName: env("LLM_MODEL"),
-        enabled: true
-      },
-      env("LLM_API_KEY") || openAiApiKey
-    )
-  );
-  saved.push(
-    await saveProvider(
-      repository,
-      "image",
-      {
-        baseUrl: env("IMAGE_BASE_URL") || openAiBaseUrl,
-        modelName: env("IMAGE_MODEL"),
-        enabled: true
-      },
-      env("IMAGE_API_KEY") || openAiApiKey
-    )
-  );
-  saved.push(
-    await saveProvider(
-      repository,
-      "asr",
-      {
-        baseUrl: env("ASR_BASE_URL") || openAiBaseUrl,
-        modelName: env("ASR_MODEL"),
-        enabled: true
-      },
-      env("ASR_API_KEY") || openAiApiKey
-    )
-  );
+  if (env("SOURCE_PARSER_BASE_URL") || env("SOURCE_PARSER_API_KEY")) {
+    saved.push(
+      await saveProvider(
+        repository,
+        "source-parser",
+        {
+          baseUrl: env("SOURCE_PARSER_BASE_URL"),
+          enabled: true
+        },
+        env("SOURCE_PARSER_API_KEY")
+      )
+    );
+  }
+
+  if (
+    hasAnyEnv([
+      "HEYGEN_BASE_URL",
+      "HEYGEN_AVATAR_ID",
+      "HEYGEN_VOICE_ID",
+      "HEYGEN_RESOLUTION",
+      "HEYGEN_API_KEY"
+    ])
+  ) {
+    saved.push(
+      await saveProvider(
+        repository,
+        "heygen",
+        {
+          baseUrl: env("HEYGEN_BASE_URL"),
+          avatarId: env("HEYGEN_AVATAR_ID"),
+          voiceId: env("HEYGEN_VOICE_ID"),
+          resolution: env("HEYGEN_RESOLUTION"),
+          enabled: true
+        },
+        env("HEYGEN_API_KEY")
+      )
+    );
+  }
+
+  if (hasAnyEnv(["LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY"]) || openAiBaseUrl || openAiApiKey) {
+    saved.push(
+      await saveProvider(
+        repository,
+        "llm",
+        {
+          baseUrl: env("LLM_BASE_URL") || openAiBaseUrl,
+          modelName: env("LLM_MODEL"),
+          enabled: true
+        },
+        env("LLM_API_KEY") || openAiApiKey
+      )
+    );
+  }
+
+  if (
+    hasAnyEnv(["IMAGE_BASE_URL", "IMAGE_MODEL", "IMAGE_API_KEY"]) ||
+    openAiBaseUrl ||
+    openAiApiKey
+  ) {
+    saved.push(
+      await saveProvider(
+        repository,
+        "image",
+        {
+          baseUrl: env("IMAGE_BASE_URL") || openAiBaseUrl,
+          modelName: env("IMAGE_MODEL"),
+          enabled: true
+        },
+        env("IMAGE_API_KEY") || openAiApiKey
+      )
+    );
+  }
+
+  if (hasAnyEnv(["ASR_BASE_URL", "ASR_MODEL", "ASR_API_KEY"])) {
+    saved.push(
+      await saveProvider(
+        repository,
+        "asr",
+        {
+          baseUrl: env("ASR_BASE_URL") || openAiBaseUrl,
+          modelName: env("ASR_MODEL"),
+          enabled: true
+        },
+        env("ASR_API_KEY") || openAiApiKey
+      )
+    );
+  }
 
   const summary = saved.map((configuration) => ({
     providerId: configuration.providerId,

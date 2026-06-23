@@ -53,6 +53,100 @@ describe("SourceAssetService", () => {
     ).toEqual(Buffer.from([0, 1, 2, 3]));
   });
 
+  it("downloads source videos through the configured parser API", async () => {
+    const seenRequests: Array<{ url: string; method?: string; xApiKey?: string }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      seenRequests.push({
+        url: String(url),
+        method: init?.method,
+        xApiKey: (init?.headers as Record<string, string>)?.["x-api-key"]
+      });
+
+      if (String(url).endsWith("/api/v1/jobs") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({ url: "https://v.douyin.com/example/" });
+        return new Response(JSON.stringify({ job_id: "job-123" }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (String(url).endsWith("/api/v1/jobs/job-123") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            job_id: "job-123",
+            status: "completed",
+            title: "Source video",
+            filename: "source-video.mp4"
+          }),
+          {
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+
+      if (String(url).endsWith("/api/v1/jobs/job-123/download") && init?.method === "GET") {
+        return new Response(new Uint8Array([5, 6, 7, 8]), {
+          headers: { "content-type": "video/mp4" }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+    const service = new SourceAssetService(
+      repository,
+      appPaths,
+      fetchImpl,
+      {
+        getConfiguration: () => ({
+          providerId: "source-parser",
+          label: "原视频解析下载",
+          kind: "source-parser",
+          settings: {
+            baseUrl: "https://jiexi.example/",
+            enabled: true
+          },
+          credentialConfigured: true,
+          updatedAt: "2026-06-23T00:00:00.000Z"
+        })
+      },
+      {
+        readCredential: async () => "parser-key"
+      }
+    );
+    const task = repository.createTask({ title: "Parser source" });
+    repository.updateTask({
+      taskId: task.id,
+      originalVideoUrl: "https://v.douyin.com/example/"
+    });
+
+    const updated = await service.downloadOriginalVideo(task.id);
+    const asset = updated.mediaAssets.find((mediaAsset) => mediaAsset.kind === "source-video");
+
+    expect(updated.steps.find((step) => step.id === "source")?.status).toBe("complete");
+    expect(asset?.relativePath).toMatch(/^source\/original-video-\d+-source-video\.mp4$/);
+    expect(
+      fs.readFileSync(
+        path.join(getTaskDirectory(appPaths, task.id), ...(asset?.relativePath ?? "").split("/"))
+      )
+    ).toEqual(Buffer.from([5, 6, 7, 8]));
+    expect(seenRequests).toEqual([
+      {
+        url: "https://jiexi.example/api/v1/jobs",
+        method: "POST",
+        xApiKey: "parser-key"
+      },
+      {
+        url: "https://jiexi.example/api/v1/jobs/job-123",
+        method: "GET",
+        xApiKey: "parser-key"
+      },
+      {
+        url: "https://jiexi.example/api/v1/jobs/job-123/download",
+        method: "GET",
+        xApiKey: "parser-key"
+      }
+    ]);
+  });
+
   it("rejects non-media platform pages instead of pretending the download worked", async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response("<html>login required</html>", {

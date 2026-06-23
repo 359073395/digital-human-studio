@@ -44,7 +44,7 @@ const {
   StoryboardWorkflowService
 } = require("../dist-electron/main/storyboard/storyboardWorkflowService");
 
-const PROVIDERS = ["heygen", "llm", "image", "video", "asr", "tts"];
+const PROVIDERS = ["heygen", "source-parser", "llm", "image", "video", "asr", "tts"];
 const REQUIRED_PROVIDERS = new Set(["heygen", "llm", "image"]);
 const OUTPUT_PRESETS = ["portrait-9-16", "landscape-16-9"];
 
@@ -184,6 +184,18 @@ function providerEnvSettings(providerId) {
     };
   }
 
+  if (providerId === "source-parser") {
+    return {
+      baseUrl: env("SOURCE_PARSER_BASE_URL") || env("VIDEO_PARSER_BASE_URL"),
+      enabled: Boolean(
+        env("SOURCE_PARSER_BASE_URL") ||
+        env("VIDEO_PARSER_BASE_URL") ||
+        env("SOURCE_PARSER_API_KEY") ||
+        env("VIDEO_PARSER_API_KEY")
+      )
+    };
+  }
+
   if (providerId === "image") {
     return {
       baseUrl: env("IMAGE_BASE_URL") || openAiBaseUrl,
@@ -222,6 +234,10 @@ function providerEnvApiKey(providerId) {
 
   if (providerId === "llm") {
     return env("LLM_API_KEY") || env("OPENAI_COMPAT_API_KEY");
+  }
+
+  if (providerId === "source-parser") {
+    return env("SOURCE_PARSER_API_KEY") || env("VIDEO_PARSER_API_KEY");
   }
 
   if (providerId === "image") {
@@ -318,7 +334,13 @@ function createServices(runtime) {
     runtime.taskRepository,
     runtime.appPaths
   );
-  const sourceAssetService = new SourceAssetService(runtime.taskRepository, runtime.appPaths);
+  const sourceAssetService = new SourceAssetService(
+    runtime.taskRepository,
+    runtime.appPaths,
+    fetch,
+    runtime.serviceRepository,
+    runtime.credentialStore
+  );
   const storyboardWorkflowService = new StoryboardWorkflowService(
     runtime.taskRepository,
     runtime.appPaths,

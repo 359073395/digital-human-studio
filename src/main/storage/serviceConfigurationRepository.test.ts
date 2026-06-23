@@ -50,6 +50,7 @@ describe("ServiceConfigurationRepository", () => {
 
     expect(configurations.map((configuration) => configuration.providerId)).toEqual([
       "heygen",
+      "source-parser",
       "llm",
       "image",
       "video",
@@ -69,6 +70,10 @@ describe("ServiceConfigurationRepository", () => {
     expect(
       configurations.find((configuration) => configuration.providerId === "asr")?.settings.enabled
     ).toBe(false);
+    expect(
+      configurations.find((configuration) => configuration.providerId === "source-parser")?.settings
+        .baseUrl
+    ).toBe("https://jiexi.hyjiexi.eu.org");
   });
 
   it("saves non-secret settings in SQLite and secret values outside SQLite", async () => {
@@ -192,6 +197,52 @@ describe("ServiceConfigurationRepository", () => {
 
     await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({ ok: true });
     expect(seenAuthorizations).toEqual(["Bearer oauth-token", "Bearer oauth-token"]);
+  });
+
+  it("tests the source parser provider with the quota endpoint", async () => {
+    const seenRequests: Array<{ url: string; xApiKey?: string }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      seenRequests.push({
+        url: String(url),
+        xApiKey: (init?.headers as Record<string, string>)["x-api-key"]
+      });
+      return new Response(
+        JSON.stringify({
+          limit: 100,
+          used: 1,
+          remaining: 99,
+          unlimited: false
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    };
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+
+    await repository.saveConfiguration({
+      providerId: "source-parser",
+      settings: {
+        baseUrl: "https://jiexi.example",
+        enabled: true
+      },
+      apiKey: "parser-key"
+    });
+
+    await expect(repository.testConfiguration("source-parser")).resolves.toMatchObject({
+      ok: true,
+      message: "原视频解析下载测试通过，总额度 100，已用 1，剩余 99"
+    });
+    expect(seenRequests).toEqual([
+      {
+        url: "https://jiexi.example/api/v1/quota",
+        xApiKey: "parser-key"
+      }
+    ]);
+    expect(fs.readFileSync(createAppPaths(tempDir).databasePath, "utf8")).not.toContain(
+      "parser-key"
+    );
   });
 
   it("tests the LLM provider with the chat completions endpoint used by generation", async () => {

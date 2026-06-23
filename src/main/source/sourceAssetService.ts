@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { MediaAsset, VideoTask } from "../../shared/domain";
+import type { ServiceConfiguration } from "../../shared/serviceConfig";
+import { defaultServiceSettings } from "../../shared/serviceConfig";
+import { redactSecret } from "../security/redaction";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 
@@ -25,11 +28,41 @@ const KNOWLEDGE_DOCUMENT_EXTENSIONS = new Set([
   ".docx"
 ]);
 
+interface SourceParserConfigurationReader {
+  getConfiguration: (providerId: "source-parser") => ServiceConfiguration;
+}
+
+interface SourceParserCredentialReader {
+  readCredential: (providerId: "source-parser") => Promise<string | null>;
+}
+
+interface SourceParserRuntime {
+  baseUrl: string;
+  apiKey: string;
+}
+
+interface SourceParserCreateJobResponse {
+  job_id?: string;
+  jobId?: string;
+}
+
+interface SourceParserJob {
+  job_id?: string;
+  jobId?: string;
+  status?: string;
+  title?: string | null;
+  filename?: string | null;
+  error?: string | null;
+  progress?: number;
+}
+
 export class SourceAssetService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
-    private readonly fetchImpl: typeof fetch = fetch
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly sourceParserConfigurations?: SourceParserConfigurationReader,
+    private readonly sourceParserCredentials?: SourceParserCredentialReader
   ) {}
 
   async downloadOriginalVideo(taskId: string): Promise<VideoTask> {
@@ -42,29 +75,12 @@ export class SourceAssetService {
     this.taskRepository.updateStepStatus(taskId, "source", "running");
 
     try {
-      const url = new URL(originalVideoUrl);
-      const response = await this.fetchImpl(url.toString());
-      if (!response.ok) {
-        throw new Error(`原视频下载失败 (${response.status})：${response.statusText}`);
+      const parserRuntime = await this.resolveSourceParserRuntime();
+      if (parserRuntime) {
+        return await this.downloadWithSourceParser(taskId, originalVideoUrl, parserRuntime);
       }
 
-      const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-      const extension = extensionFromUrl(url) || extensionFromContentType(contentType);
-      if (!isDirectMedia(contentType, extension)) {
-        throw new Error(
-          "当前链接没有直接返回视频/音频文件，可能是平台短链、网页登录页或防盗链页面。请先手动下载原视频，再用“上传原视频”导入。"
-        );
-      }
-
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length === 0) {
-        throw new Error("原视频下载内容为空。");
-      }
-
-      const relativePath = `source/original-video-${Date.now()}${extension || ".mp4"}`;
-      writeTaskFile(this.paths, taskId, relativePath, bytes);
-      this.taskRepository.addMediaAsset(taskId, mediaKindFromExtension(extension), relativePath);
-      return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+      return await this.downloadDirectMedia(taskId, originalVideoUrl);
     } catch (error) {
       this.taskRepository.updateStepStatus(
         taskId,
@@ -74,6 +90,154 @@ export class SourceAssetService {
       );
       throw error;
     }
+  }
+
+  private async resolveSourceParserRuntime(): Promise<SourceParserRuntime | null> {
+    if (!this.sourceParserConfigurations || !this.sourceParserCredentials) {
+      return null;
+    }
+
+    const configuration = this.sourceParserConfigurations.getConfiguration("source-parser");
+    if (configuration.settings.enabled === false) {
+      return null;
+    }
+
+    const baseUrl =
+      configuration.settings.baseUrl || defaultServiceSettings("source-parser").baseUrl;
+    if (!baseUrl) {
+      throw new Error("请先在设置里填写原视频解析下载 Base URL。");
+    }
+
+    const apiKey = await this.sourceParserCredentials.readCredential("source-parser");
+    if (!apiKey) {
+      throw new Error("请先在设置里保存原视频解析下载 API Key。");
+    }
+
+    return { baseUrl: normalizeBaseUrl(baseUrl), apiKey };
+  }
+
+  private async downloadWithSourceParser(
+    taskId: string,
+    originalVideoUrl: string,
+    runtime: SourceParserRuntime
+  ): Promise<VideoTask> {
+    const created = await requestJson<SourceParserCreateJobResponse>(
+      this.fetchImpl,
+      `${runtime.baseUrl}/api/v1/jobs`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": runtime.apiKey
+        },
+        body: JSON.stringify({ url: originalVideoUrl })
+      }
+    );
+    const jobId = created.job_id ?? created.jobId;
+    if (!jobId) {
+      throw new Error("原视频解析任务创建成功但响应缺少 job_id。");
+    }
+
+    const completed = await this.pollSourceParserJob(runtime, jobId);
+    const fileResponse = await this.fetchImpl(
+      `${runtime.baseUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/download`,
+      {
+        method: "GET",
+        headers: {
+          "x-api-key": runtime.apiKey
+        }
+      }
+    );
+    if (!fileResponse.ok) {
+      const text = await fileResponse.text();
+      throw new Error(
+        `原视频解析下载文件失败 (${fileResponse.status})：${redactSecret(text.slice(0, 800)) || fileResponse.statusText}`
+      );
+    }
+
+    const bytes = Buffer.from(await fileResponse.arrayBuffer());
+    if (bytes.length === 0) {
+      throw new Error("原视频解析下载内容为空。");
+    }
+
+    const contentType = fileResponse.headers.get("content-type")?.toLowerCase() ?? "";
+    const extension =
+      extensionFromFileName(completed.filename ?? "") ||
+      extensionFromFileName(completed.title ?? "") ||
+      extensionFromContentType(contentType) ||
+      ".mp4";
+    const fileNameStem =
+      sanitizeBaseName(path.basename(completed.filename ?? "", extension)) ||
+      sanitizeBaseName(completed.title ?? "") ||
+      "parsed-video";
+    const relativePath = `source/original-video-${Date.now()}-${fileNameStem}${extension}`;
+    writeTaskFile(this.paths, taskId, relativePath, bytes);
+    this.taskRepository.addMediaAsset(taskId, mediaKindFromExtension(extension), relativePath);
+    return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+  }
+
+  private async pollSourceParserJob(
+    runtime: SourceParserRuntime,
+    jobId: string
+  ): Promise<SourceParserJob> {
+    let latestJob: SourceParserJob | undefined;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      latestJob = await requestJson<SourceParserJob>(
+        this.fetchImpl,
+        `${runtime.baseUrl}/api/v1/jobs/${encodeURIComponent(jobId)}`,
+        {
+          method: "GET",
+          headers: {
+            "x-api-key": runtime.apiKey
+          }
+        }
+      );
+
+      const status = latestJob.status?.toLowerCase();
+      if (status === "completed") {
+        return latestJob;
+      }
+
+      if (status === "failed" || status === "expired") {
+        throw new Error(
+          latestJob.error || `原视频解析任务${status === "expired" ? "已过期" : "失败"}。`
+        );
+      }
+
+      await delay(1_500);
+    }
+
+    throw new Error(
+      latestJob?.status
+        ? `原视频解析任务超时，最后状态：${latestJob.status}。`
+        : "原视频解析任务超时。"
+    );
+  }
+
+  private async downloadDirectMedia(taskId: string, originalVideoUrl: string): Promise<VideoTask> {
+    const url = new URL(originalVideoUrl);
+    const response = await this.fetchImpl(url.toString());
+    if (!response.ok) {
+      throw new Error(`原视频下载失败 (${response.status})：${response.statusText}`);
+    }
+
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    const extension = extensionFromUrl(url) || extensionFromContentType(contentType);
+    if (!isDirectMedia(contentType, extension)) {
+      throw new Error(
+        "当前链接没有直接返回视频/音频文件，可能是平台短链、网页登录页或防盗链页面。请先手动下载原视频，再用“上传原视频”导入。"
+      );
+    }
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length === 0) {
+      throw new Error("原视频下载内容为空。");
+    }
+
+    const relativePath = `source/original-video-${Date.now()}${extension || ".mp4"}`;
+    writeTaskFile(this.paths, taskId, relativePath, bytes);
+    this.taskRepository.addMediaAsset(taskId, mediaKindFromExtension(extension), relativePath);
+    return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
   importSourceVideo(taskId: string, filePath: string): VideoTask {
@@ -211,6 +375,26 @@ function buildVisualAnalysisBrief(input: {
   ].join("\n");
 }
 
+async function requestJson<T>(fetchImpl: typeof fetch, url: string, init: RequestInit): Promise<T> {
+  const response = await fetchImpl(url, init);
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `原视频解析请求失败 (${response.status})：${redactSecret(text.slice(0, 800)) || response.statusText}`
+    );
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    throw new Error("原视频解析响应不是有效 JSON。", { cause: error });
+  }
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
+
 function isDirectMedia(contentType: string, extension: string): boolean {
   return (
     DIRECT_MEDIA_CONTENT_TYPES.some((prefix) => contentType.startsWith(prefix)) ||
@@ -219,11 +403,22 @@ function isDirectMedia(contentType: string, extension: string): boolean {
   );
 }
 
+function extensionFromFileName(fileName: string): string {
+  const extension = path.extname(fileName).toLowerCase();
+  return SOURCE_VIDEO_EXTENSIONS.has(extension) || SOURCE_AUDIO_EXTENSIONS.has(extension)
+    ? extension
+    : "";
+}
+
 function extensionFromUrl(url: URL): string {
   const extension = path.extname(url.pathname).toLowerCase();
   return SOURCE_VIDEO_EXTENSIONS.has(extension) || SOURCE_AUDIO_EXTENSIONS.has(extension)
     ? extension
     : "";
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function extensionFromContentType(contentType: string): string {

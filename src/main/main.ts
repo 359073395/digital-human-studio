@@ -175,7 +175,13 @@ function createRepositories(): MainRepositories {
     new OpenAiCompatibleStoryboardProvider(serviceConfigurationRepository, credentialStore),
     imageProvider
   );
-  const sourceAssetService = new SourceAssetService(taskRepository, appPaths);
+  const sourceAssetService = new SourceAssetService(
+    taskRepository,
+    appPaths,
+    fetch,
+    serviceConfigurationRepository,
+    credentialStore
+  );
   const exportWorkflowService = new ExportWorkflowService(taskRepository, appPaths);
   const mixedCutWorkflowService = new MixedCutWorkflowService(taskRepository, appPaths);
   const realWorkflowRunner = new RealWorkflowRunner(

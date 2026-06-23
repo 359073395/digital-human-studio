@@ -1,9 +1,10 @@
-export type ProviderId = "heygen" | "llm" | "image" | "video" | "asr" | "tts";
+export type ProviderId = "heygen" | "source-parser" | "llm" | "image" | "video" | "asr" | "tts";
 
 export type HeyGenAuthMode = "api-key" | "oauth-bearer";
 
 export type ProviderKind =
   | "avatar"
+  | "source-parser"
   | "language-model"
   | "image-generation"
   | "video-generation"
@@ -71,6 +72,13 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
     requiresCredential: true
   },
   {
+    id: "source-parser",
+    kind: "source-parser",
+    label: "原视频解析下载",
+    description: "通过影链工坊 API 解析并下载抖音、TikTok、YouTube 等原视频素材",
+    requiresCredential: true
+  },
+  {
     id: "llm",
     kind: "language-model",
     label: "大模型（OpenAI 兼容）",
@@ -124,6 +132,8 @@ export function defaultServiceSettings(providerId: ProviderId): ServiceConfigura
         resolution: "720p",
         enabled: true
       };
+    case "source-parser":
+      return { baseUrl: "https://jiexi.hyjiexi.eu.org", enabled: false };
     case "llm":
       return { baseUrl: "https://api.openai.com/v1", modelName: "gpt-4.1-mini", enabled: true };
     case "image":

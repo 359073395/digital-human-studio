@@ -10,6 +10,7 @@ The generation screen shows a compact flow guide for the active task. It lists w
 
 | Stage                                 | Service                             | Required setting                                                                                            |
 | ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Source download                       | Source parser API                   | Base URL, API Key                                                                                           |
 | Source extraction/material extraction | ASR, OpenAI-compatible              | Base URL, ASR model, API Key when transcription is needed                                                   |
 | Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                                               |
 | Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                                              |
@@ -58,6 +59,31 @@ Provider-specific overrides are also supported:
 - `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`
 - `IMAGE_BASE_URL`, `IMAGE_MODEL`, `IMAGE_API_KEY`
 - `ASR_BASE_URL`, `ASR_MODEL`, `ASR_API_KEY`
+
+## Source Parser API
+
+The `原视频解析下载` provider is used by the `下载原视频` button. When it is enabled and has a saved API Key, the app calls:
+
+1. `POST /api/v1/jobs` with `X-API-Key`.
+2. `GET /api/v1/jobs/{job_id}` until the job is completed.
+3. `GET /api/v1/jobs/{job_id}/download` and stores the media under the current task's `source/` folder.
+
+If this provider is disabled, the app falls back to direct media URL download.
+
+Default Base URL:
+
+```text
+https://jiexi.hyjiexi.eu.org
+```
+
+PowerShell setup example:
+
+```powershell
+$env:DHS_APP_DATA_DIR="D:\Codex\2026-06-13\digital-human-studio\data"
+$env:SOURCE_PARSER_BASE_URL="https://jiexi.hyjiexi.eu.org"
+$env:SOURCE_PARSER_API_KEY="your-source-parser-key"
+npm run configure:services
+```
 
 ## HeyGen
 

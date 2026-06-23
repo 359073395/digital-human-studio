@@ -90,12 +90,16 @@ export class ServiceConfigurationRepository {
       ...sanitizeSettings(input.settings)
     };
 
-    if (input.providerId === "heygen") {
+    if (input.providerId === "heygen" || input.providerId === "source-parser") {
+      const message =
+        input.providerId === "heygen"
+          ? "HeyGen 使用数字人 Avatar 和 Voice ID，不提供 OpenAI 兼容模型列表。"
+          : "原视频解析下载服务不需要模型名，只需要 Base URL 和 API Key。";
       return {
         providerId: input.providerId,
         ok: false,
         models: [],
-        message: "HeyGen 使用数字人 Avatar 和 Voice ID，不提供 OpenAI 兼容模型列表。"
+        message
       };
     }
 
@@ -208,6 +212,10 @@ export class ServiceConfigurationRepository {
 
     if (providerId === "heygen") {
       return this.testHeyGenConnection(configuration, apiKey.value);
+    }
+
+    if (providerId === "source-parser") {
+      return this.testSourceParserConnection(configuration, apiKey.value);
     }
 
     if (providerId === "llm") {
@@ -520,6 +528,46 @@ export class ServiceConfigurationRepository {
       message: `HeyGen 测试通过，${describeHeyGenAccount(userResult.json)}；预设数字人会在任务里自动读取后选择`
     };
   }
+
+  private async testSourceParserConnection(
+    configuration: ServiceConfiguration,
+    apiKey: string
+  ): Promise<ServiceConnectionCheck> {
+    const baseUrl =
+      configuration.settings.baseUrl || defaultServiceSettings("source-parser").baseUrl;
+    if (!baseUrl) {
+      return {
+        providerId: "source-parser",
+        ok: false,
+        message: "原视频解析下载 Base URL 尚未配置"
+      };
+    }
+
+    const result = await fetchWithTimeout(
+      this.fetchImpl,
+      `${normalizeBaseUrl(baseUrl)}/api/v1/quota`,
+      {
+        method: "GET",
+        headers: {
+          "x-api-key": apiKey
+        }
+      }
+    );
+
+    if (!result.ok) {
+      return {
+        providerId: "source-parser",
+        ok: false,
+        message: `原视频解析下载测试失败：${result.message}`
+      };
+    }
+
+    return {
+      providerId: "source-parser",
+      ok: true,
+      message: `原视频解析下载测试通过，${describeSourceParserQuota(result.json)}`
+    };
+  }
 }
 
 interface FetchTestResult {
@@ -671,6 +719,32 @@ function describeHeyGenAccount(value: unknown): string {
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join("，") : "账号认证成功";
+}
+
+function describeSourceParserQuota(value: unknown): string {
+  if (!isRecord(value)) {
+    return "额度信息已读取";
+  }
+
+  const used = readNumber(value, "used");
+  if (value.unlimited === true) {
+    return `不限量，已用 ${used ?? 0}`;
+  }
+
+  const limit = readNumber(value, "limit");
+  const remaining = readNumber(value, "remaining");
+  const parts = [
+    limit !== undefined ? `总额度 ${limit}` : "",
+    used !== undefined ? `已用 ${used}` : "",
+    remaining !== undefined ? `剩余 ${remaining}` : ""
+  ].filter(Boolean);
+
+  return parts.length > 0 ? parts.join("，") : "额度信息已读取";
+}
+
+function readNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeModelIds(value: unknown): string[] {
