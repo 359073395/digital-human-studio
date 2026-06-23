@@ -1548,23 +1548,6 @@ export function App() {
     }
   }
 
-  async function clearAppPathSetting(kind: AppPathSettingKind) {
-    if (!window.digitalHumanStudio) {
-      setPathSettingsMessage("本地预览模式无法清除保存路径");
-      return;
-    }
-
-    try {
-      const settings = await window.digitalHumanStudio.clearAppPathSetting(kind);
-      setAppPathSettings(settings);
-      setPathSettingsMessage(`${appPathSettingLabel(kind)}已清除`);
-    } catch (error) {
-      setPathSettingsMessage(
-        error instanceof Error ? error.message : `${appPathSettingLabel(kind)}清除失败`
-      );
-    }
-  }
-
   async function loadServiceConfigurations() {
     if (!window.digitalHumanStudio) {
       setServiceConfigurations([]);
@@ -2821,7 +2804,6 @@ export function App() {
             <LocalPathSettingsPanel
               message={pathSettingsMessage}
               onChoose={(kind) => void chooseAppPathSetting(kind)}
-              onClear={(kind) => void clearAppPathSetting(kind)}
               settings={appPathSettings}
             />
             <div className="settings-layout">
@@ -3123,12 +3105,10 @@ export function App() {
 function LocalPathSettingsPanel({
   message,
   onChoose,
-  onClear,
   settings
 }: {
   message: string;
   onChoose: (kind: AppPathSettingKind) => void;
-  onClear: (kind: AppPathSettingKind) => void;
   settings: AppPathSettings;
 }) {
   const rows: Array<{
@@ -3175,10 +3155,7 @@ function LocalPathSettingsPanel({
             </div>
             <span>
               <button type="button" onClick={() => onChoose(row.kind)}>
-                选择
-              </button>
-              <button type="button" onClick={() => onClear(row.kind)}>
-                清除
+                选择路径
               </button>
             </span>
           </div>

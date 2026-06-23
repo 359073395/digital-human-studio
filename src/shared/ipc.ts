@@ -74,7 +74,6 @@ export interface DigitalHumanStudioAPI {
   listServiceModels: (input: ListServiceModelsInput) => Promise<ServiceModelList>;
   getAppPathSettings: () => Promise<AppPathSettings>;
   chooseAppPathSetting: (kind: AppPathSettingKind) => Promise<AppPathSettings>;
-  clearAppPathSetting: (kind: AppPathSettingKind) => Promise<AppPathSettings>;
 }
 
 export const IPC_CHANNELS = {
@@ -115,8 +114,7 @@ export const IPC_CHANNELS = {
   testServiceConfiguration: "service-configurations:test",
   listServiceModels: "service-configurations:list-models",
   getAppPathSettings: "app-settings:get-paths",
-  chooseAppPathSetting: "app-settings:choose-path",
-  clearAppPathSetting: "app-settings:clear-path"
+  chooseAppPathSetting: "app-settings:choose-path"
 } as const;
 
 export interface CreateTaskInput {

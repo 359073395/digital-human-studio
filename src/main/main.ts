@@ -271,10 +271,6 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return appSettingsRepository.updatePathSetting(kind, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.clearAppPathSetting, (_event, kind: AppPathSettingKind) =>
-    appSettingsRepository.clearPathSetting(kind)
-  );
-
   ipcMain.handle(IPC_CHANNELS.listTasks, () => taskRepository.listTasks());
 
   ipcMain.handle(IPC_CHANNELS.getTask, (_event, taskId: string) => taskRepository.getTask(taskId));

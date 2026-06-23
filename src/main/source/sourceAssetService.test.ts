@@ -176,6 +176,132 @@ describe("SourceAssetService", () => {
     ]);
   });
 
+  it("extracts the first URL from pasted platform share text before parsing", async () => {
+    const requestBodies: unknown[] = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      if (String(url).endsWith("/api/v1/jobs") && init?.method === "POST") {
+        requestBodies.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({ job_id: "job-share-text" }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (String(url).endsWith("/api/v1/jobs/job-share-text") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            job_id: "job-share-text",
+            status: "completed",
+            title: "Share text video",
+            filename: "share-text.mp4"
+          }),
+          {
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+
+      if (String(url).endsWith("/api/v1/jobs/job-share-text/download") && init?.method === "GET") {
+        return new Response(new Uint8Array([1, 3, 5, 7]), {
+          headers: { "content-type": "video/mp4" }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+    const service = new SourceAssetService(
+      repository,
+      appPaths,
+      fetchImpl,
+      {
+        getConfiguration: () => ({
+          providerId: "source-parser",
+          label: "原视频解析下载",
+          kind: "source-parser",
+          settings: {
+            baseUrl: "https://jiexi.example/",
+            enabled: true
+          },
+          credentialConfigured: true,
+          updatedAt: "2026-06-23T00:00:00.000Z"
+        })
+      },
+      {
+        readCredential: async () => "parser-key"
+      }
+    );
+    const task = repository.createTask({ title: "Share text source" });
+    repository.updateTask({
+      taskId: task.id,
+      originalVideoUrl:
+        "5.10 复制打开抖音，看看作者的作品 https://v.douyin.com/OPZgLZseJOA/ 复制此链接"
+    });
+
+    const updated = await service.downloadOriginalVideo(task.id);
+
+    expect(requestBodies).toEqual([{ url: "https://v.douyin.com/OPZgLZseJOA/" }]);
+    expect(updated.mediaAssets.some((asset) => asset.kind === "source-video")).toBe(true);
+  });
+
+  it("explains Douyin cookie failures from the parser service", async () => {
+    const fetchImpl: typeof fetch = async (url, init) => {
+      if (String(url).endsWith("/api/v1/jobs") && init?.method === "POST") {
+        return new Response(JSON.stringify({ job_id: "job-cookie-failure" }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (String(url).endsWith("/api/v1/jobs/job-cookie-failure") && init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            job_id: "job-cookie-failure",
+            status: "failed",
+            error: "ERROR: [Douyin] 123: Fresh cookies (not necessarily logged in) are needed"
+          }),
+          {
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+    const service = new SourceAssetService(
+      repository,
+      appPaths,
+      fetchImpl,
+      {
+        getConfiguration: () => ({
+          providerId: "source-parser",
+          label: "原视频解析下载",
+          kind: "source-parser",
+          settings: {
+            baseUrl: "https://jiexi.example/",
+            enabled: true
+          },
+          credentialConfigured: true,
+          updatedAt: "2026-06-23T00:00:00.000Z"
+        })
+      },
+      {
+        readCredential: async () => "parser-key"
+      }
+    );
+    const task = repository.createTask({ title: "Cookie failure" });
+    repository.updateTask({
+      taskId: task.id,
+      originalVideoUrl: "https://v.douyin.com/OPZgLZseJOA/"
+    });
+
+    await expect(service.downloadOriginalVideo(task.id)).rejects.toThrow(
+      "抖音要求服务端提供新的 cookies"
+    );
+
+    const failed = repository.getTask(task.id);
+    expect(failed?.steps.find((step) => step.id === "source")?.errorMessage).toContain(
+      "解析站更新 Douyin cookies"
+    );
+  });
+
   it("rejects non-media platform pages instead of pretending the download worked", async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response("<html>login required</html>", {

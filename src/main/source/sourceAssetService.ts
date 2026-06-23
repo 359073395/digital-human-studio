@@ -73,9 +73,15 @@ export class SourceAssetService {
 
   async downloadOriginalVideo(taskId: string): Promise<VideoTask> {
     const task = this.requireTask(taskId);
-    const originalVideoUrl = task.originalVideoUrl?.trim();
-    if (!originalVideoUrl) {
+    const originalVideoInput = task.originalVideoUrl?.trim();
+    if (!originalVideoInput) {
       throw new Error("请先粘贴原视频链接。");
+    }
+    const originalVideoUrl = extractFirstHttpUrl(originalVideoInput);
+    if (!originalVideoUrl) {
+      throw new Error(
+        "没有在原视频链接输入框中找到 http/https 链接。请粘贴平台分享文案或直接粘贴原视频 URL。"
+      );
     }
 
     this.taskRepository.updateStepStatus(taskId, "source", "running");
@@ -207,7 +213,9 @@ export class SourceAssetService {
 
       if (status === "failed" || status === "expired") {
         throw new Error(
-          latestJob.error || `原视频解析任务${status === "expired" ? "已过期" : "失败"}。`
+          describeSourceParserJobFailure(
+            latestJob.error || `原视频解析任务${status === "expired" ? "已过期" : "失败"}。`
+          )
         );
       }
 
@@ -472,6 +480,33 @@ function validateExtension(filePath: string, allowed: Set<string>): string {
     throw new Error(`不支持的素材格式：${extension || "无扩展名"}`);
   }
   return extension;
+}
+
+function extractFirstHttpUrl(value: string): string {
+  const match = value.match(/https?:\/\/[^\s"'<>]+/i);
+  if (!match?.[0]) {
+    return "";
+  }
+
+  const candidate = match[0].replace(/[)\]}>,，。；;、！!?？]+$/g, "");
+  try {
+    const url = new URL(candidate);
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function describeSourceParserJobFailure(errorMessage: string): string {
+  if (/fresh cookies/i.test(errorMessage)) {
+    return `原视频解析失败：抖音要求服务端提供新的 cookies。请先在解析站更新 Douyin cookies，或换一个可公开解析的链接后再试。服务端原始错误：${errorMessage}`;
+  }
+
+  if (/private|login|permission|unauthorized/i.test(errorMessage)) {
+    return `原视频解析失败：该链接可能需要登录、权限或不是公开可访问内容。服务端原始错误：${errorMessage}`;
+  }
+
+  return `原视频解析失败：${errorMessage}`;
 }
 
 function copyTaskFile(

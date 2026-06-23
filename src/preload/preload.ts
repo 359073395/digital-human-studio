@@ -63,8 +63,7 @@ const IPC_CHANNELS = {
   testServiceConfiguration: "service-configurations:test",
   listServiceModels: "service-configurations:list-models",
   getAppPathSettings: "app-settings:get-paths",
-  chooseAppPathSetting: "app-settings:choose-path",
-  clearAppPathSetting: "app-settings:clear-path"
+  chooseAppPathSetting: "app-settings:choose-path"
 } as const;
 
 const api: DigitalHumanStudioAPI = {
@@ -149,9 +148,7 @@ const api: DigitalHumanStudioAPI = {
   getAppPathSettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getAppPathSettings) as Promise<AppPathSettings>,
   chooseAppPathSetting: (kind: AppPathSettingKind) =>
-    ipcRenderer.invoke(IPC_CHANNELS.chooseAppPathSetting, kind) as Promise<AppPathSettings>,
-  clearAppPathSetting: (kind: AppPathSettingKind) =>
-    ipcRenderer.invoke(IPC_CHANNELS.clearAppPathSetting, kind) as Promise<AppPathSettings>
+    ipcRenderer.invoke(IPC_CHANNELS.chooseAppPathSetting, kind) as Promise<AppPathSettings>
 };
 
 contextBridge.exposeInMainWorld("digitalHumanStudio", api);
