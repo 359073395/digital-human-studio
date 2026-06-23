@@ -255,14 +255,15 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.chooseAppPathSetting, async (_event, kind: AppPathSettingKind) => {
     const current = appSettingsRepository.getPathSettings();
+    const defaultPath = resolveExistingDirectory(
+      current[kind] || defaultPathSettingDirectory(kind) || app.getPath("documents")
+    );
     const options: OpenDialogOptions = {
       title: pathSettingDialogTitle(kind),
       properties: ["openDirectory", "createDirectory"],
-      defaultPath: current[kind] || defaultPathSettingDirectory(kind)
+      defaultPath
     };
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options);
+    const result = await dialog.showOpenDialog(options);
 
     if (result.canceled || !result.filePaths[0]) {
       return current;
@@ -710,6 +711,19 @@ function defaultPathSettingDirectory(kind: AppPathSettingKind): string {
     case "generatedVideoDirectory":
       return app.getPath("videos");
   }
+}
+
+function resolveExistingDirectory(directory: string): string {
+  let candidate = directory;
+  while (candidate && !fs.existsSync(candidate)) {
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      break;
+    }
+    candidate = parent;
+  }
+
+  return candidate || app.getPath("documents");
 }
 
 app.whenReady().then(() => {

@@ -228,6 +228,7 @@ export function App() {
   const [appPathSettings, setAppPathSettings] =
     useState<AppPathSettings>(DEFAULT_APP_PATH_SETTINGS);
   const [pathSettingsMessage, setPathSettingsMessage] = useState("");
+  const [choosingPathKind, setChoosingPathKind] = useState<AppPathSettingKind | "">("");
   const [actionMessage, setActionMessage] = useState("");
   const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
   const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null);
@@ -1538,13 +1539,22 @@ export function App() {
     }
 
     try {
+      setChoosingPathKind(kind);
+      setPathSettingsMessage(`正在打开${appPathSettingLabel(kind)}选择窗口...`);
+      const before = appPathSettings[kind];
       const settings = await window.digitalHumanStudio.chooseAppPathSetting(kind);
       setAppPathSettings(settings);
-      setPathSettingsMessage(`${appPathSettingLabel(kind)}已更新`);
+      setPathSettingsMessage(
+        settings[kind] === before
+          ? `${appPathSettingLabel(kind)}未变更`
+          : `${appPathSettingLabel(kind)}已更新`
+      );
     } catch (error) {
       setPathSettingsMessage(
         error instanceof Error ? error.message : `${appPathSettingLabel(kind)}设置失败`
       );
+    } finally {
+      setChoosingPathKind("");
     }
   }
 
@@ -2802,6 +2812,7 @@ export function App() {
             </div>
             <p className="settings-note">API Key 只保存在本机安全存储里，不写入任务数据库。</p>
             <LocalPathSettingsPanel
+              choosingKind={choosingPathKind}
               message={pathSettingsMessage}
               onChoose={(kind) => void chooseAppPathSetting(kind)}
               settings={appPathSettings}
@@ -3103,10 +3114,12 @@ export function App() {
 }
 
 function LocalPathSettingsPanel({
+  choosingKind,
   message,
   onChoose,
   settings
 }: {
+  choosingKind: AppPathSettingKind | "";
   message: string;
   onChoose: (kind: AppPathSettingKind) => void;
   settings: AppPathSettings;
@@ -3154,8 +3167,15 @@ function LocalPathSettingsPanel({
               </code>
             </div>
             <span>
-              <button type="button" onClick={() => onChoose(row.kind)}>
-                选择路径
+              <button
+                disabled={Boolean(choosingKind)}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onChoose(row.kind);
+                }}
+              >
+                {choosingKind === row.kind ? "选择中..." : "选择路径"}
               </button>
             </span>
           </div>
