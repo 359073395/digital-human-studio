@@ -165,6 +165,43 @@ describe("OpenAiImageProvider", () => {
     expect(result.imageBytes.toString()).toBe("storyboard-image");
   });
 
+  it("falls back to multipart generations when an image proxy rejects JSON content type", async () => {
+    const imageBytes = Buffer.from("storyboard-image-from-form");
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      if (String(init?.headers && JSON.stringify(init.headers)).includes("application/json")) {
+        return new Response(JSON.stringify({ detail: "Unsupported content type" }), {
+          status: 400,
+          statusText: "Bad Request"
+        });
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: [{ b64_json: imageBytes.toString("base64") }]
+        })
+      );
+    });
+
+    const result = await createProvider({ fetchImpl: fetchMock }).generateVisualStoryboardImage({
+      prompt: "Create one visual storyboard with 6 consistent panels."
+    });
+    const [fallbackUrl, fallbackInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const formData = fallbackInit.body as FormData;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fallbackUrl).toBe("https://api.openai.test/v1/images/generations");
+    expect(fallbackInit.headers).toMatchObject({
+      authorization: `Bearer ${TEST_API_KEY}`
+    });
+    expect(JSON.stringify(fallbackInit.headers)).not.toContain("content-type");
+    expect(formData.get("model")).toBe("gpt-image-2");
+    expect(formData.get("size")).toBe("1536x1024");
+    expect(formData.get("response_format")).toBe("b64_json");
+    expect(String(formData.get("prompt"))).toContain("visual storyboard");
+    expect(String(formData.get("prompt"))).not.toContain(TEST_API_KEY);
+    expect(result.imageBytes.toString()).toBe("storyboard-image-from-form");
+  });
+
   it("is unavailable when the image provider is disabled or missing credentials", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 

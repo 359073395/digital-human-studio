@@ -305,7 +305,7 @@ export class SourceAssetService {
     const originalVideoUrl = task.originalVideoUrl?.trim();
 
     if (sourceAssets.length === 0) {
-      throw new Error("??????????/????????????");
+      throw new Error("请先上传原视频、混剪素材、商品图或人物图，再进行画面分析。");
     }
 
     this.taskRepository.updateStepStatus(taskId, "source", "running");
@@ -332,7 +332,7 @@ export class SourceAssetService {
         taskId,
         "source",
         "retry-ready",
-        error instanceof Error ? error.message : "???????"
+        error instanceof Error ? error.message : "画面分析失败。"
       );
       throw error;
     }

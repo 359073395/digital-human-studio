@@ -76,6 +76,7 @@ async function main() {
       "HEYGEN_AVATAR_ID",
       "HEYGEN_VOICE_ID",
       "HEYGEN_RESOLUTION",
+      "HEYGEN_AUTH_MODE",
       "HEYGEN_API_KEY"
     ])
   ) {
@@ -88,6 +89,7 @@ async function main() {
           avatarId: env("HEYGEN_AVATAR_ID"),
           voiceId: env("HEYGEN_VOICE_ID"),
           resolution: env("HEYGEN_RESOLUTION"),
+          authMode: env("HEYGEN_AUTH_MODE"),
           enabled: true
         },
         env("HEYGEN_API_KEY")
@@ -129,7 +131,7 @@ async function main() {
     );
   }
 
-  if (hasAnyEnv(["ASR_BASE_URL", "ASR_MODEL", "ASR_API_KEY"])) {
+  if (hasAnyEnv(["ASR_BASE_URL", "ASR_MODEL", "ASR_MODE", "ASR_API_KEY"])) {
     saved.push(
       await saveProvider(
         repository,
@@ -137,6 +139,7 @@ async function main() {
         {
           baseUrl: env("ASR_BASE_URL") || openAiBaseUrl,
           modelName: env("ASR_MODEL"),
+          asrMode: env("ASR_MODE"),
           enabled: true
         },
         env("ASR_API_KEY") || openAiApiKey

@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CREATIVE_WORKFLOW, DEFAULT_PERSONAL_IP_PROFILE } from "../../shared/domain";
 import {
+  buildCompactVisualStoryboardPrompt,
   buildStoryScriptOptionsPrompt,
   buildVisualStoryboardPrompt
 } from "./visualStoryboardPromptBuilder";
@@ -87,5 +88,24 @@ describe("visual storyboard prompt builder", () => {
     expect(storyboardPrompt).toContain("Image2 storyboard method");
     expect(storyboardPrompt).toContain("Seedance/Jimeng/Kling");
     expect(storyboardPrompt).toContain("continuity");
+  });
+
+  it("builds a compact retry prompt for long storyboard contexts", () => {
+    const fullPrompt = buildVisualStoryboardPrompt({
+      task: baseTask,
+      sourceBrief: "Very long source brief. ".repeat(1200),
+      panelCount: 6
+    });
+    const compactPrompt = buildCompactVisualStoryboardPrompt({
+      task: baseTask,
+      sourceBrief: "Very long source brief. ".repeat(1200),
+      panelCount: 6
+    });
+
+    expect(compactPrompt.length).toBeLessThan(fullPrompt.length);
+    expect(compactPrompt).toContain("compact retry prompt");
+    expect(compactPrompt).toContain("Confirmed editable script");
+    expect(compactPrompt).toContain('"boardImagePrompt"');
+    expect(compactPrompt).toContain("Use exactly 6 panels");
   });
 });

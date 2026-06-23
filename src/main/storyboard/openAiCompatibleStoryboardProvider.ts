@@ -16,6 +16,7 @@ import {
   type VisualStoryboardGenerationResult
 } from "./storyboardProvider";
 import {
+  buildCompactVisualStoryboardPrompt,
   buildStoryScriptOptionsPrompt,
   buildVisualStoryboardPrompt
 } from "./visualStoryboardPromptBuilder";
@@ -40,6 +41,8 @@ interface OpenAiStoryboardProviderOptions {
   fetchImpl?: typeof fetch;
 }
 
+const STORYBOARD_COMPLETION_TIMEOUT_MS = 120000;
+
 export class OpenAiCompatibleStoryboardProvider implements StoryboardProvider {
   private readonly fetchImpl: typeof fetch;
 
@@ -55,16 +58,32 @@ export class OpenAiCompatibleStoryboardProvider implements StoryboardProvider {
     input: StoryScriptGenerationInput
   ): Promise<StoryScriptGenerationResult> {
     const promptPreview = buildStoryScriptOptionsPrompt(input);
-    const content = await this.requestJsonCompletion({
-      promptPreview,
-      systemPrompt: [
-        "You create original drama-commerce script options for short-form videos.",
-        "Return only valid JSON.",
-        "Analyze product, audience, source mechanics, conversion logic, and originality risks.",
-        "Reuse reference mechanics only; do not copy protected expression."
-      ].join(" "),
-      temperature: 0.72
-    });
+    let content: string;
+    try {
+      content = await this.requestJsonCompletion({
+        promptPreview,
+        systemPrompt: [
+          "You create original drama-commerce script options for short-form videos.",
+          "Return only valid JSON.",
+          "Analyze product, audience, source mechanics, conversion logic, and originality risks.",
+          "Reuse reference mechanics only; do not copy protected expression."
+        ].join(" "),
+        temperature: 0.72
+      });
+    } catch (error) {
+      if (!isTransientCompletionFailure(error)) {
+        throw error;
+      }
+      return {
+        scriptPackage: createFallbackStoryScriptPackage(input, error),
+        promptPreview: [
+          promptPreview,
+          "",
+          "Fallback story script package was generated locally because the LLM script endpoint timed out or returned a temporary gateway error.",
+          `Fallback reason: ${error instanceof Error ? error.message : String(error)}`
+        ].join("\n")
+      };
+    }
 
     return {
       scriptPackage: normalizeStoryScriptPackage(parseJsonObject(content), input),
@@ -75,18 +94,48 @@ export class OpenAiCompatibleStoryboardProvider implements StoryboardProvider {
   async generateVisualStoryboard(
     input: VisualStoryboardGenerationInput
   ): Promise<VisualStoryboardGenerationResult> {
-    const promptPreview = buildVisualStoryboardPrompt(input);
-    const content = await this.requestJsonCompletion({
-      promptPreview,
-      systemPrompt: [
-        "You create original visual storyboard packages for short-form videos.",
-        "Return only valid JSON.",
-        "Prioritize visual continuity and practical image-to-video prompts.",
-        "Use the confirmed script as source of truth when provided.",
-        "Reuse reference mechanics only; do not copy protected expression."
-      ].join(" "),
-      temperature: 0.65
-    });
+    let promptPreview = buildVisualStoryboardPrompt(input);
+    const storyboardSystemPrompt = [
+      "You create original visual storyboard packages for short-form videos.",
+      "Return only valid JSON.",
+      "Prioritize visual continuity and practical image-to-video prompts.",
+      "Use the confirmed script as source of truth when provided.",
+      "Reuse reference mechanics only; do not copy protected expression."
+    ].join(" ");
+    let content: string;
+    try {
+      content = await this.requestJsonCompletion({
+        promptPreview,
+        systemPrompt: storyboardSystemPrompt,
+        temperature: 0.65
+      });
+    } catch (error) {
+      if (!isTransientCompletionFailure(error)) {
+        throw error;
+      }
+      promptPreview = buildCompactVisualStoryboardPrompt(input);
+      try {
+        content = await this.requestJsonCompletion({
+          promptPreview,
+          systemPrompt: storyboardSystemPrompt,
+          temperature: 0.45
+        });
+      } catch (retryError) {
+        if (!isTransientCompletionFailure(retryError)) {
+          throw retryError;
+        }
+        const fallbackStoryboard = createFallbackVisualStoryboard(input, retryError);
+        return {
+          storyboard: fallbackStoryboard,
+          promptPreview: [
+            promptPreview,
+            "",
+            "Fallback storyboard was generated locally because the LLM storyboard endpoint timed out or returned a temporary gateway error.",
+            `Fallback reason: ${retryError instanceof Error ? retryError.message : String(retryError)}`
+          ].join("\n")
+        };
+      }
+    }
 
     return {
       storyboard: normalizeVisualStoryboard(parseJsonObject(content), input),
@@ -114,28 +163,45 @@ export class OpenAiCompatibleStoryboardProvider implements StoryboardProvider {
       throw new StoryboardProviderUnavailableError("大模型 API Key 尚未配置。");
     }
 
-    const response = await this.fetchImpl(buildChatCompletionUrl(configuration), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: configuration.settings.modelName || defaultServiceSettings("llm").modelName,
-        temperature,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt
-          },
-          {
-            role: "user",
-            content: promptPreview
-          }
-        ]
-      })
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), STORYBOARD_COMPLETION_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(buildChatCompletionUrl(configuration), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: configuration.settings.modelName || defaultServiceSettings("llm").modelName,
+          temperature,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt
+            },
+            {
+              role: "user",
+              content: promptPreview
+            }
+          ]
+        })
+      });
+    } catch (error) {
+      throw new Error(
+        error instanceof Error && error.name === "AbortError"
+          ? "大模型 JSON 生成请求超时，请稍后重试或使用更短素材。"
+          : error instanceof Error
+            ? error.message
+            : "视觉故事板生成请求失败。",
+        { cause: error }
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const body = await safeReadResponseBody(response);
@@ -161,6 +227,132 @@ function buildChatCompletionUrl(configuration: ServiceConfiguration): string {
   }
 
   return `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
+}
+
+function isTransientCompletionFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(408|429|500|502|503|504)\b|timeout|timed out|gateway|overloaded|rate limit|超时|网关|限流|过载/i.test(
+    message
+  );
+}
+
+function createFallbackStoryScriptPackage(
+  input: StoryScriptGenerationInput,
+  error: unknown
+): StoryScriptPackage {
+  const baseScript =
+    input.task.finalScript.trim() ||
+    input.task.sourceScript.trim() ||
+    "先用一个清晰问题吸引注意，再用步骤、对比或证明说明价值，最后提醒观众收藏或查看详情。";
+  const sourceSummary = summarizeForFallback(input.sourceBrief);
+
+  return {
+    title: `${input.task.title || "剧情脚本"}兜底方案`,
+    productAnalysis: [
+      "大模型脚本接口临时失败，系统已基于当前任务输入生成兜底脚本方案。正式发布前请人工核对商品事实、价格、规格、适用范围和禁用词。",
+      `兜底原因：${error instanceof Error ? error.message : String(error)}`
+    ].join("\n"),
+    referenceMechanics: [
+      "保留参考素材的抽象结构：前 5 秒钩子、中段证明或步骤、结尾低压力 CTA。",
+      sourceSummary
+    ].join("\n"),
+    conversionStrategy:
+      "用一个明确痛点或利益点开场；中段通过演示、对比、场景代入或观点证明建立信任；结尾提醒收藏、评论、查看商品入口或继续了解。",
+    recommendedOptionId: "A",
+    originalityNotes:
+      "兜底方案只复用抽象节奏和转化机制，不复制参考视频的原句、口头禅、人物签名或具体镜头表达。",
+    options: [
+      {
+        id: "A",
+        title: "稳妥复刻结构版",
+        angle: "保留爆款节奏，替换成当前任务的原创表达。",
+        targetAudience: "对当前主题或商品场景有需求、需要快速判断是否值得继续看的人。",
+        hook: "前 5 秒直接提出一个具体问题或反差。",
+        beatSheet: [
+          "0-3s：用痛点、反差或强画面让观众停留",
+          "3-8s：解释为什么这个问题常见或值得关注",
+          "8-18s：展示步骤、证据、场景或产品用法",
+          "18-28s：给出前后对比、结果或异议处理",
+          "28-35s：低压力 CTA，提醒收藏、查看详情或按需行动"
+        ],
+        script: baseScript,
+        reason: "该方案依赖现有输入，稳定可编辑，适合作为故事板兜底来源。",
+        riskNotes: "需要人工确认事实准确性，不要加入未验证功效、绝对化承诺或虚假紧迫感。"
+      }
+    ]
+  };
+}
+
+function createFallbackVisualStoryboard(
+  input: VisualStoryboardGenerationInput,
+  error: unknown
+): VisualStoryboardPackage {
+  const panelCount = input.panelCount === "auto" ? 6 : input.panelCount;
+  const script =
+    input.task.finalScript.trim() ||
+    input.task.sourceScript.trim() ||
+    "用清晰开头吸引注意，中段展示证明或步骤，结尾给出行动提示。";
+  const sourceSummary = summarizeForFallback(input.sourceBrief);
+  const shots = fallbackShots(panelCount).map((shot, index) => {
+    const line = scriptChunk(script, index, panelCount);
+    return {
+      ...shot,
+      voiceoverOrText: line || shot.voiceoverOrText,
+      visualAction:
+        index === 0
+          ? "用强视觉或明确痛点开场，让观众立刻知道这一条视频解决什么问题。"
+          : shot.visualAction,
+      imagePrompt: [
+        `Panel ${index + 1} of a consistent short-video storyboard.`,
+        shot.imagePrompt,
+        line ? `Narration or on-screen text: ${line}` : "",
+        "Keep one protagonist, one product/key object, one scene style, and bottom subtitle-safe space."
+      ]
+        .filter(Boolean)
+        .join(" ")
+    };
+  });
+
+  return {
+    title: `${input.task.title || "视觉故事板"}兜底版`,
+    sourceSummary: [
+      "大模型视觉故事板接口临时失败，系统已基于现有文案、提取文案和画面分析生成可编辑兜底故事板。",
+      sourceSummary
+    ].join("\n"),
+    remakeStrategy:
+      "保留参考素材的抽象节奏、钩子功能、证明方式和 CTA 位置；替换具体表达、人物设定、镜头签名和画面风格。",
+    productAnalysis:
+      "请在正式生成前人工确认商品事实、价格、规格、适用范围和禁用词；兜底故事板不新增未经验证的承诺。",
+    referenceMechanics: "使用前 5 秒钩子、中段证明或步骤展示、结尾轻量 CTA 的通用短视频结构。",
+    selectedScript: script,
+    panelCount,
+    layout: layoutForPanelCount(panelCount),
+    visualBible: {
+      protagonist: "同一位自然出镜的创作者或同一视觉主体，表情真实，动作清晰。",
+      product: "同一个商品或核心对象，外观、颜色、尺寸比例在所有分镜保持一致。",
+      wardrobe: "服装简洁统一，避免每格变化。",
+      location: "同一处干净明亮的室内或使用场景，背景不抢主体。",
+      lighting: "柔和自然光或柔和商业光，避免强闪烁。",
+      colorPalette: "清爽中性色搭配一个强调色，整体适合短视频信息展示。",
+      cameraStyle: "竖屏短视频镜头，近景、特写、俯拍和轻微推进结合。",
+      subtitleSafeSpace: "每格底部 20% 留出字幕安全区，关键主体避开平台按钮区域。",
+      consistencyLocks: [
+        "same protagonist or subject",
+        "same product or key object",
+        "same wardrobe and scene",
+        "same lighting and color palette",
+        "bottom subtitle-safe space"
+      ]
+    },
+    shots,
+    boardImagePrompt: buildFallbackBoardPrompt(shots),
+    wholeVideoPrompt: [
+      `Create a ${panelCount}-shot vertical short video from the storyboard.`,
+      "Keep the protagonist, product/key object, scene, lighting, color palette, and subtitle-safe area consistent.",
+      "Use the confirmed script as narration. Avoid unsupported claims and do not copy the reference expression.",
+      `Fallback reason: ${error instanceof Error ? error.message : String(error)}`
+    ].join("\n")
+  };
 }
 
 async function safeReadResponseBody(response: Response): Promise<string> {
@@ -407,6 +599,22 @@ function buildFallbackBoardPrompt(shots: VisualStoryboardShot[]): string {
     "Leave subtitle-safe space at the bottom of each panel.",
     ...shots.map((shot) => `Panel ${shot.shotNumber}: ${shot.visualAction}`)
   ].join("\n");
+}
+
+function summarizeForFallback(value: string): string {
+  return value
+    .replace(/\r?\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 1200);
+}
+
+function scriptChunk(script: string, index: number, total: number): string {
+  const normalized = script.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  const chunkSize = Math.max(24, Math.ceil(normalized.length / Math.max(1, total)));
+  return normalized.slice(index * chunkSize, (index + 1) * chunkSize).trim();
 }
 
 function layoutForPanelCount(panelCount: number): string {

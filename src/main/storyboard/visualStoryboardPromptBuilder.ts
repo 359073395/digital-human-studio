@@ -143,3 +143,82 @@ export function buildVisualStoryboardPrompt(input: VisualStoryboardGenerationInp
     )
   ].join("\n");
 }
+
+export function buildCompactVisualStoryboardPrompt(input: VisualStoryboardGenerationInput): string {
+  const panelRule =
+    input.panelCount === "auto"
+      ? "Choose 6 to 9 panels based on content density."
+      : `Use exactly ${input.panelCount} panels.`;
+  const confirmedScript =
+    input.task.finalScript.trim() || input.task.sourceScript.trim() || "No confirmed script.";
+
+  return [
+    "Create an original visual storyboard package for a short-form video.",
+    "This is a compact retry prompt after the full context timed out.",
+    "Keep the abstract reference mechanics, but replace expression, wording, character signatures, exact shot signatures, and creator-specific style.",
+    "Prioritize: consistent protagonist, product/object, wardrobe, scene, lighting, color palette, camera style, and subtitle-safe area.",
+    `Output language for user-facing text: ${contentLanguageName(input.task.contentLanguage)}.`,
+    panelRule,
+    "",
+    input.task.originalVideoUrl?.trim()
+      ? `Reference video URL: ${input.task.originalVideoUrl.trim()}`
+      : "Reference video URL: not provided",
+    `Task title: ${input.task.title}`,
+    `Video mode: ${input.task.generationMode}`,
+    "",
+    "Confirmed editable script:",
+    compactText(confirmedScript, 1800),
+    "",
+    "Compact source brief:",
+    compactText(input.sourceBrief, 3600),
+    "",
+    "Return only valid JSON in this shape:",
+    JSON.stringify({
+      title: "short working title",
+      sourceSummary: "what the source is doing",
+      remakeStrategy: "mechanics to keep and expression to replace",
+      productAnalysis: "product/audience/pain/use case/objection/proof",
+      referenceMechanics: "abstract mechanics reused safely",
+      selectedScript: "confirmed editable script",
+      panelCount: 8,
+      layout: "2x4 visual storyboard",
+      visualBible: {
+        protagonist: "consistent protagonist description",
+        product: "consistent product or key object",
+        wardrobe: "consistent wardrobe",
+        location: "consistent location",
+        lighting: "consistent lighting",
+        colorPalette: "consistent palette",
+        cameraStyle: "consistent camera style",
+        subtitleSafeSpace: "caption-safe area",
+        consistencyLocks: ["same face", "same product", "same scene"]
+      },
+      shots: [
+        {
+          shotNumber: 1,
+          durationSeconds: 3,
+          shotType: "first frame / proof / demo / CTA",
+          visualAction: "what is visible",
+          subjectAction: "what the subject does",
+          productAction: "how product or key object appears",
+          voiceoverOrText: "spoken line or on-screen text",
+          cameraMovement: "push in / pan / static",
+          imagePrompt: "image prompt for this panel",
+          videoMotionPrompt: "motion prompt for image-to-video",
+          negativePrompt: "things to avoid",
+          continuityNotes: "connection to adjacent shots"
+        }
+      ],
+      boardImagePrompt: "single prompt for one multi-panel visual storyboard image",
+      wholeVideoPrompt: "one prompt for future full-video generation"
+    })
+  ].join("\n");
+}
+
+function compactText(value: string, maxLength: number): string {
+  return value
+    .replace(/\r?\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}

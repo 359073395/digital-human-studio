@@ -64,6 +64,27 @@ function createConfiguration(): ServiceConfiguration {
 }
 
 describe("OpenAiCompatibleStoryboardProvider", () => {
+  it("returns a local fallback story script package when the script endpoint times out", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response("Gateway Time-out", { status: 504, statusText: "Gateway Time-out" })
+    );
+    const provider = new OpenAiCompatibleStoryboardProvider(
+      { getConfiguration: () => createConfiguration() },
+      { readCredential: async () => TEST_API_KEY },
+      { fetchImpl: fetchMock }
+    );
+
+    const result = await provider.generateStoryScriptOptions({
+      task: createTask(),
+      sourceBrief: "Reference hook, proof, and CTA."
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.scriptPackage.title).toContain("兜底方案");
+    expect(result.scriptPackage.options[0]?.script).toContain("Reference hook");
+    expect(result.promptPreview).toContain("Fallback story script package");
+  });
+
   it("builds a visual storyboard request and normalizes the response", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => {
       return new Response(
@@ -138,5 +159,100 @@ describe("OpenAiCompatibleStoryboardProvider", () => {
     expect(result.storyboard.panelCount).toBe(8);
     expect(result.storyboard.shots[0]?.imagePrompt).toBe("Panel 1 prompt");
     expect(result.storyboard.visualBible.consistencyLocks).toEqual(["same face", "same product"]);
+  });
+
+  it("retries visual storyboard generation with a compact prompt after a gateway timeout", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response("Gateway Time-out", {
+          status: 504,
+          statusText: "Gateway Time-out"
+        });
+      }
+
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: "压缩故事板",
+                  sourceSummary: "压缩上下文后继续生成。",
+                  remakeStrategy: "保留机制，替换表达。",
+                  panelCount: 6,
+                  visualBible: {
+                    protagonist: "同一人",
+                    product: "同一物",
+                    wardrobe: "同一服装",
+                    location: "同一场景",
+                    lighting: "同一光线",
+                    colorPalette: "同一色调",
+                    cameraStyle: "短视频镜头",
+                    subtitleSafeSpace: "底部留白",
+                    consistencyLocks: ["same face"]
+                  },
+                  shots: [],
+                  boardImagePrompt: "Create one compact storyboard.",
+                  wholeVideoPrompt: "Generate a compact video."
+                })
+              }
+            }
+          ]
+        })
+      );
+    });
+    const provider = new OpenAiCompatibleStoryboardProvider(
+      { getConfiguration: () => createConfiguration() },
+      { readCredential: async () => TEST_API_KEY },
+      { fetchImpl: fetchMock }
+    );
+
+    const result = await provider.generateVisualStoryboard({
+      task: createTask(),
+      sourceBrief: "Long source brief. ".repeat(2000),
+      panelCount: 6
+    });
+    const firstBody = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as {
+      messages: Array<{ content: string }>;
+    };
+    const retryBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as {
+      messages: Array<{ content: string }>;
+    };
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(firstBody.messages[1]?.content.length).toBeGreaterThan(
+      retryBody.messages[1]?.content.length
+    );
+    expect(retryBody.messages[1]?.content).toContain("compact retry prompt");
+    expect(retryBody.messages[1]?.content).toContain("Confirmed editable script");
+    expect(result.storyboard.title).toBe("压缩故事板");
+    expect(result.promptPreview).toContain("compact retry prompt");
+  });
+
+  it("returns a local fallback storyboard when full and compact requests both time out", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response("Gateway Time-out", { status: 504, statusText: "Gateway Time-out" })
+    );
+    const provider = new OpenAiCompatibleStoryboardProvider(
+      { getConfiguration: () => createConfiguration() },
+      { readCredential: async () => TEST_API_KEY },
+      { fetchImpl: fetchMock }
+    );
+
+    const result = await provider.generateVisualStoryboard({
+      task: {
+        ...createTask(),
+        finalScript: "先提出痛点，再展示步骤，最后提醒保存。"
+      },
+      sourceBrief: "Reference analysis with hook, proof and CTA.",
+      panelCount: 6
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.storyboard.title).toContain("兜底版");
+    expect(result.storyboard.shots).toHaveLength(6);
+    expect(result.storyboard.boardImagePrompt).toContain("Panel 1");
+    expect(result.storyboard.selectedScript).toContain("先提出痛点");
+    expect(result.promptPreview).toContain("Fallback storyboard was generated locally");
   });
 });

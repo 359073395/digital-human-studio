@@ -99,7 +99,8 @@ export class OpenAiImageProvider implements ImageProvider {
       throw new Error("视觉故事板提示词为空。");
     }
 
-    const response = await this.fetchImpl(`${normalizeBaseUrl(baseUrl)}/images/generations`, {
+    const generationUrl = `${normalizeBaseUrl(baseUrl)}/images/generations`;
+    const response = await this.fetchImpl(generationUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -113,7 +114,35 @@ export class OpenAiImageProvider implements ImageProvider {
       })
     });
 
-    const responseText = await response.text();
+    let responseText = await response.text();
+    if (!response.ok && isUnsupportedContentTypeResponse(response.status, responseText)) {
+      const formData = new FormData();
+      formData.append("model", modelName);
+      formData.append("prompt", promptPreview);
+      formData.append("size", "1536x1024");
+      formData.append("response_format", "b64_json");
+      const fallbackResponse = await this.fetchImpl(generationUrl, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`
+        },
+        body: formData
+      });
+      responseText = await fallbackResponse.text();
+      if (!fallbackResponse.ok) {
+        throw new Error(
+          `OpenAI 故事板图生成失败 (${fallbackResponse.status}): ${redactSecret(responseText.slice(0, 800)) || fallbackResponse.statusText}`
+        );
+      }
+
+      return readImageResult(
+        this.fetchImpl,
+        responseText,
+        promptPreview,
+        "OpenAI 故事板图响应缺少图片数据。"
+      );
+    }
+
     if (!response.ok) {
       throw new Error(
         `OpenAI 故事板图生成失败 (${response.status}): ${redactSecret(responseText.slice(0, 800)) || response.statusText}`
@@ -228,4 +257,8 @@ function extensionFromUrl(url: string): ProductPresenterImageResult["extension"]
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
+}
+
+function isUnsupportedContentTypeResponse(status: number, responseText: string): boolean {
+  return status === 400 && /unsupported content type/i.test(responseText);
 }

@@ -1,6 +1,8 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const ffmpegStaticPath = require("ffmpeg-static");
 
 const {
   createAppPaths,
@@ -66,9 +68,9 @@ const MATERIALS = {
     fileName: "portrait.jpg"
   },
   sampleVideo: {
-    label: "MDN CC0 flower video",
-    url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
-    fileName: "flower.mp4"
+    label: "Generated speech sample video",
+    url: "local://generated-speech-sample.mp4",
+    fileName: "speech-sample.mp4"
   }
 };
 
@@ -293,6 +295,44 @@ async function prepareConfigurations(sourceAppDataDir, target) {
   }
 }
 
+async function ensureReleaseAsrConfiguration(runtime, cases) {
+  if (!cases.some((mode) => mode.importSourceVideo)) {
+    return;
+  }
+
+  if (env("ASR_BASE_URL") || env("ASR_MODEL") || env("ASR_MODE") || env("ASR_API_KEY")) {
+    return;
+  }
+
+  const currentCheck = await runtime.serviceRepository.testConfiguration("asr");
+  if (currentCheck.ok) {
+    return;
+  }
+
+  const current = runtime.serviceRepository.getConfiguration("asr");
+  const asrCredential = await readOptionalCredential(runtime, "asr");
+  const llmCredential = await readOptionalCredential(runtime, "llm");
+  await runtime.serviceRepository.saveConfiguration({
+    providerId: "asr",
+    settings: {
+      ...current.settings,
+      baseUrl: "https://api.hyjiexi.eu.org/v1",
+      modelName: "gemini-3.1-flash-lite",
+      asrMode: "chat-audio",
+      enabled: true
+    },
+    apiKey: asrCredential || llmCredential || undefined
+  });
+}
+
+async function readOptionalCredential(runtime, providerId) {
+  try {
+    return (await runtime.credentialStore.readCredential(providerId)) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function downloadMaterial(materialRoot, material) {
   const filePath = path.join(materialRoot, material.fileName);
   if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
@@ -314,8 +354,108 @@ async function prepareMaterials(testRoot) {
   return {
     productImage: await downloadMaterial(materialRoot, MATERIALS.productImage),
     referenceImage: await downloadMaterial(materialRoot, MATERIALS.referenceImage),
-    sampleVideo: await downloadMaterial(materialRoot, MATERIALS.sampleVideo)
+    sampleVideo: createSpeechSampleVideo(materialRoot, MATERIALS.sampleVideo.fileName)
   };
+}
+
+function createSpeechSampleVideo(materialRoot, fileName) {
+  const videoPath = path.join(materialRoot, fileName);
+  if (fs.existsSync(videoPath) && fs.statSync(videoPath).size > 0) {
+    return videoPath;
+  }
+
+  fs.mkdirSync(materialRoot, { recursive: true });
+  const speechPath = path.join(materialRoot, "speech-sample.wav");
+  createSpeechWav(
+    speechPath,
+    "Hello world. This is a release test for source transcription. The video shows a creator workflow with a simple product demonstration."
+  );
+
+  const ffmpegPath = requireFfmpegPath();
+  const result = spawnSync(
+    ffmpegPath,
+    [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=1280x720:rate=30:duration=8",
+      "-i",
+      speechPath,
+      "-shortest",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "21",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
+      videoPath
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 5 * 60 * 1000
+    }
+  );
+
+  if (result.error) {
+    throw new Error(`发布验收语音样片生成失败：${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `发布验收语音样片生成失败：${(result.stderr || result.stdout || "").slice(-1200)}`
+    );
+  }
+  if (!fs.existsSync(videoPath) || fs.statSync(videoPath).size === 0) {
+    throw new Error("发布验收语音样片生成完成但文件为空。");
+  }
+
+  return videoPath;
+}
+
+function createSpeechWav(outputPath, text) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName System.Speech",
+    "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
+    `$s.SetOutputToWaveFile(${powershellString(outputPath)})`,
+    `$s.Speak(${powershellString(text)})`,
+    "$s.Dispose()"
+  ].join("; ");
+  const result = spawnSync("powershell", ["-NoProfile", "-Command", script], {
+    encoding: "utf8",
+    timeout: 2 * 60 * 1000,
+    maxBuffer: 1024 * 1024
+  });
+
+  if (result.error) {
+    throw new Error(`发布验收语音生成失败：${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`发布验收语音生成失败：${(result.stderr || result.stdout || "").slice(-1200)}`);
+  }
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+    throw new Error("发布验收语音生成完成但文件为空。");
+  }
+}
+
+function powershellString(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function requireFfmpegPath() {
+  if (!ffmpegStaticPath) {
+    throw new Error("未找到 ffmpeg-static，无法生成发布验收语音样片。");
+  }
+  return ffmpegStaticPath;
 }
 
 function createServices(runtime) {
@@ -780,6 +920,7 @@ async function main() {
 
   try {
     await prepareConfigurations(sourceAppDataDir, runtime);
+    await ensureReleaseAsrConfiguration(runtime, cases);
     report.heyGenAuthMode =
       runtime.serviceRepository.getConfiguration("heygen").settings.authMode || "api-key";
     const services = createServices(runtime);
