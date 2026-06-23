@@ -29,6 +29,9 @@ describe("script prompt builder", () => {
     expect(prompt).toContain("reference video breakdown");
     expect(prompt).toContain("Use reference breakdown, not direct rewriting");
     expect(prompt).toContain("Reference video URL: https://example.com/reference-video");
+    expect(prompt).toContain("Built-in production method library");
+    expect(prompt).toContain("Claude Code style video breakdown");
+    expect(prompt).toContain("Image2 storyboard method");
   });
 
   it("adds mode-specific internal rules for product, personal IP, and mixed-cut videos", () => {
@@ -50,7 +53,11 @@ describe("script prompt builder", () => {
 
     expect(productPrompt).toContain("product-card logic");
     expect(productPrompt).toContain("Do not assume a human presenter is required");
+    expect(productPrompt).toContain("Product-to-commerce method");
+    expect(productPrompt).toContain("Product presenter image method");
     expect(personalIpPrompt).toContain("store visit, knowledge output, opinion");
+    expect(personalIpPrompt).toContain("Personal IP method");
     expect(mixedCutPrompt).toContain("Do not assume a real person or digital human is required");
+    expect(mixedCutPrompt).toContain("Mixed-cut method");
   });
 });

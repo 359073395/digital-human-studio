@@ -2,6 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import type { VideoTask } from "../../shared/domain";
 import type { SourceTranscriptionResult } from "../../shared/scriptGeneration";
+import {
+  buildKnowledgeContext,
+  writeKnowledgeContextPreview
+} from "../knowledge/knowledgeContextBuilder";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 import { MockAsrProvider } from "./mockAsrProvider";
@@ -20,7 +24,15 @@ export class ScriptWorkflowService {
   async generateScript(taskId: string) {
     const task = this.requireTask(taskId);
     const sourceScript = task.sourceScript || defaultSourceScript(task.contentLanguage);
-    const sourceBrief = buildSourceBrief(this.paths, task, sourceScript);
+    const knowledgeContext = buildKnowledgeContext(
+      this.paths,
+      {
+        ...task,
+        sourceScript
+      },
+      "script"
+    );
+    writeKnowledgeContextPreview(this.paths, taskId, knowledgeContext);
 
     this.taskRepository.updateStepStatus(taskId, "source", "complete");
     this.taskRepository.updateStepStatus(taskId, "script", "running");
@@ -35,7 +47,7 @@ export class ScriptWorkflowService {
 
       const result = await this.generateWithFallback({
         ...task,
-        sourceScript: sourceBrief
+        sourceScript: knowledgeContext.promptText
       });
 
       writeTaskFile(
@@ -58,7 +70,7 @@ export class ScriptWorkflowService {
         taskId,
         "script",
         "retry-ready",
-        error instanceof Error ? error.message : "Script generation failed."
+        error instanceof Error ? error.message : "文案生成失败。"
       );
     }
   }
@@ -87,7 +99,7 @@ export class ScriptWorkflowService {
         taskId,
         "source",
         "retry-ready",
-        error instanceof Error ? error.message : "Source transcription failed."
+        error instanceof Error ? error.message : "源素材转写失败。"
       );
       throw error;
     }
@@ -123,34 +135,4 @@ function writeTaskFile(
   const absolutePath = path.join(getTaskDirectory(paths, taskId), ...relativePath.split("/"));
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   fs.writeFileSync(absolutePath, content, "utf8");
-}
-
-function buildSourceBrief(paths: AppPaths, task: VideoTask, sourceScript: string): string {
-  const visualAnalysis = readLatestVisualAnalysis(paths, task);
-  if (!visualAnalysis) {
-    return sourceScript;
-  }
-
-  return [sourceScript, "", "Reference visual analysis brief:", visualAnalysis]
-    .filter(Boolean)
-    .join("\n");
-}
-
-function readLatestVisualAnalysis(paths: AppPaths, task: VideoTask): string {
-  const asset = [...task.mediaAssets]
-    .reverse()
-    .find((candidate) => candidate.kind === "source-visual-analysis");
-  if (!asset) {
-    return "";
-  }
-
-  const absolutePath = path.join(
-    getTaskDirectory(paths, task.id),
-    ...asset.relativePath.split("/")
-  );
-  try {
-    return fs.readFileSync(absolutePath, "utf8").slice(0, 5000);
-  } catch {
-    return "";
-  }
 }

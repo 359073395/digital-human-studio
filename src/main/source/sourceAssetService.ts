@@ -15,6 +15,15 @@ const MIXED_MATERIAL_EXTENSIONS = new Set([
   ".jpeg",
   ".webp"
 ]);
+const KNOWLEDGE_DOCUMENT_EXTENSIONS = new Set([
+  ".txt",
+  ".md",
+  ".json",
+  ".csv",
+  ".pdf",
+  ".doc",
+  ".docx"
+]);
 
 export class SourceAssetService {
   constructor(
@@ -96,6 +105,14 @@ export class SourceAssetService {
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
+  importKnowledgeDocuments(taskId: string, filePaths: string[]): VideoTask {
+    return this.importKnowledgeFiles(taskId, filePaths, "knowledge-document", "knowledge");
+  }
+
+  importViralCopyReferences(taskId: string, filePaths: string[]): VideoTask {
+    return this.importKnowledgeFiles(taskId, filePaths, "viral-copy-reference", "viral-copy");
+  }
+
   analyzeSourceVisuals(taskId: string): VideoTask {
     const task = this.requireTask(taskId);
     const sourceAssets = task.mediaAssets.filter((asset) =>
@@ -132,6 +149,29 @@ export class SourceAssetService {
       throw new Error(`Task ${taskId} was not found.`);
     }
     return task;
+  }
+
+  private importKnowledgeFiles(
+    taskId: string,
+    filePaths: string[],
+    kind: MediaAsset["kind"],
+    folderName: string
+  ): VideoTask {
+    if (filePaths.length === 0) {
+      return this.requireTask(taskId);
+    }
+
+    this.requireTask(taskId);
+    for (const [index, filePath] of filePaths.entries()) {
+      const extension = validateExtension(filePath, KNOWLEDGE_DOCUMENT_EXTENSIONS);
+      const relativePath = `source/${folderName}/${Date.now()}-${index + 1}-${sanitizeBaseName(
+        path.basename(filePath, extension)
+      )}${extension}`;
+      copyTaskFile(this.paths, taskId, filePath, relativePath);
+      this.taskRepository.addMediaAsset(taskId, kind, relativePath);
+    }
+
+    return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 }
 

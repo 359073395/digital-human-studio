@@ -17,7 +17,7 @@ import {
   UserRound,
   WandSparkles
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import {
   CONTENT_LANGUAGES,
   DEFAULT_COVER_STYLE,
@@ -31,17 +31,25 @@ import {
   type MediaAsset,
   type OutputPresetId,
   type PersonalIpProfile,
+  type StoryScriptPackage,
   type SubtitleStyle,
+  type VisualStoryboardPackage,
+  type VisualStoryboardPanelCount,
   type VideoGenerationMode,
   type VideoTask,
   type VideoTaskSummary
 } from "../shared/domain";
 import type { DigitalHumanStudioAPI, HeyGenAvatarLook, UpdateTaskInput } from "../shared/ipc";
+import {
+  getProductionModeWorkflow,
+  type ProductionModeWorkflow
+} from "../shared/productionWorkflows";
 import type {
   ProviderId,
   SaveServiceConfigurationInput,
   ServiceConfiguration,
   ServiceConnectionCheck,
+  ServiceModelList,
   ServiceConfigurationSettings
 } from "../shared/serviceConfig";
 import { defaultServiceSettings } from "../shared/serviceConfig";
@@ -50,6 +58,22 @@ import { countCompleteSteps } from "../shared/workbench";
 const now = new Date().toISOString();
 
 type PreviewMode = "finished" | "cover";
+type TaskNameDialog =
+  | {
+      mode: "create";
+      value: string;
+    }
+  | {
+      mode: "rename";
+      taskId: string;
+      currentTitle: string;
+      value: string;
+    };
+
+interface AvatarCreateDialog {
+  name: string;
+  prompt: string;
+}
 
 const fallbackTask: VideoTask = {
   id: "preview-task",
@@ -64,8 +88,10 @@ const fallbackTask: VideoTask = {
   generationMode: "preset-avatar",
   avatarMode: "preset-avatar",
   presetAvatarId: "",
+  presetAvatarGroupId: "",
   avatarDescriptionPrompt: "",
   motionPrompt: "",
+  generatedPresenterImageSelections: {},
   customFontFamily: "",
   selectedOutputPresets: ["portrait-9-16"],
   frameTitleStyle: DEFAULT_FRAME_TITLE_STYLE,
@@ -119,6 +145,7 @@ type EditableTaskPatch = Partial<
     | "generationMode"
     | "avatarMode"
     | "presetAvatarId"
+    | "presetAvatarGroupId"
     | "avatarDescriptionPrompt"
     | "motionPrompt"
     | "selectedOutputPresets"
@@ -127,6 +154,7 @@ type EditableTaskPatch = Partial<
     | "coverStyle"
     | "customFontFamily"
     | "personalIpProfile"
+    | "generatedPresenterImageSelections"
   >
 >;
 
@@ -180,21 +208,39 @@ export function App() {
   const [settingsCheckResults, setSettingsCheckResults] = useState<
     Record<string, ServiceConnectionCheck>
   >({});
+  const [settingsModelLists, setSettingsModelLists] = useState<Record<string, ServiceModelList>>(
+    {}
+  );
+  const [activeSettingsProviderId, setActiveSettingsProviderId] = useState<ProviderId | "">("");
   const [settingsBusyProviderId, setSettingsBusyProviderId] = useState<ProviderId | "">("");
   const [settingsMessage, setSettingsMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+  const [taskNameDialog, setTaskNameDialog] = useState<TaskNameDialog | null>(null);
+  const [isTaskNameSaving, setIsTaskNameSaving] = useState(false);
+  const [deleteTaskDialog, setDeleteTaskDialog] = useState<VideoTaskSummary | null>(null);
+  const [isTaskDeleting, setIsTaskDeleting] = useState(false);
+  const [avatarCreateDialog, setAvatarCreateDialog] = useState<AvatarCreateDialog | null>(null);
+  const [isAvatarCreating, setIsAvatarCreating] = useState(false);
+  const [outputConfirmTask, setOutputConfirmTask] = useState<VideoTask | null>(null);
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const [avatarLooks, setAvatarLooks] = useState<HeyGenAvatarLook[]>([]);
   const [avatarLookMessage, setAvatarLookMessage] = useState("");
   const [isAvatarLookLoading, setIsAvatarLookLoading] = useState(false);
   const [activePreviewMode, setActivePreviewMode] = useState<PreviewMode>("finished");
+  const [storyboardPanelCount, setStoryboardPanelCount] =
+    useState<VisualStoryboardPanelCount>("auto");
+  const [storyScriptPackage, setStoryScriptPackage] = useState<StoryScriptPackage | null>(null);
+  const [storyScriptError, setStoryScriptError] = useState("");
+  const [visualStoryboard, setVisualStoryboard] = useState<VisualStoryboardPackage | null>(null);
+  const [visualStoryboardError, setVisualStoryboardError] = useState("");
 
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
   const frameTitleStyle = selectedTask.frameTitleStyle ?? DEFAULT_FRAME_TITLE_STYLE;
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
+  const activeProductionWorkflow = getProductionModeWorkflow(selectedTask.generationMode);
   const exportDirectoryLabel = selectedTask.exportDirectory?.trim() || "未选择保存目录";
   const sourceScriptLabel =
     selectedTask.generationMode === "viral-remix" ? "爆款参考文案" : "参考文案";
@@ -211,7 +257,15 @@ export function App() {
   const referenceImageAsset =
     selectedTask.mediaAssets.find((asset) => asset.id === selectedTask.referenceImageAssetId) ??
     selectedTask.mediaAssets.find((asset) => asset.kind === "reference-image");
+  const generatedPresenterAssets = useMemo(
+    () => selectedTask.mediaAssets.filter((asset) => asset.kind === "generated-presenter-image"),
+    [selectedTask.mediaAssets]
+  );
+  const selectedGeneratedPresenterAssetId = primaryVariant
+    ? selectedTask.generatedPresenterImageSelections?.[primaryVariant.presetId]
+    : undefined;
   const generatedPresenterAsset =
+    generatedPresenterAssets.find((asset) => asset.id === selectedGeneratedPresenterAssetId) ??
     selectedTask.mediaAssets.find(
       (asset) =>
         asset.kind === "generated-presenter-image" &&
@@ -229,6 +283,28 @@ export function App() {
   const mixedCutMaterialAssets = selectedTask.mediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-material"
   );
+  const knowledgeAssets = selectedTask.mediaAssets.filter((asset) =>
+    ["knowledge-document", "viral-copy-reference"].includes(asset.kind)
+  );
+  const knowledgeContextCounts = useMemo(
+    () => countKnowledgeContextSources(selectedTask),
+    [selectedTask]
+  );
+  const visualStoryboardAssets = selectedTask.mediaAssets.filter(
+    (asset) => asset.kind === "visual-storyboard"
+  );
+  const storyScriptAssets = selectedTask.mediaAssets.filter(
+    (asset) => asset.kind === "story-script-options"
+  );
+  const latestStoryScriptJsonAsset = [...storyScriptAssets]
+    .reverse()
+    .find((asset) => asset.relativePath.endsWith(".json"));
+  const latestStoryboardImageAsset = [...visualStoryboardAssets]
+    .reverse()
+    .find((asset) => /\.(png|jpe?g|webp)$/i.test(asset.relativePath));
+  const latestStoryboardJsonAsset = [...visualStoryboardAssets]
+    .reverse()
+    .find((asset) => asset.relativePath.endsWith(".json"));
   const previewRelativePaths = useMemo(
     () =>
       Array.from(
@@ -238,6 +314,10 @@ export function App() {
             customFontAsset?.relativePath,
             referenceImageAsset?.relativePath,
             generatedPresenterAsset?.relativePath,
+            ...generatedPresenterAssets.map((asset) => asset.relativePath),
+            latestStoryScriptJsonAsset?.relativePath,
+            latestStoryboardImageAsset?.relativePath,
+            latestStoryboardJsonAsset?.relativePath,
             ...selectedTask.outputVariants.flatMap((variant) => [
               variant.finishedVideoPath,
               variant.coverImagePath
@@ -247,7 +327,11 @@ export function App() {
       ),
     [
       generatedPresenterAsset?.relativePath,
+      generatedPresenterAssets,
       customFontAsset?.relativePath,
+      latestStoryboardImageAsset?.relativePath,
+      latestStoryboardJsonAsset?.relativePath,
+      latestStoryScriptJsonAsset?.relativePath,
       productImageAsset?.relativePath,
       referenceImageAsset?.relativePath,
       selectedTask
@@ -272,6 +356,19 @@ export function App() {
   const customFontUrl = customFontAsset?.relativePath
     ? assetUrls[customFontAsset.relativePath]
     : "";
+  const visualStoryboardImageUrl = latestStoryboardImageAsset?.relativePath
+    ? assetUrls[latestStoryboardImageAsset.relativePath]
+    : "";
+  const storyScriptJsonUrl = latestStoryScriptJsonAsset?.relativePath
+    ? assetUrls[latestStoryScriptJsonAsset.relativePath]
+    : "";
+  const visualStoryboardJsonUrl = latestStoryboardJsonAsset?.relativePath
+    ? assetUrls[latestStoryboardJsonAsset.relativePath]
+    : "";
+  const displayedStoryScriptPackage = storyScriptJsonUrl ? storyScriptPackage : null;
+  const displayedStoryScriptError = storyScriptJsonUrl ? storyScriptError : "";
+  const displayedVisualStoryboard = visualStoryboardJsonUrl ? visualStoryboard : null;
+  const displayedVisualStoryboardError = visualStoryboardJsonUrl ? visualStoryboardError : "";
   const previewPresetId = primaryVariant?.presetId ?? selectedTask.selectedOutputPresets[0];
   const heygenConfiguration = serviceConfigurations.find(
     (configuration) => configuration.providerId === "heygen"
@@ -284,7 +381,11 @@ export function App() {
     () => Array.from(new Set([...avatarLooks.map((look) => look.id), ...configuredAvatarIds])),
     [avatarLooks, configuredAvatarIds]
   );
-  const selectedAvatarLook = avatarLooks.find((look) => look.id === selectedTask.presetAvatarId);
+  const selectedAvatarLook = avatarLooks.find(
+    (look) =>
+      look.id === selectedTask.presetAvatarId ||
+      Boolean(look.groupId && look.groupId === selectedTask.presetAvatarGroupId)
+  );
 
   function requireDesktopRuntime(
     actionLabel: string
@@ -327,6 +428,9 @@ export function App() {
         setTaskSummaries(summaries);
         const nextSelectedId = summaries[0]?.id;
         if (!nextSelectedId) {
+          setSelectedTaskId("");
+          setSelectedTask(fallbackTask);
+          setAssetUrls({});
           return;
         }
 
@@ -386,6 +490,72 @@ export function App() {
       ignore = true;
     };
   }, [previewPathSignature, previewRelativePaths, selectedTask.id]);
+
+  useEffect(() => {
+    if (!storyScriptJsonUrl) {
+      return;
+    }
+
+    let ignore = false;
+
+    async function loadStoryScriptPackage() {
+      try {
+        const response = await fetch(storyScriptJsonUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const parsed = (await response.json()) as StoryScriptPackage;
+        if (!ignore) {
+          setStoryScriptPackage(parsed);
+          setStoryScriptError("");
+        }
+      } catch (error) {
+        if (!ignore) {
+          setStoryScriptPackage(null);
+          setStoryScriptError(error instanceof Error ? error.message : "剧情脚本方案读取失败");
+        }
+      }
+    }
+
+    void loadStoryScriptPackage();
+
+    return () => {
+      ignore = true;
+    };
+  }, [storyScriptJsonUrl]);
+
+  useEffect(() => {
+    if (!visualStoryboardJsonUrl) {
+      return;
+    }
+
+    let ignore = false;
+
+    async function loadVisualStoryboard() {
+      try {
+        const response = await fetch(visualStoryboardJsonUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const parsed = (await response.json()) as VisualStoryboardPackage;
+        if (!ignore) {
+          setVisualStoryboard(parsed);
+          setVisualStoryboardError("");
+        }
+      } catch (error) {
+        if (!ignore) {
+          setVisualStoryboard(null);
+          setVisualStoryboardError(error instanceof Error ? error.message : "视觉故事板读取失败");
+        }
+      }
+    }
+
+    void loadVisualStoryboard();
+
+    return () => {
+      ignore = true;
+    };
+  }, [visualStoryboardJsonUrl]);
 
   useEffect(() => {
     if (
@@ -448,19 +618,79 @@ export function App() {
     await refreshTaskState(task.id, task);
   }
 
-  async function createTask() {
+  function openCreateTaskDialog() {
     const api = requireDesktopRuntime("新建任务");
     if (!api) {
       return;
     }
 
-    const task = await api.createTask({
-      title: "新建视频任务"
+    setTaskError("");
+    setTaskNameDialog({
+      mode: "create",
+      value: "新建视频任务"
     });
-    const summaries = await api.listTasks();
-    setTaskSummaries(summaries);
-    setSelectedTaskId(task.id);
-    setSelectedTask(task);
+  }
+
+  function openRenameTaskDialog(taskId: string, currentTitle: string) {
+    const api = requireDesktopRuntime("重命名任务");
+    if (!api) {
+      return;
+    }
+
+    setTaskError("");
+    setTaskNameDialog({
+      mode: "rename",
+      taskId,
+      currentTitle,
+      value: currentTitle
+    });
+  }
+
+  async function submitTaskNameDialog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const api = requireDesktopRuntime(
+      taskNameDialog?.mode === "rename" ? "重命名任务" : "新建任务"
+    );
+    if (!api || !taskNameDialog) {
+      return;
+    }
+
+    const normalizedTitle = taskNameDialog.value.trim() || "未命名任务";
+    setIsTaskNameSaving(true);
+    setTaskError("");
+
+    try {
+      if (taskNameDialog.mode === "create") {
+        const task = await api.createTask({
+          title: normalizedTitle
+        });
+        const summaries = await api.listTasks();
+        setTaskSummaries(summaries);
+        setSelectedTaskId(task.id);
+        setSelectedTask(task);
+        setActionMessage(`已新建任务：${task.title}`);
+      } else if (normalizedTitle !== taskNameDialog.currentTitle.trim()) {
+        const task = await api.updateTask({
+          taskId: taskNameDialog.taskId,
+          title: normalizedTitle
+        });
+        await refreshTaskState(task.id, task);
+        setActionMessage(`任务已重命名为：${task.title}`);
+      }
+
+      setTaskNameDialog(null);
+    } catch (error) {
+      setTaskError(error instanceof Error ? error.message : "任务保存失败");
+    } finally {
+      setIsTaskNameSaving(false);
+    }
+  }
+
+  function requestDeleteTask(taskId: string) {
+    const targetTask = taskSummaries.find((task) => task.id === taskId);
+    if (targetTask) {
+      setDeleteTaskDialog(targetTask);
+    }
   }
 
   async function deleteTask(taskId: string) {
@@ -469,32 +699,34 @@ export function App() {
       return;
     }
 
-    const targetTask = taskSummaries.find((task) => task.id === taskId);
-    const confirmed = window.confirm(`确定删除「${targetTask?.title ?? "这个任务"}」吗？`);
-    if (!confirmed) {
-      return;
-    }
+    try {
+      setIsTaskDeleting(true);
+      setTaskError("");
+      const summaries = await api.deleteTask(taskId);
+      setTaskSummaries(summaries);
+      const nextSelectedId =
+        taskId === selectedTaskId
+          ? summaries[0]?.id
+          : summaries.find((task) => task.id === selectedTaskId)?.id;
 
-    const summaries = await api.deleteTask(taskId);
-    setTaskSummaries(summaries);
-    const nextSelectedId =
-      taskId === selectedTaskId
-        ? summaries[0]?.id
-        : summaries.find((task) => task.id === selectedTaskId)?.id;
+      if (!nextSelectedId) {
+        setSelectedTaskId("");
+        setSelectedTask(fallbackTask);
+        setAssetUrls({});
+        setActionMessage("任务已删除。点击左上角 + 新建任务后继续。");
+        return;
+      }
 
-    if (!nextSelectedId) {
-      const newTask = await api.createTask({ title: "新建视频任务" });
-      const nextSummaries = await api.listTasks();
-      setTaskSummaries(nextSummaries);
-      setSelectedTaskId(newTask.id);
-      setSelectedTask(newTask);
-      return;
-    }
-
-    setSelectedTaskId(nextSelectedId);
-    const nextTask = await api.getTask(nextSelectedId);
-    if (nextTask) {
-      setSelectedTask(nextTask);
+      setSelectedTaskId(nextSelectedId);
+      const nextTask = await api.getTask(nextSelectedId);
+      if (nextTask) {
+        setSelectedTask(nextTask);
+      }
+    } catch (error) {
+      setTaskError(error instanceof Error ? error.message : "任务删除失败");
+    } finally {
+      setIsTaskDeleting(false);
+      setDeleteTaskDialog(null);
     }
   }
 
@@ -530,13 +762,16 @@ export function App() {
       taskForRun = chosenTask;
     }
 
-    const confirmed = window.confirm(
-      "请先在预览中设置字幕和封面。确认后将输出视频、封面、字幕文件和发布资料包；当前版本暂未把字幕烧录进 MP4。是否继续？"
-    );
-    if (!confirmed) {
+    setOutputConfirmTask(taskForRun);
+  }
+
+  async function executeRealWorkflow(taskForRun: VideoTask) {
+    const api = requireDesktopRuntime("一键输出视频和封面");
+    if (!api) {
       return;
     }
 
+    setOutputConfirmTask(null);
     setIsWorkflowRunning(true);
     setActionMessage("正在输出视频、封面和字幕文件...");
 
@@ -557,8 +792,10 @@ export function App() {
         generationMode: taskForRun.generationMode,
         avatarMode: taskForRun.avatarMode,
         presetAvatarId: taskForRun.presetAvatarId ?? "",
+        presetAvatarGroupId: taskForRun.presetAvatarGroupId ?? "",
         avatarDescriptionPrompt: taskForRun.avatarDescriptionPrompt,
         motionPrompt: taskForRun.motionPrompt,
+        generatedPresenterImageSelections: taskForRun.generatedPresenterImageSelections,
         selectedOutputPresets: taskForRun.selectedOutputPresets,
         frameTitleStyle,
         subtitleStyle,
@@ -738,6 +975,58 @@ export function App() {
     }
   }
 
+  async function uploadKnowledgeDocuments() {
+    const api = requireDesktopRuntime("上传知识库");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择知识库文档...");
+
+    try {
+      const beforeCount = knowledgeAssets.length;
+      const task = await api.uploadKnowledgeDocuments(selectedTask.id);
+      const afterCount = task.mediaAssets.filter((asset) =>
+        ["knowledge-document", "viral-copy-reference"].includes(asset.kind)
+      ).length;
+      setActionMessage(
+        afterCount > beforeCount ? `已导入 ${afterCount - beforeCount} 个知识库文档` : "未选择文档"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "知识库导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function uploadViralCopyReferences() {
+    const api = requireDesktopRuntime("上传爆款文案");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择爆款文案或案例...");
+
+    try {
+      const beforeCount = knowledgeAssets.length;
+      const task = await api.uploadViralCopyReferences(selectedTask.id);
+      const afterCount = task.mediaAssets.filter((asset) =>
+        ["knowledge-document", "viral-copy-reference"].includes(asset.kind)
+      ).length;
+      setActionMessage(
+        afterCount > beforeCount ? `已导入 ${afterCount - beforeCount} 个爆款案例` : "未选择文档"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "爆款文案导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
   async function generateScriptOnly() {
     const api = requireDesktopRuntime("一键AI生成文案");
     if (!api) {
@@ -757,8 +1046,10 @@ export function App() {
         generationMode: selectedTask.generationMode,
         avatarMode: selectedTask.avatarMode,
         presetAvatarId: selectedTask.presetAvatarId ?? "",
+        presetAvatarGroupId: selectedTask.presetAvatarGroupId ?? "",
         avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
         motionPrompt: selectedTask.motionPrompt,
+        generatedPresenterImageSelections: selectedTask.generatedPresenterImageSelections,
         selectedOutputPresets: selectedTask.selectedOutputPresets,
         frameTitleStyle,
         subtitleStyle,
@@ -832,7 +1123,91 @@ export function App() {
     }
   }
 
-  async function generatePresenterImages() {
+  async function generateStoryScriptOptions() {
+    const api = requireDesktopRuntime("生成剧情脚本方案");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在分析素材并生成多套剧情脚本方案...");
+
+    try {
+      await api.updateTask({
+        taskId: selectedTask.id,
+        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
+        sourceScript: selectedTask.sourceScript,
+        finalScript: selectedTask.finalScript,
+        contentLanguage: selectedTask.contentLanguage,
+        generationMode: "viral-remix",
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
+        personalIpProfile: selectedTask.personalIpProfile
+      });
+      const task = await api.generateStoryScriptOptions(selectedTask.id);
+      const scriptStep = task.steps.find((step) => step.id === "script");
+      setActionMessage(
+        scriptStep?.status === "retry-ready"
+          ? scriptStep.errorMessage || "剧情脚本方案生成失败，可检查 API 设置后重试"
+          : "剧情脚本方案已生成，推荐方案已写入 AI 生成文案，可先修改再生成故事板"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "剧情脚本方案生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function applyStoryScriptOption(script: string) {
+    setSelectedTask((current) => ({
+      ...current,
+      finalScript: script
+    }));
+    await updateCurrentTask({ finalScript: script });
+    setActionMessage("已把所选剧情方案写入 AI 生成文案，可继续手动修改。");
+  }
+
+  async function generateVisualStoryboard() {
+    const api = requireDesktopRuntime("一键生成视觉故事板");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在生成分镜提示词和统一视觉故事板...");
+
+    try {
+      await api.updateTask({
+        taskId: selectedTask.id,
+        originalVideoUrl: selectedTask.originalVideoUrl ?? "",
+        sourceScript: selectedTask.sourceScript,
+        finalScript: selectedTask.finalScript,
+        contentLanguage: selectedTask.contentLanguage,
+        generationMode: "viral-remix",
+        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt,
+        motionPrompt: selectedTask.motionPrompt,
+        personalIpProfile: selectedTask.personalIpProfile
+      });
+      const task = await api.generateVisualStoryboard({
+        taskId: selectedTask.id,
+        panelCount: storyboardPanelCount
+      });
+      const storyboardStep = task.steps.find((step) => step.id === "script");
+      setActionMessage(
+        storyboardStep?.status === "retry-ready"
+          ? storyboardStep.errorMessage || "视觉故事板已生成文本，但故事板图需要重试"
+          : "视觉故事板已生成，可查看分镜提示词、统一设定和故事板图"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "视觉故事板生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function generatePresenterImages(presetIds?: OutputPresetId[]) {
     const api = requireDesktopRuntime("生成人物商品图");
     if (!api) {
       return;
@@ -856,7 +1231,10 @@ export function App() {
         subtitleStyle,
         coverStyle
       });
-      const task = await api.generatePresenterImages(selectedTask.id);
+      const task = await api.generatePresenterImages({
+        taskId: selectedTask.id,
+        presetIds: presetIds ?? selectedTask.selectedOutputPresets
+      });
       const avatarStep = task.steps.find((step) => step.id === "avatar");
       setActionMessage(
         avatarStep?.status === "retry-ready"
@@ -868,6 +1246,25 @@ export function App() {
       setActionMessage(error instanceof Error ? error.message : "人物商品图生成失败");
     } finally {
       setIsWorkflowRunning(false);
+    }
+  }
+
+  async function selectGeneratedPresenterImage(presetId: OutputPresetId, assetId: string) {
+    const api = requireDesktopRuntime("选择人物商品图");
+    if (!api) {
+      return;
+    }
+
+    try {
+      const task = await api.selectGeneratedPresenterImage({
+        taskId: selectedTask.id,
+        presetId,
+        assetId
+      });
+      setActionMessage("已切换当前人物商品图");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "人物商品图切换失败");
     }
   }
 
@@ -893,6 +1290,17 @@ export function App() {
     await updateCurrentTask({
       generationMode: mode,
       avatarMode: nextAvatarMode
+    });
+  }
+
+  async function changeProductAvatarMode(avatarMode: VideoTask["avatarMode"]) {
+    setSelectedTask((current) => ({
+      ...current,
+      avatarMode
+    }));
+    await updateCurrentTask({
+      generationMode: "product-avatar",
+      avatarMode
     });
   }
 
@@ -933,9 +1341,39 @@ export function App() {
   async function selectHeyGenAvatarLook(look: HeyGenAvatarLook) {
     setSelectedTask((current) => ({
       ...current,
-      presetAvatarId: look.id
+      presetAvatarId: look.id,
+      presetAvatarGroupId: look.groupId ?? ""
     }));
-    await updateCurrentTask({ presetAvatarId: look.id });
+    await updateCurrentTask({ presetAvatarId: look.id, presetAvatarGroupId: look.groupId ?? "" });
+  }
+
+  async function createHeyGenAvatar() {
+    const api = requireDesktopRuntime("创建 HeyGen Avatar");
+    if (!api || !avatarCreateDialog) {
+      return;
+    }
+
+    setIsAvatarCreating(true);
+    setAvatarLookMessage("正在创建 HeyGen Avatar...");
+
+    try {
+      const result = await api.createHeyGenAvatar({
+        name: avatarCreateDialog.name,
+        prompt: avatarCreateDialog.prompt,
+        avatarGroupId: selectedTask.presetAvatarGroupId || undefined
+      });
+      setAvatarCreateDialog(null);
+      setAvatarLooks((current) => {
+        const withoutDuplicate = current.filter((look) => look.id !== result.look.id);
+        return [result.look, ...withoutDuplicate];
+      });
+      await selectHeyGenAvatarLook(result.look);
+      setAvatarLookMessage(result.message);
+    } catch (error) {
+      setAvatarLookMessage(error instanceof Error ? error.message : "HeyGen Avatar 创建失败");
+    } finally {
+      setIsAvatarCreating(false);
+    }
   }
 
   async function updateSubtitleStyle(patch: Partial<SubtitleStyle>) {
@@ -1014,6 +1452,11 @@ export function App() {
       const configurations = await window.digitalHumanStudio.listServiceConfigurations();
       setServiceConfigurations(configurations);
       setSettingsDraft(createSettingsDraft(configurations));
+      setActiveSettingsProviderId((current) =>
+        configurations.some((configuration) => configuration.providerId === current)
+          ? current
+          : (configurations[0]?.providerId ?? "")
+      );
     } catch (error) {
       setSettingsMessage(
         error instanceof Error
@@ -1035,6 +1478,7 @@ export function App() {
       settings: {
         baseUrl: draft.baseUrl,
         modelName: draft.modelName,
+        authMode: draft.authMode,
         avatarId: draft.avatarId,
         voiceId: draft.voiceId,
         resolution: draft.resolution,
@@ -1123,6 +1567,76 @@ export function App() {
     }
   }
 
+  async function fetchServiceModels(providerId: ProviderId) {
+    const draft = settingsDraft[providerId];
+    if (!window.digitalHumanStudio || !draft) {
+      setSettingsMessage("本地预览模式无法获取模型列表");
+      return;
+    }
+
+    const label = providerLabel(serviceConfigurations, providerId);
+    setSettingsBusyProviderId(providerId);
+    setSettingsMessage(`${label} 正在获取模型列表...`);
+
+    try {
+      const result = await window.digitalHumanStudio.listServiceModels({
+        providerId,
+        settings: {
+          baseUrl: draft.baseUrl,
+          modelName: draft.modelName,
+          authMode: draft.authMode,
+          avatarId: draft.avatarId,
+          voiceId: draft.voiceId,
+          resolution: draft.resolution,
+          enabled: draft.enabled
+        },
+        apiKey: draft.apiKey || undefined
+      });
+      setSettingsModelLists((current) => ({ ...current, [providerId]: result }));
+      setSettingsMessage(result.message);
+
+      if (result.ok && result.models.length > 0 && !draft.modelName?.trim()) {
+        setSettingsDraft((current) =>
+          updateDraft(current, providerId, {
+            modelName: result.models[0] ?? ""
+          })
+        );
+      }
+    } catch (error) {
+      const result: ServiceModelList = {
+        providerId,
+        ok: false,
+        models: [],
+        message: error instanceof Error ? error.message : "模型列表获取失败"
+      };
+      setSettingsModelLists((current) => ({ ...current, [providerId]: result }));
+      setSettingsMessage(result.message);
+    } finally {
+      setSettingsBusyProviderId("");
+    }
+  }
+
+  const activeSettingsConfiguration =
+    serviceConfigurations.find(
+      (configuration) => configuration.providerId === activeSettingsProviderId
+    ) ?? serviceConfigurations[0];
+  const activeSettingsDraft = activeSettingsConfiguration
+    ? (settingsDraft[activeSettingsConfiguration.providerId] ?? createEmptySettingsDraft())
+    : null;
+  const activeSettingsCheckResult = activeSettingsConfiguration
+    ? settingsCheckResults[activeSettingsConfiguration.providerId]
+    : undefined;
+  const activeSettingsModelList = activeSettingsConfiguration
+    ? settingsModelLists[activeSettingsConfiguration.providerId]
+    : undefined;
+  const activeSettingsIsBusy = activeSettingsConfiguration
+    ? settingsBusyProviderId === activeSettingsConfiguration.providerId
+    : false;
+  const activeSettingsCanFetchModels =
+    activeSettingsConfiguration && activeSettingsDraft
+      ? canFetchServiceModels(activeSettingsConfiguration.providerId)
+      : false;
+
   return (
     <div className="app-shell">
       {customFontUrl ? (
@@ -1134,14 +1648,24 @@ export function App() {
           <p>{appVersion || "自媒体视频工作台"}</p>
         </div>
         <div className="topbar-actions">
-          <button className="icon-button" title="设置" onClick={() => void openSettingsModal()}>
+          <button
+            className="icon-button"
+            data-testid="release-open-settings"
+            title="设置"
+            onClick={() => void openSettingsModal()}
+          >
             <Settings size={18} />
           </button>
         </div>
       </header>
 
       <section className="task-strip" aria-label="任务列表">
-        <button className="icon-button small" title="新建任务" onClick={() => void createTask()}>
+        <button
+          className="icon-button small"
+          data-testid="release-new-task"
+          title="新建任务"
+          onClick={openCreateTaskDialog}
+        >
           <Plus size={16} />
         </button>
         <div className="task-list">
@@ -1149,9 +1673,16 @@ export function App() {
             <div
               key={task.id}
               className={`task-row ${task.id === selectedTaskId ? "active" : ""}`}
+              data-testid="release-task-row"
+              data-task-id={task.id}
               title={`${task.title} · ${formatTaskMeta(task)}`}
             >
-              <button className="task-main" type="button" onClick={() => void selectTask(task.id)}>
+              <button
+                className="task-main"
+                type="button"
+                onClick={() => void selectTask(task.id)}
+                onDoubleClick={() => openRenameTaskDialog(task.id, task.title)}
+              >
                 <span className={`task-dot ${task.status}`} />
                 <span>
                   <strong>{task.title}</strong>
@@ -1160,9 +1691,14 @@ export function App() {
               </button>
               <button
                 className="icon-button task-delete-button"
+                data-testid="release-delete-task"
                 type="button"
                 title="删除任务"
-                onClick={() => void deleteTask(task.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestDeleteTask(task.id);
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
               >
                 <Trash2 size={14} />
               </button>
@@ -1172,616 +1708,964 @@ export function App() {
         {taskError ? <p className="task-error">{taskError}</p> : null}
       </section>
 
-      <main className="workspace">
-        <section className="editor-pane">
-          <nav className="mode-tabs" aria-label="视频生成类别">
-            {GENERATION_MODE_TABS.map((mode) => (
-              <button
-                className={selectedTask.generationMode === mode.id ? "active" : ""}
-                disabled={Boolean(mode.disabled)}
-                key={mode.id}
-                type="button"
-                onClick={() => void changeGenerationMode(mode.id)}
-                title={mode.description}
-              >
-                <strong>{mode.label}</strong>
-                <span>{mode.description}</span>
-              </button>
-            ))}
-          </nav>
-
-          <section className="source-ingest-card">
-            <div className="source-ingest-heading">
-              <span>
-                <Link2 size={16} />
-                原视频链接
-              </span>
-            </div>
-            <div className="source-link-row">
-              <input
-                type="url"
-                value={selectedTask.originalVideoUrl ?? ""}
-                placeholder="先粘贴 TikTok / 抖音 / Reels / Shorts 原视频链接"
-                aria-label="原视频链接"
-                onBlur={() =>
-                  void updateCurrentTask({
-                    originalVideoUrl: selectedTask.originalVideoUrl ?? ""
-                  })
-                }
-                onChange={(event) =>
-                  setSelectedTask((current) => ({
-                    ...current,
-                    originalVideoUrl: event.target.value
-                  }))
-                }
-              />
-            </div>
-            <div className="source-action-row">
-              <button
-                type="button"
-                disabled={isWorkflowRunning}
-                onClick={() => void downloadOriginalVideo()}
-              >
-                <Download size={16} />
-                下载原视频
-              </button>
-              <button
-                type="button"
-                disabled={isWorkflowRunning}
-                onClick={() => void uploadSourceVideo()}
-              >
-                <Upload size={16} />
-                上传原视频
-              </button>
-              <button
-                type="button"
-                disabled={isWorkflowRunning}
-                onClick={() => void extractSourceCopy()}
-              >
-                <FileSearch size={16} />
-                提取文案
-              </button>
-              <button
-                type="button"
-                disabled={isWorkflowRunning}
-                onClick={() => void analyzeSourceVisuals()}
-              >
-                <WandSparkles size={16} />
-                画面分析
-              </button>
-            </div>
-            <AssetList
-              assets={sourceMaterialAssets}
-              emptyLabel="还没有原视频、转写或画面分析素材"
-              title="源素材"
-            />
+      {taskSummaries.length === 0 ? (
+        <main className="empty-workspace">
+          <section className="empty-task-panel">
+            <h2>还没有视频任务</h2>
+            <p>点击左上角 + 新建任务，并在弹窗里给任务命名。</p>
+            <button className="primary" type="button" onClick={openCreateTaskDialog}>
+              新建任务
+            </button>
           </section>
-
-          <div className="script-grid">
-            <section className="field-block">
-              <div className="section-title">
-                <FileSearch size={16} />
-                <h2>{sourceScriptLabel}</h2>
-              </div>
-              <p className="field-hint">提取后会填到这里；也可以直接粘贴或修改原视频文案。</p>
-              <textarea
-                value={selectedTask.sourceScript}
-                aria-label={sourceScriptLabel}
-                onBlur={() => void updateCurrentTask({ sourceScript: selectedTask.sourceScript })}
-                onChange={(event) =>
-                  setSelectedTask((current) => ({
-                    ...current,
-                    sourceScript: event.target.value
-                  }))
-                }
-              />
-            </section>
-
-            <section className="field-block">
-              <div className="section-title">
-                <WandSparkles size={16} />
-                <h2>AI生成文案</h2>
+        </main>
+      ) : (
+        <main className="workspace">
+          <section className="editor-pane">
+            <nav className="mode-tabs" aria-label="视频生成类别">
+              {GENERATION_MODE_TABS.map((mode) => (
                 <button
+                  className={selectedTask.generationMode === mode.id ? "active" : ""}
+                  disabled={Boolean(mode.disabled)}
+                  key={mode.id}
                   type="button"
-                  className="small-action-button"
-                  disabled={isWorkflowRunning}
-                  onClick={() => void generateScriptOnly()}
+                  onClick={() => void changeGenerationMode(mode.id)}
+                  title={mode.description}
                 >
-                  <WandSparkles size={15} />
-                  一键AI生成文案
+                  <strong>{mode.label}</strong>
+                  <span>{mode.description}</span>
                 </button>
-              </div>
-              <p className="field-hint">
-                生成后可直接改价格、禁用词和表达，视频会按这里的最终文案生成。
-              </p>
-              <textarea
-                value={selectedTask.finalScript}
-                placeholder="点击一键AI生成文案，或直接手动输入最终口播文案"
-                aria-label="AI生成文案"
-                onBlur={() => void updateCurrentTask({ finalScript: selectedTask.finalScript })}
-                onChange={(event) =>
-                  setSelectedTask((current) => ({
-                    ...current,
-                    finalScript: event.target.value
-                  }))
-                }
-              />
-              <div className="risk-row">
-                <CheckCircle2 size={16} />
-                <span>相似风险：{similarityRiskLabel(selectedTask.similarityRisk)}</span>
-              </div>
-              {selectedTask.scriptGenerationNotes ? (
-                <p className="script-note">{selectedTask.scriptGenerationNotes}</p>
-              ) : null}
-            </section>
-          </div>
+              ))}
+            </nav>
 
-          <section className="compact-block generation-settings-block">
-            <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
-            <FlowApiGuide
-              configurations={serviceConfigurations}
-              task={selectedTask}
-              hasGeneratedPresenterImages={hasGeneratedPresenterImages(selectedTask)}
-              selectedAvatarName={selectedAvatarLook?.name}
-            />
-            <div className="control-grid mode-settings-grid">
-              <label>
-                生成语言 / 语音
-                <select
-                  value={selectedTask.contentLanguage}
-                  onChange={(event) =>
+            <section className="source-ingest-card">
+              <div className="source-ingest-heading">
+                <span>
+                  <Link2 size={16} />
+                  原视频链接
+                </span>
+              </div>
+              <div className="source-link-row">
+                <input
+                  type="url"
+                  value={selectedTask.originalVideoUrl ?? ""}
+                  placeholder="先粘贴 TikTok / 抖音 / Reels / Shorts 原视频链接"
+                  aria-label="原视频链接"
+                  onBlur={() =>
                     void updateCurrentTask({
-                      contentLanguage: event.target.value as VideoTask["contentLanguage"]
+                      originalVideoUrl: selectedTask.originalVideoUrl ?? ""
                     })
                   }
+                  onChange={(event) =>
+                    setSelectedTask((current) => ({
+                      ...current,
+                      originalVideoUrl: event.target.value
+                    }))
+                  }
+                />
+              </div>
+              <div className="source-action-row">
+                <button
+                  type="button"
+                  disabled={isWorkflowRunning}
+                  onClick={() => void downloadOriginalVideo()}
                 >
-                  {CONTENT_LANGUAGES.map((language) => (
-                    <option key={language.id} value={language.id}>
-                      {language.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <fieldset className="preset-fieldset">
-                <legend>输出比例</legend>
-                <label className="checkbox-row compact-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
-                    onChange={(event) =>
-                      void toggleOutputPreset("portrait-9-16", event.target.checked)
-                    }
-                  />
-                  <Smartphone size={16} />
-                  竖屏 9:16
-                </label>
-                <label className="checkbox-row compact-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
-                    onChange={(event) =>
-                      void toggleOutputPreset("landscape-16-9", event.target.checked)
-                    }
-                  />
-                  <Monitor size={16} />
-                  横屏 16:9
-                </label>
-              </fieldset>
+                  <Download size={16} />
+                  下载原视频
+                </button>
+                <button
+                  type="button"
+                  disabled={isWorkflowRunning}
+                  onClick={() => void uploadSourceVideo()}
+                >
+                  <Upload size={16} />
+                  上传原视频
+                </button>
+                <button
+                  type="button"
+                  disabled={isWorkflowRunning}
+                  onClick={() => void extractSourceCopy()}
+                >
+                  <FileSearch size={16} />
+                  提取文案
+                </button>
+                <button
+                  type="button"
+                  disabled={isWorkflowRunning}
+                  onClick={() => void analyzeSourceVisuals()}
+                >
+                  <WandSparkles size={16} />
+                  画面分析
+                </button>
+              </div>
+              <AssetList
+                assets={sourceMaterialAssets}
+                emptyLabel="还没有原视频、转写或画面分析素材"
+                title="源素材"
+              />
+              <div className="source-knowledge-row">
+                <div>
+                  <strong>知识库 / 爆款文案</strong>
+                  <span>上传后，一键 AI 生成文案和故事板会自动参考。</span>
+                </div>
+                <div className="source-action-row compact">
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void uploadKnowledgeDocuments()}
+                  >
+                    <Upload size={16} />
+                    上传知识库
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void uploadViralCopyReferences()}
+                  >
+                    <Upload size={16} />
+                    上传爆款文案
+                  </button>
+                </div>
+              </div>
+              <AssetList
+                assets={knowledgeAssets}
+                itemBadge="已纳入AI上下文"
+                emptyLabel="还没有上传知识库或爆款案例"
+                title="知识资料"
+              />
+            </section>
+
+            <ProductionWorkflowPanel workflow={activeProductionWorkflow} />
+
+            <div className="script-grid">
+              <section className="field-block">
+                <div className="section-title">
+                  <FileSearch size={16} />
+                  <h2>{sourceScriptLabel}</h2>
+                </div>
+                <p className="field-hint">提取后会填到这里；也可以直接粘贴或修改原视频文案。</p>
+                <textarea
+                  value={selectedTask.sourceScript}
+                  aria-label={sourceScriptLabel}
+                  onBlur={() => void updateCurrentTask({ sourceScript: selectedTask.sourceScript })}
+                  onChange={(event) =>
+                    setSelectedTask((current) => ({
+                      ...current,
+                      sourceScript: event.target.value
+                    }))
+                  }
+                />
+              </section>
+
+              <section className="field-block">
+                <div className="section-title">
+                  <WandSparkles size={16} />
+                  <h2>AI生成文案</h2>
+                  <button
+                    type="button"
+                    className="small-action-button"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void generateScriptOnly()}
+                  >
+                    <WandSparkles size={15} />
+                    一键AI生成文案
+                  </button>
+                </div>
+                <p className="field-hint">
+                  生成后可直接改价格、禁用词和表达，视频会按这里的最终文案生成。
+                </p>
+                <p className="knowledge-context-summary">
+                  将调用：内置知识 {knowledgeContextCounts.builtIn} / 上传知识{" "}
+                  {knowledgeContextCounts.uploadedKnowledge} / 爆款案例{" "}
+                  {knowledgeContextCounts.viralReferences} / 当前素材{" "}
+                  {knowledgeContextCounts.taskAssets}
+                </p>
+                <textarea
+                  value={selectedTask.finalScript}
+                  placeholder="点击一键AI生成文案，或直接手动输入最终口播文案"
+                  aria-label="AI生成文案"
+                  onBlur={() => void updateCurrentTask({ finalScript: selectedTask.finalScript })}
+                  onChange={(event) =>
+                    setSelectedTask((current) => ({
+                      ...current,
+                      finalScript: event.target.value
+                    }))
+                  }
+                />
+                <div className="risk-row">
+                  <CheckCircle2 size={16} />
+                  <span>相似风险：{similarityRiskLabel(selectedTask.similarityRisk)}</span>
+                </div>
+                {selectedTask.scriptGenerationNotes ? (
+                  <p className="script-note">{selectedTask.scriptGenerationNotes}</p>
+                ) : null}
+              </section>
             </div>
 
-            <div className="prompt-grid">
-              {selectedTask.generationMode === "preset-avatar" ? (
-                <div className="avatar-picker-block">
-                  <div className="avatar-picker-header">
-                    <span>预设数字人选择</span>
-                    <button
-                      type="button"
-                      disabled={isAvatarLookLoading}
-                      onClick={() => void refreshHeyGenAvatarLooks()}
-                    >
-                      <RefreshCw size={15} />
-                      {isAvatarLookLoading ? "读取中" : "刷新"}
-                    </button>
-                  </div>
-                  {selectedAvatarLook ? (
-                    <p className="selected-avatar-summary">
-                      当前：{selectedAvatarLook.name} · {selectedAvatarLook.id}
-                    </p>
-                  ) : null}
-                  {avatarLooks.length > 0 ? (
-                    <div className="avatar-look-grid" aria-label="HeyGen 预设数字人">
-                      {avatarLooks.map((look) => (
-                        <button
-                          className={
-                            selectedTask.presetAvatarId === look.id
-                              ? "avatar-look-card selected"
-                              : "avatar-look-card"
-                          }
-                          key={look.id}
-                          title={`${look.name} · ${look.id}`}
-                          type="button"
-                          onClick={() => void selectHeyGenAvatarLook(look)}
-                        >
-                          <span className="avatar-look-thumb">
-                            {look.previewImageUrl ? (
-                              <img
-                                alt={look.name}
-                                loading="lazy"
-                                referrerPolicy="no-referrer"
-                                src={look.previewImageUrl}
-                              />
-                            ) : (
-                              <UserRound size={24} />
-                            )}
-                          </span>
-                          <strong>{look.name}</strong>
-                          <small>{avatarLookMeta(look)}</small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="field-hint">
-                      点击刷新读取当前 HeyGen 账号可用数字人；读取失败时仍可手动输入 Avatar ID。
-                    </p>
-                  )}
-                  {avatarLookMessage ? (
-                    <p className="avatar-look-message">{avatarLookMessage}</p>
-                  ) : null}
-                  <label className="avatar-id-field">
-                    Avatar ID
+            <section className="compact-block generation-settings-block">
+              <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
+              <FlowApiGuide
+                configurations={serviceConfigurations}
+                task={selectedTask}
+                hasGeneratedPresenterImages={hasGeneratedPresenterImages(selectedTask)}
+                selectedAvatarName={selectedAvatarLook?.name}
+              />
+              <div className="control-grid mode-settings-grid">
+                <label>
+                  生成语言 / 语音
+                  <select
+                    value={selectedTask.contentLanguage}
+                    onChange={(event) =>
+                      void updateCurrentTask({
+                        contentLanguage: event.target.value as VideoTask["contentLanguage"]
+                      })
+                    }
+                  >
+                    {CONTENT_LANGUAGES.map((language) => (
+                      <option key={language.id} value={language.id}>
+                        {language.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset className="preset-fieldset">
+                  <legend>输出比例</legend>
+                  <label className="checkbox-row compact-checkbox">
                     <input
-                      type="text"
-                      list="avatar-id-options"
-                      value={selectedTask.presetAvatarId ?? ""}
-                      placeholder="留空使用设置里的默认 Avatar ID"
+                      type="checkbox"
+                      checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
+                      onChange={(event) =>
+                        void toggleOutputPreset("portrait-9-16", event.target.checked)
+                      }
+                    />
+                    <Smartphone size={16} />
+                    竖屏 9:16
+                  </label>
+                  <label className="checkbox-row compact-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
+                      onChange={(event) =>
+                        void toggleOutputPreset("landscape-16-9", event.target.checked)
+                      }
+                    />
+                    <Monitor size={16} />
+                    横屏 16:9
+                  </label>
+                </fieldset>
+              </div>
+
+              {selectedTask.generationMode === "product-avatar" ? (
+                <div className="avatar-source-toggle">
+                  <span>数字人来源</span>
+                  <button
+                    type="button"
+                    className={selectedTask.avatarMode === "image-presenter" ? "active" : ""}
+                    onClick={() => void changeProductAvatarMode("image-presenter")}
+                  >
+                    OpenAI 人物商品图
+                  </button>
+                  <button
+                    type="button"
+                    className={selectedTask.avatarMode === "preset-avatar" ? "active" : ""}
+                    onClick={() => void changeProductAvatarMode("preset-avatar")}
+                  >
+                    HeyGen Avatar 口播
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="prompt-grid">
+                {selectedTask.generationMode === "preset-avatar" ||
+                (selectedTask.generationMode === "product-avatar" &&
+                  selectedTask.avatarMode === "preset-avatar") ? (
+                  <div className="avatar-picker-block">
+                    <div className="avatar-picker-header">
+                      <span>预设数字人选择</span>
+                      <span className="avatar-picker-actions">
+                        <button
+                          type="button"
+                          disabled={isAvatarLookLoading || isAvatarCreating}
+                          onClick={() =>
+                            setAvatarCreateDialog({
+                              name: selectedTask.title || "新数字人",
+                              prompt:
+                                selectedTask.avatarDescriptionPrompt ||
+                                "真实自然的短视频口播数字人，干净背景，亲和可信，适合自媒体视频。"
+                            })
+                          }
+                        >
+                          <Plus size={15} />
+                          创建
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isAvatarLookLoading || isAvatarCreating}
+                          onClick={() => void refreshHeyGenAvatarLooks()}
+                        >
+                          <RefreshCw size={15} />
+                          {isAvatarLookLoading ? "读取中" : "刷新"}
+                        </button>
+                      </span>
+                    </div>
+                    {selectedAvatarLook ? (
+                      <p className="selected-avatar-summary">
+                        当前：{selectedAvatarLook.name} · {selectedAvatarLook.id}
+                        {selectedAvatarLook.groupId ? ` · Group ${selectedAvatarLook.groupId}` : ""}
+                      </p>
+                    ) : null}
+                    {avatarLooks.length > 0 ? (
+                      <div className="avatar-look-grid" aria-label="HeyGen 预设数字人">
+                        {avatarLooks.map((look) => (
+                          <button
+                            className={
+                              selectedTask.presetAvatarId === look.id ||
+                              Boolean(
+                                look.groupId && look.groupId === selectedTask.presetAvatarGroupId
+                              )
+                                ? "avatar-look-card selected"
+                                : "avatar-look-card"
+                            }
+                            key={look.id}
+                            title={`${look.name} · ${look.id}`}
+                            type="button"
+                            onClick={() => void selectHeyGenAvatarLook(look)}
+                          >
+                            <span className="avatar-look-thumb">
+                              {look.previewImageUrl ? (
+                                <img
+                                  alt={look.name}
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  src={look.previewImageUrl}
+                                />
+                              ) : (
+                                <UserRound size={24} />
+                              )}
+                            </span>
+                            <strong>{look.name}</strong>
+                            <small>{avatarLookMeta(look)}</small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="field-hint">
+                        点击刷新读取当前 HeyGen 账号可用数字人；读取失败时仍可手动输入 Avatar ID。
+                      </p>
+                    )}
+                    {avatarLookMessage ? (
+                      <p className="avatar-look-message">{avatarLookMessage}</p>
+                    ) : null}
+                    <label className="avatar-id-field">
+                      Avatar ID
+                      <input
+                        type="text"
+                        list="avatar-id-options"
+                        value={selectedTask.presetAvatarId ?? ""}
+                        placeholder="留空使用设置里的默认 Avatar ID"
+                        onBlur={() =>
+                          void updateCurrentTask({
+                            presetAvatarId: selectedTask.presetAvatarId ?? "",
+                            presetAvatarGroupId: selectedTask.presetAvatarGroupId ?? ""
+                          })
+                        }
+                        onChange={(event) =>
+                          setSelectedTask((current) => ({
+                            ...current,
+                            presetAvatarId: event.target.value,
+                            presetAvatarGroupId:
+                              avatarLooks.find((look) => look.id === event.target.value)?.groupId ??
+                              ""
+                          }))
+                        }
+                      />
+                      <datalist id="avatar-id-options">
+                        {avatarOptions.map((avatarId) => (
+                          <option key={avatarId} value={avatarId} />
+                        ))}
+                      </datalist>
+                    </label>
+                  </div>
+                ) : null}
+                {selectedTask.generationMode === "product-avatar" &&
+                selectedTask.avatarMode === "image-presenter" ? (
+                  <label>
+                    人物/画面描述提示词
+                    <textarea
+                      className="compact-textarea"
+                      value={selectedTask.avatarDescriptionPrompt}
+                      aria-label="人物/画面描述提示词"
                       onBlur={() =>
                         void updateCurrentTask({
-                          presetAvatarId: selectedTask.presetAvatarId ?? ""
+                          avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt
                         })
                       }
                       onChange={(event) =>
                         setSelectedTask((current) => ({
                           ...current,
-                          presetAvatarId: event.target.value
+                          avatarDescriptionPrompt: event.target.value
                         }))
                       }
                     />
-                    <datalist id="avatar-id-options">
-                      {avatarOptions.map((avatarId) => (
-                        <option key={avatarId} value={avatarId} />
-                      ))}
-                    </datalist>
                   </label>
-                </div>
-              ) : null}
-              {selectedTask.generationMode === "product-avatar" ? (
+                ) : null}
+                {selectedTask.generationMode === "personal-ip" ? (
+                  <>
+                    <label>
+                      IP 名称
+                      <input
+                        type="text"
+                        value={selectedTask.personalIpProfile.name}
+                        onChange={(event) =>
+                          void updatePersonalIpProfile({ name: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      固定语气
+                      <input
+                        type="text"
+                        value={selectedTask.personalIpProfile.tone}
+                        onChange={(event) =>
+                          void updatePersonalIpProfile({ tone: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      人设描述
+                      <textarea
+                        className="compact-textarea"
+                        value={selectedTask.personalIpProfile.persona}
+                        onChange={(event) =>
+                          void updatePersonalIpProfile({ persona: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      口头禅
+                      <textarea
+                        className="compact-textarea"
+                        value={selectedTask.personalIpProfile.catchphrases}
+                        onChange={(event) =>
+                          void updatePersonalIpProfile({ catchphrases: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      禁用词
+                      <textarea
+                        className="compact-textarea"
+                        value={selectedTask.personalIpProfile.bannedWords}
+                        onChange={(event) =>
+                          void updatePersonalIpProfile({ bannedWords: event.target.value })
+                        }
+                      />
+                    </label>
+                  </>
+                ) : null}
+                {selectedTask.generationMode === "viral-remix" ? (
+                  <div className="mode-note">
+                    <strong>爆款视频复刻</strong>
+                    <span>保留爆款结构、钩子功能、情绪曲线和 CTA，生成时改写为新的表达。</span>
+                  </div>
+                ) : null}
+                {selectedTask.generationMode === "mixed-cut" ? (
+                  <div className="mode-note">
+                    <strong>混剪视频</strong>
+                    <span>
+                      当前先生成文案、素材编排和可选数字人片段；完整素材混剪/生视频 API 后续接入。
+                    </span>
+                  </div>
+                ) : null}
                 <label>
-                  人物/画面描述提示词
+                  动作提示词
                   <textarea
                     className="compact-textarea"
-                    value={selectedTask.avatarDescriptionPrompt}
-                    aria-label="人物/画面描述提示词"
+                    value={selectedTask.motionPrompt}
+                    aria-label="动作提示词"
                     onBlur={() =>
-                      void updateCurrentTask({
-                        avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt
-                      })
+                      void updateCurrentTask({ motionPrompt: selectedTask.motionPrompt })
                     }
                     onChange={(event) =>
                       setSelectedTask((current) => ({
                         ...current,
-                        avatarDescriptionPrompt: event.target.value
+                        motionPrompt: event.target.value
                       }))
                     }
                   />
                 </label>
-              ) : null}
-              {selectedTask.generationMode === "personal-ip" ? (
-                <>
-                  <label>
-                    IP 名称
-                    <input
-                      type="text"
-                      value={selectedTask.personalIpProfile.name}
-                      onChange={(event) =>
-                        void updatePersonalIpProfile({ name: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    固定语气
-                    <input
-                      type="text"
-                      value={selectedTask.personalIpProfile.tone}
-                      onChange={(event) =>
-                        void updatePersonalIpProfile({ tone: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    人设描述
-                    <textarea
-                      className="compact-textarea"
-                      value={selectedTask.personalIpProfile.persona}
-                      onChange={(event) =>
-                        void updatePersonalIpProfile({ persona: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    口头禅
-                    <textarea
-                      className="compact-textarea"
-                      value={selectedTask.personalIpProfile.catchphrases}
-                      onChange={(event) =>
-                        void updatePersonalIpProfile({ catchphrases: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    禁用词
-                    <textarea
-                      className="compact-textarea"
-                      value={selectedTask.personalIpProfile.bannedWords}
-                      onChange={(event) =>
-                        void updatePersonalIpProfile({ bannedWords: event.target.value })
-                      }
-                    />
-                  </label>
-                </>
-              ) : null}
+              </div>
+
               {selectedTask.generationMode === "viral-remix" ? (
-                <div className="mode-note">
-                  <strong>爆款视频复刻</strong>
-                  <span>保留爆款结构、钩子功能、情绪曲线和 CTA，生成时改写为新的表达。</span>
+                <div className="mode-material-card">
+                  <div>
+                    <strong>爆款参考素材</strong>
+                    <span>上传参考视频后，可先提取文案和生成画面分析，再做结构复刻。</span>
+                  </div>
+                  <div className="source-action-row compact">
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void uploadSourceVideo()}
+                    >
+                      <Upload size={16} />
+                      上传参考视频
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void analyzeSourceVisuals()}
+                    >
+                      <WandSparkles size={16} />
+                      画面分析
+                    </button>
+                  </div>
+                  <AssetList
+                    assets={sourceMaterialAssets}
+                    emptyLabel="还没有参考视频或分析产物"
+                    title="参考素材"
+                  />
                 </div>
               ) : null}
+
+              {selectedTask.generationMode === "viral-remix" ? (
+                <VisualStoryboardPanelV2
+                  disabled={isWorkflowRunning}
+                  errorMessage={displayedVisualStoryboardError}
+                  finalScript={selectedTask.finalScript}
+                  imageUrl={visualStoryboardImageUrl}
+                  onGenerateScriptOptions={() => void generateStoryScriptOptions()}
+                  onGenerateStoryboard={() => void generateVisualStoryboard()}
+                  onPanelCountChange={setStoryboardPanelCount}
+                  onUseScriptOption={(script) => void applyStoryScriptOption(script)}
+                  panelCount={storyboardPanelCount}
+                  scriptErrorMessage={displayedStoryScriptError}
+                  scriptPackage={displayedStoryScriptPackage}
+                  storyboard={displayedVisualStoryboard}
+                />
+              ) : null}
+
               {selectedTask.generationMode === "mixed-cut" ? (
-                <div className="mode-note">
-                  <strong>混剪视频</strong>
-                  <span>
-                    当前先生成文案、素材编排和可选数字人片段；完整素材混剪/生视频 API 后续接入。
-                  </span>
+                <div className="mode-material-card">
+                  <div>
+                    <strong>混剪素材</strong>
+                    <span>可上传视频、音频、图片素材；完整自动混剪 Provider 后续接入。</span>
+                  </div>
+                  <div className="source-action-row compact">
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void uploadMixedCutMaterial()}
+                    >
+                      <Upload size={16} />
+                      上传混剪素材
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void analyzeSourceVisuals()}
+                    >
+                      <WandSparkles size={16} />
+                      画面分析
+                    </button>
+                  </div>
+                  <AssetList
+                    assets={mixedCutMaterialAssets}
+                    emptyLabel="还没有混剪素材"
+                    title="素材列表"
+                  />
                 </div>
               ) : null}
-              <label>
-                动作提示词
-                <textarea
-                  className="compact-textarea"
-                  value={selectedTask.motionPrompt}
-                  aria-label="动作提示词"
-                  onBlur={() => void updateCurrentTask({ motionPrompt: selectedTask.motionPrompt })}
-                  onChange={(event) =>
-                    setSelectedTask((current) => ({
-                      ...current,
-                      motionPrompt: event.target.value
-                    }))
-                  }
-                />
-              </label>
-            </div>
 
-            {selectedTask.generationMode === "viral-remix" ? (
-              <div className="mode-material-card">
-                <div>
-                  <strong>爆款参考素材</strong>
-                  <span>上传参考视频后，可先提取文案和生成画面分析，再做结构复刻。</span>
+              {selectedTask.generationMode === "product-avatar" &&
+              selectedTask.avatarMode === "image-presenter" ? (
+                <div className="image-action-row">
+                  <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
+                  <AssetPreview
+                    title="人物商品图"
+                    url={generatedPresenterUrl}
+                    emptyLabel="未生成"
+                  />
+                  <GeneratedPresenterHistory
+                    assets={generatedPresenterAssets}
+                    assetUrls={assetUrls}
+                    presetId={previewPresetId ?? "portrait-9-16"}
+                    selectedAssetId={selectedGeneratedPresenterAssetId}
+                    onSelect={(presetId, assetId) =>
+                      void selectGeneratedPresenterImage(presetId, assetId)
+                    }
+                  />
+                  <div className="stacked-actions">
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void uploadProductImage()}
+                    >
+                      <Upload size={16} />
+                      上传商品图
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void generatePresenterImages()}
+                    >
+                      <WandSparkles size={16} />
+                      生成人物商品图
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() =>
+                        void generatePresenterImages([previewPresetId ?? "portrait-9-16"])
+                      }
+                    >
+                      <RefreshCw size={16} />
+                      重生成当前比例
+                    </button>
+                  </div>
                 </div>
-                <div className="source-action-row compact">
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void uploadSourceVideo()}
-                  >
-                    <Upload size={16} />
-                    上传参考视频
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void analyzeSourceVisuals()}
-                  >
-                    <WandSparkles size={16} />
-                    画面分析
-                  </button>
+              ) : null}
+              {selectedTask.generationMode === "image-lipsync" ? (
+                <div className="image-action-row single">
+                  <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
+                  <div className="mode-note">
+                    <strong>图片口型同步</strong>
+                    <span>上传一张人物图，HeyGen 会用这张图对脚本做口型同步。</span>
+                  </div>
+                  <div className="stacked-actions">
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void uploadReferenceImage()}
+                    >
+                      <Upload size={16} />
+                      上传人物图
+                    </button>
+                  </div>
                 </div>
-                <AssetList
-                  assets={sourceMaterialAssets}
-                  emptyLabel="还没有参考视频或分析产物"
-                  title="参考素材"
-                />
-              </div>
-            ) : null}
+              ) : null}
+            </section>
 
-            {selectedTask.generationMode === "mixed-cut" ? (
-              <div className="mode-material-card">
-                <div>
-                  <strong>混剪素材</strong>
-                  <span>可上传视频、音频、图片素材；完整自动混剪 Provider 后续接入。</span>
-                </div>
-                <div className="source-action-row compact">
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void uploadMixedCutMaterial()}
-                  >
-                    <Upload size={16} />
-                    上传混剪素材
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void analyzeSourceVisuals()}
-                  >
-                    <WandSparkles size={16} />
-                    画面分析
-                  </button>
-                </div>
-                <AssetList
-                  assets={mixedCutMaterialAssets}
-                  emptyLabel="还没有混剪素材"
-                  title="素材列表"
-                />
+            <div className="primary-actions">
+              {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
+              <div className="export-directory-control">
+                <button
+                  type="button"
+                  disabled={isWorkflowRunning}
+                  onClick={() => void chooseExportDirectory()}
+                >
+                  <FolderOpen size={16} />
+                  选择保存目录
+                </button>
+                <span title={exportDirectoryLabel}>{exportDirectoryLabel}</span>
               </div>
-            ) : null}
-
-            {selectedTask.generationMode === "product-avatar" ? (
-              <div className="image-action-row">
-                <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
-                <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
-                <div className="stacked-actions">
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void uploadProductImage()}
-                  >
-                    <Upload size={16} />
-                    上传商品图
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void generatePresenterImages()}
-                  >
-                    <WandSparkles size={16} />
-                    生成人物商品图
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            {selectedTask.generationMode === "image-lipsync" ? (
-              <div className="image-action-row single">
-                <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
-                <div className="mode-note">
-                  <strong>图片口型同步</strong>
-                  <span>上传一张人物图，HeyGen 会用这张图对脚本做口型同步。</span>
-                </div>
-                <div className="stacked-actions">
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void uploadReferenceImage()}
-                  >
-                    <Upload size={16} />
-                    上传人物图
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </section>
-
-          <div className="primary-actions">
-            {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
-            <div className="export-directory-control">
               <button
                 type="button"
+                className="primary"
                 disabled={isWorkflowRunning}
-                onClick={() => void chooseExportDirectory()}
+                onClick={() => void runRealWorkflow()}
               >
-                <FolderOpen size={16} />
-                选择保存目录
+                <Play size={18} />
+                一键输出视频和封面
               </button>
-              <span title={exportDirectoryLabel}>{exportDirectoryLabel}</span>
             </div>
-            <button
-              type="button"
-              className="primary"
-              disabled={isWorkflowRunning}
-              onClick={() => void runRealWorkflow()}
-            >
-              <Play size={18} />
-              一键输出视频和封面
-            </button>
-          </div>
-        </section>
+          </section>
 
-        <aside className="preview-pane">
-          <section className="preview-card">
-            <div className="pane-heading">
-              <span>预览</span>
-              <button type="button" onClick={() => void openTaskExports()}>
-                <FolderOpen size={16} />
-                打开导出
-              </button>
-            </div>
-            <nav className="preview-mode-tabs" aria-label="预览类型">
-              <button
-                className={activePreviewMode === "finished" ? "active" : ""}
-                type="button"
-                onClick={() => setActivePreviewMode("finished")}
-              >
-                <strong>成品预览</strong>
-                <span>{presetLabel(previewPresetId ?? "portrait-9-16")}</span>
-              </button>
-              <button
-                className={activePreviewMode === "cover" ? "active" : ""}
-                type="button"
-                onClick={() => setActivePreviewMode("cover")}
-              >
-                <strong>封面预览</strong>
-                <span>{coverAssetUrl ? "已生成" : "编辑中"}</span>
-              </button>
-            </nav>
-            {activePreviewMode === "finished" ? (
-              <PrimaryPreview
+          <aside className="preview-pane">
+            <section className="preview-card">
+              <div className="pane-heading">
+                <span>预览</span>
+                <button type="button" onClick={() => void openTaskExports()}>
+                  <FolderOpen size={16} />
+                  打开导出
+                </button>
+              </div>
+              <nav className="preview-mode-tabs" aria-label="预览类型">
+                <button
+                  className={activePreviewMode === "finished" ? "active" : ""}
+                  data-testid="release-preview-finished-tab"
+                  type="button"
+                  onClick={() => setActivePreviewMode("finished")}
+                >
+                  <strong>成品预览</strong>
+                  <span>{presetLabel(previewPresetId ?? "portrait-9-16")}</span>
+                </button>
+                <button
+                  className={activePreviewMode === "cover" ? "active" : ""}
+                  data-testid="release-preview-cover-tab"
+                  type="button"
+                  onClick={() => setActivePreviewMode("cover")}
+                >
+                  <strong>封面预览</strong>
+                  <span>{coverAssetUrl ? "已生成" : "编辑中"}</span>
+                </button>
+              </nav>
+              {activePreviewMode === "finished" ? (
+                <PrimaryPreview
+                  frameTitleStyle={frameTitleStyle}
+                  frameTitleText={createFrameTitleText(selectedTask, coverStyle)}
+                  presetId={previewPresetId}
+                  videoUrl={finishedVideoUrl}
+                  imageUrl={generatedPresenterUrl || referenceImageUrl || productImageUrl}
+                  subtitleStyle={subtitleStyle}
+                  subtitleText={createSubtitleSample(selectedTask)}
+                  variantStatus={primaryVariant?.status}
+                />
+              ) : (
+                <CoverPreview
+                  imageUrl={coverAssetUrl}
+                  style={coverStyle}
+                  title={coverStyle.title || createCoverTitle(selectedTask)}
+                  presetId={previewPresetId}
+                />
+              )}
+              <PreviewStyleControls
+                activePreviewMode={activePreviewMode}
+                coverStyle={coverStyle}
+                customFontEnabled={Boolean(customFontUrl)}
+                disabled={isWorkflowRunning}
+                onCoverStyleChange={(patch) => void updateCoverStyle(patch)}
+                onFrameTitleStyleChange={(patch) => void updateFrameTitleStyle(patch)}
+                onSubtitleStyleChange={(patch) => void updateSubtitleStyle(patch)}
+                onUploadCustomFont={() => void uploadCustomFont()}
+                onSaveSettings={() => void savePreviewStyleSettings()}
                 frameTitleStyle={frameTitleStyle}
-                frameTitleText={createFrameTitleText(selectedTask, coverStyle)}
-                presetId={previewPresetId}
-                videoUrl={finishedVideoUrl}
-                imageUrl={generatedPresenterUrl || referenceImageUrl || productImageUrl}
                 subtitleStyle={subtitleStyle}
-                subtitleText={createSubtitleSample(selectedTask)}
-                variantStatus={primaryVariant?.status}
               />
-            ) : (
-              <CoverPreview
-                imageUrl={coverAssetUrl}
-                style={coverStyle}
-                title={coverStyle.title || createCoverTitle(selectedTask)}
-                presetId={previewPresetId}
-              />
-            )}
-            <PreviewStyleControls
-              activePreviewMode={activePreviewMode}
-              coverStyle={coverStyle}
-              customFontEnabled={Boolean(customFontUrl)}
-              disabled={isWorkflowRunning}
-              onCoverStyleChange={(patch) => void updateCoverStyle(patch)}
-              onFrameTitleStyleChange={(patch) => void updateFrameTitleStyle(patch)}
-              onSubtitleStyleChange={(patch) => void updateSubtitleStyle(patch)}
-              onUploadCustomFont={() => void uploadCustomFont()}
-              onSaveSettings={() => void savePreviewStyleSettings()}
-              frameTitleStyle={frameTitleStyle}
-              subtitleStyle={subtitleStyle}
-            />
-          </section>
+            </section>
 
-          <section className="status-strip" aria-label="步骤状态">
-            <span className="status-count">
-              {completeCount}/{steps.length}
-            </span>
-            {steps.map((step) => (
-              <span
-                className={`status-pill ${step.status}`}
-                key={step.id}
-                title={step.errorMessage}
-              >
-                {step.label}
+            <section className="status-strip" aria-label="步骤状态">
+              <span className="status-count">
+                {completeCount}/{steps.length}
               </span>
-            ))}
-          </section>
+              {steps.map((step) => (
+                <span
+                  className={`status-pill ${step.status}`}
+                  key={step.id}
+                  title={step.errorMessage}
+                >
+                  {step.label}
+                </span>
+              ))}
+            </section>
 
-          <div className="preview-asset-grid">
-            <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
-            <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
-            <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
-          </div>
-        </aside>
-      </main>
+            <div className="preview-asset-grid">
+              <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
+              <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
+              <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
+            </div>
+          </aside>
+        </main>
+      )}
+
+      {taskNameDialog ? (
+        <div
+          className="modal-backdrop"
+          data-testid="release-task-dialog-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isTaskNameSaving) {
+              setTaskNameDialog(null);
+            }
+          }}
+        >
+          <form
+            className="task-dialog"
+            data-testid="release-task-dialog"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => void submitTaskNameDialog(event)}
+          >
+            <div className="task-dialog-heading">
+              <h2>{taskNameDialog.mode === "create" ? "新建任务" : "重命名任务"}</h2>
+              <p>
+                {taskNameDialog.mode === "create"
+                  ? "给这条视频任务起一个容易识别的名字。"
+                  : "双击任务卡片后可在这里修改名称。"}
+              </p>
+            </div>
+            <label>
+              任务名称
+              <input
+                data-testid="release-task-name-input"
+                autoFocus
+                value={taskNameDialog.value}
+                onChange={(event) =>
+                  setTaskNameDialog((current) =>
+                    current ? { ...current, value: event.target.value } : current
+                  )
+                }
+              />
+            </label>
+            <div className="task-dialog-actions">
+              <button
+                disabled={isTaskNameSaving}
+                type="button"
+                onClick={() => setTaskNameDialog(null)}
+              >
+                取消
+              </button>
+              <button
+                className="primary"
+                data-testid="release-task-dialog-submit"
+                disabled={isTaskNameSaving}
+                type="submit"
+              >
+                {isTaskNameSaving ? "保存中..." : "确认"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {deleteTaskDialog ? (
+        <div
+          className="modal-backdrop"
+          data-testid="release-delete-dialog-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isTaskDeleting) {
+              setDeleteTaskDialog(null);
+            }
+          }}
+        >
+          <section className="task-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="task-dialog-heading">
+              <h2>删除任务</h2>
+              <p>删除后会移除任务记录和本地素材目录，这个操作不可撤销。</p>
+            </div>
+            <div className="delete-task-name">{deleteTaskDialog.title}</div>
+            <div className="task-dialog-actions">
+              <button
+                disabled={isTaskDeleting}
+                type="button"
+                onClick={() => setDeleteTaskDialog(null)}
+              >
+                取消
+              </button>
+              <button
+                className="danger-button"
+                data-testid="release-confirm-delete"
+                disabled={isTaskDeleting}
+                type="button"
+                onClick={() => void deleteTask(deleteTaskDialog.id)}
+              >
+                {isTaskDeleting ? "删除中..." : "确认删除"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {outputConfirmTask ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isWorkflowRunning) {
+              setOutputConfirmTask(null);
+            }
+          }}
+        >
+          <section
+            className="task-dialog output-confirm-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="task-dialog-heading">
+              <h2>确认输出</h2>
+              <p>
+                请先在预览中设置字幕、画面标题和封面。确认后将输出带字幕与标题样式的成片
+                MP4、封面、字幕文件和发布资料包。
+              </p>
+            </div>
+            <div className="delete-task-name">{outputConfirmTask.title}</div>
+            <div className="task-dialog-actions">
+              <button
+                disabled={isWorkflowRunning}
+                type="button"
+                onClick={() => setOutputConfirmTask(null)}
+              >
+                取消
+              </button>
+              <button
+                className="primary"
+                disabled={isWorkflowRunning}
+                type="button"
+                onClick={() => void executeRealWorkflow(outputConfirmTask)}
+              >
+                {isWorkflowRunning ? "输出中..." : "继续输出"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {avatarCreateDialog ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isAvatarCreating) {
+              setAvatarCreateDialog(null);
+            }
+          }}
+        >
+          <form
+            className="task-dialog avatar-create-dialog"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createHeyGenAvatar();
+            }}
+          >
+            <div className="task-dialog-heading">
+              <h2>创建 HeyGen Avatar</h2>
+              <p>根据描述创建一个可复用数字人形象，成功后会自动加入当前任务选择。</p>
+            </div>
+            <label>
+              Avatar 名称
+              <input
+                value={avatarCreateDialog.name}
+                disabled={isAvatarCreating}
+                onChange={(event) =>
+                  setAvatarCreateDialog((current) =>
+                    current ? { ...current, name: event.target.value } : current
+                  )
+                }
+              />
+            </label>
+            <label>
+              数字人描述提示词
+              <textarea
+                className="compact-textarea"
+                value={avatarCreateDialog.prompt}
+                disabled={isAvatarCreating}
+                onChange={(event) =>
+                  setAvatarCreateDialog((current) =>
+                    current ? { ...current, prompt: event.target.value } : current
+                  )
+                }
+              />
+            </label>
+            <div className="task-dialog-actions">
+              <button
+                disabled={isAvatarCreating}
+                type="button"
+                onClick={() => setAvatarCreateDialog(null)}
+              >
+                取消
+              </button>
+              <button className="primary" disabled={isAvatarCreating} type="submit">
+                {isAvatarCreating ? "创建中..." : "创建并选中"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {settingsOpen ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
           <section
             className="settings-modal"
+            data-testid="release-settings-modal"
             role="dialog"
             aria-modal="true"
             aria-label="设置"
@@ -1798,74 +2682,159 @@ export function App() {
               </button>
             </div>
             <p className="settings-note">API Key 只保存在本机安全存储里，不写入任务数据库。</p>
-            <div className="provider-list">
-              {serviceConfigurations.map((configuration) => {
-                const draft = settingsDraft[configuration.providerId] ?? {
-                  baseUrl: "",
-                  modelName: "",
-                  avatarId: "",
-                  voiceId: "",
-                  resolution: "720p",
-                  apiKey: "",
-                  enabled: true
-                };
-                const checkResult = settingsCheckResults[configuration.providerId];
-                const isBusy = settingsBusyProviderId === configuration.providerId;
-
-                return (
-                  <section className="provider-card" key={configuration.providerId}>
-                    <div className="provider-heading">
-                      <strong>{configuration.label}</strong>
+            <div className="settings-layout">
+              <nav className="settings-provider-nav" aria-label="服务列表">
+                {serviceConfigurations.map((configuration) => {
+                  const draft =
+                    settingsDraft[configuration.providerId] ?? createEmptySettingsDraft();
+                  const status = settingsProviderStatus(configuration, draft);
+                  return (
+                    <button
+                      data-testid="release-settings-provider-tab"
+                      data-provider-id={configuration.providerId}
+                      className={
+                        activeSettingsConfiguration?.providerId === configuration.providerId
+                          ? "settings-provider-tab active"
+                          : "settings-provider-tab"
+                      }
+                      key={configuration.providerId}
+                      type="button"
+                      onClick={() => setActiveSettingsProviderId(configuration.providerId)}
+                    >
                       <span>
-                        {configuration.credentialConfigured ? "已配置凭据" : "未配置凭据"}
+                        <strong>{configuration.label}</strong>
+                        <small>{providerSidebarDescription(configuration.providerId)}</small>
+                      </span>
+                      <em className={`settings-provider-state ${status.tone}`}>{status.label}</em>
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <section className="settings-detail-panel">
+                {activeSettingsConfiguration && activeSettingsDraft ? (
+                  <>
+                    <div className="settings-detail-heading">
+                      <div>
+                        <h3>{activeSettingsConfiguration.label}</h3>
+                        <p>{providerSettingsHint(activeSettingsConfiguration.providerId)}</p>
+                      </div>
+                      <span>
+                        {activeSettingsConfiguration.credentialConfigured
+                          ? "已保存凭据"
+                          : "未保存凭据"}
                       </span>
                     </div>
-                    <p className="provider-hint">
-                      {providerSettingsHint(configuration.providerId)}
-                    </p>
-                    <label>
-                      Base URL
-                      <input
-                        type="text"
-                        value={draft.baseUrl}
-                        placeholder="服务地址"
-                        onChange={(event) =>
-                          setSettingsDraft((current) =>
-                            updateDraft(current, configuration.providerId, {
-                              baseUrl: event.target.value
-                            })
-                          )
-                        }
-                      />
-                    </label>
-                    {configuration.providerId !== "heygen" ? (
+
+                    <div className="settings-form-grid">
                       <label>
-                        模型名
+                        Base URL
                         <input
                           type="text"
-                          value={draft.modelName}
-                          placeholder="可选"
+                          value={activeSettingsDraft.baseUrl}
+                          placeholder="服务地址"
                           onChange={(event) =>
                             setSettingsDraft((current) =>
-                              updateDraft(current, configuration.providerId, {
-                                modelName: event.target.value
+                              updateDraft(current, activeSettingsConfiguration.providerId, {
+                                baseUrl: event.target.value
                               })
                             )
                           }
                         />
                       </label>
+
+                      {activeSettingsConfiguration.providerId !== "heygen" ? (
+                        <label>
+                          模型名
+                          <input
+                            type="text"
+                            value={activeSettingsDraft.modelName}
+                            placeholder="先获取模型，或手动填写"
+                            onChange={(event) =>
+                              setSettingsDraft((current) =>
+                                updateDraft(current, activeSettingsConfiguration.providerId, {
+                                  modelName: event.target.value
+                                })
+                              )
+                            }
+                          />
+                        </label>
+                      ) : null}
+
+                      {activeSettingsCanFetchModels ? (
+                        <div className="model-picker-row">
+                          <button
+                            type="button"
+                            disabled={Boolean(settingsBusyProviderId)}
+                            onClick={() =>
+                              void fetchServiceModels(activeSettingsConfiguration.providerId)
+                            }
+                          >
+                            获取模型
+                          </button>
+                          {activeSettingsModelList?.models.length ? (
+                            <select
+                              className="model-select"
+                              value={activeSettingsDraft.modelName}
+                              onChange={(event) =>
+                                setSettingsDraft((current) =>
+                                  updateDraft(current, activeSettingsConfiguration.providerId, {
+                                    modelName: event.target.value
+                                  })
+                                )
+                              }
+                            >
+                              <option value="">选择模型</option>
+                              {activeSettingsModelList.models.map((model) => (
+                                <option key={model} value={model}>
+                                  {model}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {activeSettingsCanFetchModels && activeSettingsModelList ? (
+                      <p
+                        className={
+                          activeSettingsModelList.ok
+                            ? "model-list-message ok"
+                            : "model-list-message failed"
+                        }
+                      >
+                        {activeSettingsModelList.message}
+                      </p>
                     ) : null}
-                    {configuration.providerId === "heygen" ? (
-                      <>
+
+                    {activeSettingsConfiguration.providerId === "heygen" ? (
+                      <div className="settings-form-grid three">
+                        <label>
+                          认证方式
+                          <select
+                            value={activeSettingsDraft.authMode ?? "api-key"}
+                            onChange={(event) =>
+                              setSettingsDraft((current) =>
+                                updateDraft(current, activeSettingsConfiguration.providerId, {
+                                  authMode: event.target.value as SettingsDraft["authMode"]
+                                })
+                              )
+                            }
+                          >
+                            <option value="api-key">API Key（X-Api-Key）</option>
+                            <option value="oauth-bearer">会员/OAuth Token（Bearer）</option>
+                          </select>
+                        </label>
                         <label>
                           默认 Avatar ID（可选）
                           <input
                             type="text"
-                            value={draft.avatarId ?? ""}
+                            value={activeSettingsDraft.avatarId ?? ""}
                             placeholder="通常不用填；任务里会自动读取并选择预设数字人"
                             onChange={(event) =>
                               setSettingsDraft((current) =>
-                                updateDraft(current, configuration.providerId, {
+                                updateDraft(current, activeSettingsConfiguration.providerId, {
                                   avatarId: event.target.value
                                 })
                               )
@@ -1876,11 +2845,11 @@ export function App() {
                           Voice ID
                           <input
                             type="text"
-                            value={draft.voiceId ?? ""}
+                            value={activeSettingsDraft.voiceId ?? ""}
                             placeholder="当前 HeyGen 账号可用的 Voice ID，可留空"
                             onChange={(event) =>
                               setSettingsDraft((current) =>
-                                updateDraft(current, configuration.providerId, {
+                                updateDraft(current, activeSettingsConfiguration.providerId, {
                                   voiceId: event.target.value
                                 })
                               )
@@ -1890,10 +2859,10 @@ export function App() {
                         <label>
                           分辨率
                           <select
-                            value={draft.resolution ?? "720p"}
+                            value={activeSettingsDraft.resolution ?? "720p"}
                             onChange={(event) =>
                               setSettingsDraft((current) =>
-                                updateDraft(current, configuration.providerId, {
+                                updateDraft(current, activeSettingsConfiguration.providerId, {
                                   resolution: event.target.value as SettingsDraft["resolution"]
                                 })
                               )
@@ -1903,79 +2872,103 @@ export function App() {
                             <option value="1080p">1080p</option>
                           </select>
                         </label>
-                      </>
+                      </div>
                     ) : null}
-                    <label>
-                      API Key（填新值会替换）
-                      <input
-                        type="password"
-                        value={draft.apiKey}
-                        placeholder={
-                          configuration.credentialConfigured
-                            ? "已保存；输入新 Key 后保存会替换"
-                            : "输入后保存"
-                        }
-                        onChange={(event) =>
-                          setSettingsDraft((current) =>
-                            updateDraft(current, configuration.providerId, {
-                              apiKey: event.target.value
-                            })
-                          )
-                        }
-                      />
-                    </label>
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={draft.enabled}
-                        onChange={(event) =>
-                          setSettingsDraft((current) =>
-                            updateDraft(current, configuration.providerId, {
-                              enabled: event.target.checked
-                            })
-                          )
-                        }
-                      />
-                      启用
-                    </label>
-                    <div className="provider-actions">
+
+                    {needsServiceCredentialField(activeSettingsConfiguration.providerId) ? (
+                      <label>
+                        {activeSettingsConfiguration.providerId === "heygen" &&
+                        activeSettingsDraft.authMode === "oauth-bearer"
+                          ? "OAuth/Bearer Token（填新值会替换）"
+                          : "API Key（填新值会替换）"}
+                        <input
+                          type="password"
+                          value={activeSettingsDraft.apiKey}
+                          placeholder={
+                            activeSettingsConfiguration.credentialConfigured
+                              ? "已保存；输入新值后保存会替换"
+                              : activeSettingsConfiguration.providerId === "heygen" &&
+                                  activeSettingsDraft.authMode === "oauth-bearer"
+                                ? "粘贴 HeyGen OAuth/Bearer Token"
+                                : "输入后保存"
+                          }
+                          onChange={(event) =>
+                            setSettingsDraft((current) =>
+                              updateDraft(current, activeSettingsConfiguration.providerId, {
+                                apiKey: event.target.value
+                              })
+                            )
+                          }
+                        />
+                      </label>
+                    ) : null}
+
+                    {activeSettingsConfiguration.providerId !== "video" ? (
+                      <label className="checkbox-row settings-enabled-row">
+                        <input
+                          type="checkbox"
+                          checked={activeSettingsDraft.enabled}
+                          onChange={(event) =>
+                            setSettingsDraft((current) =>
+                              updateDraft(current, activeSettingsConfiguration.providerId, {
+                                enabled: event.target.checked
+                              })
+                            )
+                          }
+                        />
+                        启用
+                      </label>
+                    ) : null}
+
+                    <div className="provider-actions settings-sticky-actions">
                       <button
                         type="button"
                         disabled={Boolean(settingsBusyProviderId)}
-                        onClick={() => void saveServiceConfiguration(configuration.providerId)}
+                        onClick={() =>
+                          void saveServiceConfiguration(activeSettingsConfiguration.providerId)
+                        }
                       >
-                        {isBusy ? "测试中" : "保存并测试"}
+                        {activeSettingsIsBusy ? "测试中" : "保存并测试"}
                       </button>
                       <button
                         type="button"
                         disabled={Boolean(settingsBusyProviderId)}
-                        onClick={() => void testServiceConfiguration(configuration.providerId)}
+                        onClick={() =>
+                          void testServiceConfiguration(activeSettingsConfiguration.providerId)
+                        }
                       >
                         检查
                       </button>
-                      <button
-                        type="button"
-                        disabled={Boolean(settingsBusyProviderId)}
-                        onClick={() => void clearServiceCredential(configuration.providerId)}
-                      >
-                        清除凭据
-                      </button>
+                      {needsServiceCredentialField(activeSettingsConfiguration.providerId) ? (
+                        <button
+                          type="button"
+                          disabled={Boolean(settingsBusyProviderId)}
+                          onClick={() =>
+                            void clearServiceCredential(activeSettingsConfiguration.providerId)
+                          }
+                        >
+                          清除凭据
+                        </button>
+                      ) : null}
                     </div>
-                    {checkResult ? (
+
+                    {activeSettingsCheckResult ? (
                       <p
                         className={
-                          checkResult.ok
+                          activeSettingsCheckResult.ok
                             ? "provider-check-result ok"
                             : "provider-check-result failed"
                         }
                       >
-                        {checkResult.ok ? "测试通过：" : "测试失败："}
-                        {checkResult.message}
+                        {activeSettingsCheckResult.ok ? "测试通过：" : "测试失败："}
+                        {activeSettingsCheckResult.message}
                       </p>
                     ) : null}
-                  </section>
-                );
-              })}
+                  </>
+                ) : (
+                  <p className="settings-route-note">正在读取服务配置...</p>
+                )}
+              </section>
             </div>
             {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
           </section>
@@ -2004,13 +2997,64 @@ function AssetPreview({
   );
 }
 
+function GeneratedPresenterHistory({
+  assets,
+  assetUrls,
+  onSelect,
+  presetId,
+  selectedAssetId
+}: {
+  assets: MediaAsset[];
+  assetUrls: Record<string, string>;
+  onSelect: (presetId: OutputPresetId, assetId: string) => void;
+  presetId: OutputPresetId;
+  selectedAssetId?: string;
+}) {
+  const presetAssets = [...assets]
+    .filter((asset) => asset.relativePath.includes(presetId))
+    .reverse()
+    .slice(0, 8);
+
+  return (
+    <div className="generated-image-history">
+      <div className="asset-list-heading">
+        <strong>{presetLabel(presetId)} 历史图</strong>
+        <span>{presetAssets.length} 张</span>
+      </div>
+      {presetAssets.length > 0 ? (
+        <div className="generated-image-grid">
+          {presetAssets.map((asset) => {
+            const url = assetUrls[asset.relativePath] ?? "";
+            return (
+              <button
+                className={asset.id === selectedAssetId ? "selected" : ""}
+                key={asset.id}
+                type="button"
+                title={assetFileName(asset.relativePath)}
+                onClick={() => onSelect(presetId, asset.id)}
+              >
+                {url ? <img alt={assetFileName(asset.relativePath)} src={url} /> : null}
+                <span>{asset.id === selectedAssetId ? "当前" : "选择"}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="field-hint">当前比例还没有人物商品图。</p>
+      )}
+    </div>
+  );
+}
+
 function AssetList({
   assets,
   emptyLabel,
+  itemBadge,
   title
 }: {
   assets: MediaAsset[];
   emptyLabel: string;
+  itemBadge?: string;
   title: string;
 }) {
   const visibleAssets = [...assets].reverse().slice(0, 6);
@@ -2027,12 +3071,414 @@ function AssetList({
             <li key={asset.id}>
               <span>{assetKindLabel(asset.kind)}</span>
               <strong title={asset.relativePath}>{assetFileName(asset.relativePath)}</strong>
+              {itemBadge ? <em>{itemBadge}</em> : null}
             </li>
           ))}
         </ul>
       ) : (
         <p>{emptyLabel}</p>
       )}
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function VisualStoryboardPanel({
+  disabled,
+  errorMessage,
+  imageUrl,
+  onGenerate,
+  onPanelCountChange,
+  panelCount,
+  storyboard
+}: {
+  disabled: boolean;
+  errorMessage: string;
+  imageUrl: string;
+  onGenerate: () => void;
+  onPanelCountChange: (panelCount: VisualStoryboardPanelCount) => void;
+  panelCount: VisualStoryboardPanelCount;
+  storyboard: VisualStoryboardPackage | null;
+}) {
+  const shots = storyboard?.shots ?? [];
+
+  return (
+    <div className="visual-storyboard-card">
+      <div className="visual-storyboard-header">
+        <div>
+          <strong>视觉故事板</strong>
+          <span>生成带画面的统一分镜板，后续给即梦 / Seedance 等生视频模型参考。</span>
+        </div>
+        <div className="storyboard-controls">
+          <label>
+            分镜数量
+            <select
+              value={String(panelCount)}
+              onChange={(event) =>
+                onPanelCountChange(parseVisualStoryboardPanelCount(event.target.value))
+              }
+            >
+              <option value="auto">自动 6-12</option>
+              <option value="6">6 格</option>
+              <option value="8">8 格</option>
+              <option value="9">9 格</option>
+              <option value="12">12 格</option>
+            </select>
+          </label>
+          <button type="button" disabled={disabled} onClick={onGenerate}>
+            <WandSparkles size={16} />
+            一键生成视觉故事板
+          </button>
+        </div>
+      </div>
+
+      {storyboard ? (
+        <div className="visual-storyboard-summary">
+          <div>
+            <small>布局</small>
+            <strong>
+              {storyboard.panelCount} 个分镜 · {storyboard.layout}
+            </strong>
+          </div>
+          <div>
+            <small>复刻策略</small>
+            <span>{storyboard.remakeStrategy}</span>
+          </div>
+        </div>
+      ) : (
+        <p className="field-hint">
+          先提取文案或做画面分析，再生成分镜提示词和统一故事板图。分镜数量可以自动，不固定九宫格。
+        </p>
+      )}
+
+      {imageUrl ? (
+        <div className="visual-storyboard-image">
+          <img alt="视觉故事板" src={imageUrl} />
+        </div>
+      ) : (
+        <div className="visual-storyboard-empty">
+          {storyboard ? "故事板提示词已生成，故事板图尚未生成或需要重试。" : "还没有故事板图"}
+        </div>
+      )}
+
+      {errorMessage ? <p className="storyboard-error">{errorMessage}</p> : null}
+
+      {storyboard ? (
+        <div className="storyboard-output-grid">
+          <section>
+            <h4>视觉统一设定</h4>
+            <dl className="storyboard-bible">
+              <div>
+                <dt>主角</dt>
+                <dd>{storyboard.visualBible.protagonist}</dd>
+              </div>
+              <div>
+                <dt>商品</dt>
+                <dd>{storyboard.visualBible.product}</dd>
+              </div>
+              <div>
+                <dt>场景</dt>
+                <dd>{storyboard.visualBible.location}</dd>
+              </div>
+              <div>
+                <dt>风格</dt>
+                <dd>
+                  {storyboard.visualBible.colorPalette} · {storyboard.visualBible.cameraStyle}
+                </dd>
+              </div>
+            </dl>
+            <p className="storyboard-locks">
+              {storyboard.visualBible.consistencyLocks.join(" / ")}
+            </p>
+          </section>
+
+          <section>
+            <h4>整片视频提示词</h4>
+            <p className="storyboard-long-text">{storyboard.wholeVideoPrompt}</p>
+          </section>
+        </div>
+      ) : null}
+
+      {shots.length > 0 ? (
+        <div className="storyboard-shot-list">
+          <h4>分镜提示词</h4>
+          <div className="storyboard-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>镜头</th>
+                  <th>时长</th>
+                  <th>画面</th>
+                  <th>动作</th>
+                  <th>运镜</th>
+                  <th>提示词</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shots.map((shot) => (
+                  <tr key={`${shot.shotNumber}-${shot.imagePrompt}`}>
+                    <td>{shot.shotNumber}</td>
+                    <td>{shot.durationSeconds}s</td>
+                    <td>{shot.visualAction}</td>
+                    <td>{shot.subjectAction || shot.productAction}</td>
+                    <td>{shot.cameraMovement}</td>
+                    <td>{shot.imagePrompt}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function VisualStoryboardPanelV2({
+  disabled,
+  errorMessage,
+  finalScript,
+  imageUrl,
+  onGenerateScriptOptions,
+  onGenerateStoryboard,
+  onPanelCountChange,
+  onUseScriptOption,
+  panelCount,
+  scriptErrorMessage,
+  scriptPackage,
+  storyboard
+}: {
+  disabled: boolean;
+  errorMessage: string;
+  finalScript: string;
+  imageUrl: string;
+  onGenerateScriptOptions: () => void;
+  onGenerateStoryboard: () => void;
+  onPanelCountChange: (panelCount: VisualStoryboardPanelCount) => void;
+  onUseScriptOption: (script: string) => void;
+  panelCount: VisualStoryboardPanelCount;
+  scriptErrorMessage: string;
+  scriptPackage: StoryScriptPackage | null;
+  storyboard: VisualStoryboardPackage | null;
+}) {
+  const shots = storyboard?.shots ?? [];
+  const recommendedOption =
+    scriptPackage?.options.find((option) => option.id === scriptPackage.recommendedOptionId) ??
+    scriptPackage?.options[0];
+
+  return (
+    <div className="visual-storyboard-card">
+      <div className="visual-storyboard-header">
+        <div>
+          <strong>剧情带货故事板</strong>
+          <span>先生成多套剧情脚本方案，确认或修改 AI 生成文案后，再生成统一视觉故事板。</span>
+        </div>
+        <button type="button" disabled={disabled} onClick={onGenerateScriptOptions}>
+          <WandSparkles size={16} />
+          生成剧情脚本方案
+        </button>
+      </div>
+
+      {scriptErrorMessage ? <p className="storyboard-error">{scriptErrorMessage}</p> : null}
+
+      {scriptPackage ? (
+        <div className="story-script-panel">
+          <div className="story-script-analysis">
+            <section>
+              <small>产品与用户分析</small>
+              <p>{scriptPackage.productAnalysis}</p>
+            </section>
+            <section>
+              <small>爆款机制</small>
+              <p>{scriptPackage.referenceMechanics}</p>
+            </section>
+            <section>
+              <small>转化策略</small>
+              <p>{scriptPackage.conversionStrategy}</p>
+            </section>
+          </div>
+          <div className="story-script-options">
+            {scriptPackage.options.map((option) => (
+              <article
+                className={
+                  option.id === recommendedOption?.id
+                    ? "story-script-option recommended"
+                    : "story-script-option"
+                }
+                key={option.id}
+              >
+                <div>
+                  <strong>
+                    {option.id}. {option.title}
+                  </strong>
+                  {option.id === recommendedOption?.id ? <span>推荐</span> : null}
+                </div>
+                <p>{option.angle}</p>
+                <dl>
+                  <div>
+                    <dt>前 5 秒</dt>
+                    <dd>{option.hook}</dd>
+                  </div>
+                  <div>
+                    <dt>人群</dt>
+                    <dd>{option.targetAudience}</dd>
+                  </div>
+                </dl>
+                <ul>
+                  {option.beatSheet.slice(0, 5).map((beat) => (
+                    <li key={beat}>{beat}</li>
+                  ))}
+                </ul>
+                <p className="story-script-reason">{option.reason}</p>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onUseScriptOption(option.script)}
+                >
+                  使用此方案
+                </button>
+              </article>
+            ))}
+          </div>
+          <p className="story-script-originality">{scriptPackage.originalityNotes}</p>
+        </div>
+      ) : (
+        <p className="field-hint">
+          先提取文案、上传素材或做画面分析，再生成剧情脚本方案。推荐方案会自动写入 AI
+          生成文案，你可以修改后再生成故事板。
+        </p>
+      )}
+
+      <div className="visual-storyboard-header compact">
+        <div>
+          <strong>视觉故事板</strong>
+          <span>根据当前 AI 生成文案生成分镜提示词、统一设定和带画面的故事板图。</span>
+        </div>
+        <div className="storyboard-controls">
+          <label>
+            分镜数量
+            <select
+              value={String(panelCount)}
+              onChange={(event) =>
+                onPanelCountChange(parseVisualStoryboardPanelCount(event.target.value))
+              }
+            >
+              <option value="auto">自动 6-12</option>
+              <option value="6">6 格</option>
+              <option value="8">8 格</option>
+              <option value="9">9 格</option>
+              <option value="12">12 格</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={disabled || !finalScript.trim()}
+            onClick={onGenerateStoryboard}
+          >
+            <WandSparkles size={16} />
+            确认脚本并生成故事板
+          </button>
+        </div>
+      </div>
+
+      {storyboard ? (
+        <div className="visual-storyboard-summary">
+          <div>
+            <small>布局</small>
+            <strong>
+              {storyboard.panelCount} 个分镜 · {storyboard.layout}
+            </strong>
+          </div>
+          <div>
+            <small>复刻策略</small>
+            <span>{storyboard.remakeStrategy}</span>
+          </div>
+        </div>
+      ) : (
+        <p className="field-hint">
+          当前还没有视觉故事板。请先确认 AI 生成文案，再生成分镜提示词和统一故事板图。
+        </p>
+      )}
+
+      {imageUrl ? (
+        <div className="visual-storyboard-image">
+          <img alt="视觉故事板" src={imageUrl} />
+        </div>
+      ) : (
+        <div className="visual-storyboard-empty">
+          {storyboard ? "故事板提示词已生成，故事板图尚未生成或需要重试。" : "还没有故事板图"}
+        </div>
+      )}
+
+      {errorMessage ? <p className="storyboard-error">{errorMessage}</p> : null}
+
+      {storyboard ? (
+        <div className="storyboard-output-grid">
+          <section>
+            <h4>视觉统一设定</h4>
+            <dl className="storyboard-bible">
+              <div>
+                <dt>主角</dt>
+                <dd>{storyboard.visualBible.protagonist}</dd>
+              </div>
+              <div>
+                <dt>商品</dt>
+                <dd>{storyboard.visualBible.product}</dd>
+              </div>
+              <div>
+                <dt>场景</dt>
+                <dd>{storyboard.visualBible.location}</dd>
+              </div>
+              <div>
+                <dt>风格</dt>
+                <dd>
+                  {storyboard.visualBible.colorPalette} · {storyboard.visualBible.cameraStyle}
+                </dd>
+              </div>
+            </dl>
+            <p className="storyboard-locks">
+              {storyboard.visualBible.consistencyLocks.join(" / ")}
+            </p>
+          </section>
+
+          <section>
+            <h4>整片视频提示词</h4>
+            <p className="storyboard-long-text">{storyboard.wholeVideoPrompt}</p>
+          </section>
+        </div>
+      ) : null}
+
+      {shots.length > 0 ? (
+        <div className="storyboard-shot-list">
+          <h4>分镜提示词</h4>
+          <div className="storyboard-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>镜头</th>
+                  <th>时长</th>
+                  <th>画面</th>
+                  <th>动作</th>
+                  <th>运镜</th>
+                  <th>提示词</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shots.map((shot) => (
+                  <tr key={`${shot.shotNumber}-${shot.imagePrompt}`}>
+                    <td>{shot.shotNumber}</td>
+                    <td>{shot.durationSeconds}s</td>
+                    <td>{shot.visualAction}</td>
+                    <td>{shot.subjectAction || shot.productAction}</td>
+                    <td>{shot.cameraMovement}</td>
+                    <td>{shot.imagePrompt}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2044,6 +3490,41 @@ interface FlowApiGuideItem {
   modelLabel: string;
   detail: string;
   active: boolean;
+}
+
+function ProductionWorkflowPanel({ workflow }: { workflow: ProductionModeWorkflow }) {
+  return (
+    <section className="production-workflow-panel" aria-label="内置视频生产流程">
+      <div className="production-workflow-heading">
+        <div>
+          <span>内置流程</span>
+          <strong>{workflow.label}</strong>
+        </div>
+        <p>{workflow.summary}</p>
+      </div>
+      <div className="production-method-row">
+        {workflow.builtInMethods.slice(0, 5).map((method) => (
+          <span key={method}>{method}</span>
+        ))}
+      </div>
+      <div className="production-inputs">
+        <strong>默认输入</strong>
+        <span>{workflow.defaultInputs.join(" / ")}</span>
+      </div>
+      <ol className="production-stage-list">
+        {workflow.stages.map((stage, index) => (
+          <li key={stage.id} title={stage.method}>
+            <small>{String(index + 1).padStart(2, "0")}</small>
+            <div>
+              <strong>{stage.label}</strong>
+              <span>{stage.goal}</span>
+              <em>产物：{stage.outputs.join("、")}</em>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 function FlowApiGuide({
@@ -2126,7 +3607,7 @@ function PrimaryPreview({
   const frameClassName = `media-stage ${presetId === "landscape-16-9" ? "landscape" : "portrait"}`;
 
   return (
-    <div className={frameClassName}>
+    <div className={frameClassName} data-testid="release-media-stage">
       {videoUrl ? (
         <video controls src={videoUrl} />
       ) : imageUrl ? (
@@ -2546,7 +4027,11 @@ function CoverPreview({
   };
 
   return (
-    <div className={`cover-preview ${isLandscape ? "landscape" : "portrait"}`} style={previewStyle}>
+    <div
+      className={`cover-preview ${isLandscape ? "landscape" : "portrait"}`}
+      data-testid="release-cover-preview"
+      style={previewStyle}
+    >
       {imageUrl ? <img className="cover-preview-image" alt="默认封面底图" src={imageUrl} /> : null}
       {imageUrl ? <span className="cover-preview-shade" /> : null}
       <span className="cover-accent" style={{ backgroundColor: style.accentColor }} />
@@ -2679,7 +4164,7 @@ function parseAvatarOptions(value: string | undefined): string[] {
 }
 
 function avatarLookMeta(look: HeyGenAvatarLook): string {
-  const parts = [look.gender, look.status].filter(Boolean);
+  const parts = [look.gender, look.orientation, look.avatarType, look.status].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : look.id;
 }
 
@@ -2706,14 +4191,21 @@ function similarityRiskLabel(risk: VideoTask["similarityRisk"]): string {
 }
 
 function assetKindLabel(kind: MediaAsset["kind"]): string {
-  const labels: Record<MediaAsset["kind"], string> = {
+  if (kind === "visual-storyboard") {
+    return "视觉故事板";
+  }
+
+  const labels: Partial<Record<MediaAsset["kind"], string>> = {
     "source-audio": "原音频",
     "source-video": "原视频",
     "source-transcript": "文案",
     "source-visual-analysis": "画面分析",
+    "knowledge-document": "知识库",
+    "viral-copy-reference": "爆款案例",
     "product-image": "商品图",
     "reference-image": "人物图",
     "mixed-cut-material": "混剪素材",
+    "mixed-cut-video": "混剪基础视频",
     "custom-font": "字体",
     "generated-presenter-image": "人物商品图",
     "avatar-video": "数字人视频",
@@ -2724,11 +4216,84 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
     "publishing-package": "发布包"
   };
 
-  return labels[kind];
+  return labels[kind] ?? kind;
+}
+
+function countKnowledgeContextSources(task: VideoTask): {
+  builtIn: number;
+  uploadedKnowledge: number;
+  viralReferences: number;
+  taskAssets: number;
+} {
+  const currentTaskAssetKinds = new Set<MediaAsset["kind"]>([
+    "source-video",
+    "source-audio",
+    "source-transcript",
+    "source-visual-analysis",
+    "story-script-options",
+    "visual-storyboard",
+    "product-image",
+    "reference-image",
+    "mixed-cut-material",
+    "mixed-cut-video",
+    "generated-presenter-image",
+    "avatar-video",
+    "subtitle-file"
+  ]);
+  const textSourceCount = [
+    task.originalVideoUrl,
+    task.sourceScript,
+    task.finalScript,
+    task.avatarDescriptionPrompt,
+    task.motionPrompt,
+    task.personalIpProfile.name ||
+      task.personalIpProfile.persona ||
+      task.personalIpProfile.tone ||
+      task.personalIpProfile.catchphrases ||
+      task.personalIpProfile.bannedWords,
+    task.creativeWorkflow.referenceAnalysis ||
+      task.creativeWorkflow.sellingPoints ||
+      task.creativeWorkflow.storyboard ||
+      task.creativeWorkflow.dailyPipeline ||
+      task.creativeWorkflow.aiVideoPrompt ||
+      task.creativeWorkflow.mixedCutPlan
+  ].filter((value) => value?.trim()).length;
+
+  return {
+    builtIn: builtInKnowledgeCount(task.generationMode),
+    uploadedKnowledge: task.mediaAssets.filter((asset) => asset.kind === "knowledge-document")
+      .length,
+    viralReferences: task.mediaAssets.filter((asset) => asset.kind === "viral-copy-reference")
+      .length,
+    taskAssets:
+      task.mediaAssets.filter((asset) => currentTaskAssetKinds.has(asset.kind)).length +
+      textSourceCount
+  };
+}
+
+function builtInKnowledgeCount(mode: VideoGenerationMode): number {
+  const counts: Record<VideoGenerationMode, number> = {
+    "preset-avatar": 2,
+    "product-avatar": 6,
+    "image-lipsync": 5,
+    "personal-ip": 3,
+    "viral-remix": 4,
+    "mixed-cut": 5
+  };
+
+  return counts[mode];
 }
 
 function assetFileName(relativePath: string): string {
   return relativePath.split("/").filter(Boolean).pop() ?? relativePath;
+}
+
+function parseVisualStoryboardPanelCount(value: string): VisualStoryboardPanelCount {
+  if (value === "6" || value === "8" || value === "9" || value === "12") {
+    return Number(value) as VisualStoryboardPanelCount;
+  }
+
+  return "auto";
 }
 
 function buildFlowApiGuideItems(input: {
@@ -2739,7 +4304,9 @@ function buildFlowApiGuideItems(input: {
 }): FlowApiGuideItem[] {
   const { configurations, hasGeneratedPresenterImages, selectedAvatarName, task } = input;
   const needsImageGeneration =
-    task.generationMode === "product-avatar" && !hasGeneratedPresenterImages;
+    task.generationMode === "product-avatar" &&
+    task.avatarMode === "image-presenter" &&
+    !hasGeneratedPresenterImages;
   const hasSourceMedia = task.mediaAssets.some((asset) =>
     ["source-video", "source-audio", "source-transcript", "source-visual-analysis"].includes(
       asset.kind
@@ -2772,15 +4339,23 @@ function buildFlowApiGuideItems(input: {
       active: needsImageGeneration
     },
     {
-      title: "4. 生成口型视频",
+      title: "4. 故事板/生视频模型",
+      providerId: "video",
+      providerLabel: "生视频模型",
+      modelLabel: modelName(configurations, "video"),
+      detail: "爆款素材复刻、故事板生视频和图片生视频使用 Seedance、即梦、可灵等视频生成模型。",
+      active: task.generationMode === "viral-remix" || task.generationMode === "mixed-cut"
+    },
+    {
+      title: "5. 生成口型视频",
       providerId: "heygen",
-      providerLabel: "HeyGen",
+      providerLabel: "数字人模型（HeyGen）",
       modelLabel: heyGenRenderModelLabel(configurations, task, selectedAvatarName),
       detail: "每个输出比例都会向 HeyGen 生成原生比例视频，默认使用 HeyGen 内置语音。",
       active: true
     },
     {
-      title: "5. 字幕兜底",
+      title: "6. 字幕兜底",
       providerId: "asr",
       providerLabel: "HeyGen 字幕优先；ASR 兜底",
       modelLabel: modelName(configurations, "asr"),
@@ -2788,7 +4363,7 @@ function buildFlowApiGuideItems(input: {
       active: true
     },
     {
-      title: "6. 外部语音",
+      title: "7. 外部语音",
       providerId: "tts",
       providerLabel: "可选 TTS / 外部音频",
       modelLabel: modelName(configurations, "tts"),
@@ -2796,7 +4371,7 @@ function buildFlowApiGuideItems(input: {
       active: false
     },
     {
-      title: "7. 输出视频和封面",
+      title: "8. 输出视频和封面",
       providerLabel: "本地导出",
       modelLabel: "不需要模型",
       detail: "使用已生成视频、字幕样式和封面样式，导出到你选择的保存目录。",
@@ -2847,7 +4422,8 @@ function heyGenBaseSettingsLabel(configurations: ServiceConfiguration[]): string
   const configuration = providerConfiguration(configurations, "heygen");
   const resolution =
     configuration?.settings.resolution || defaultServiceSettings("heygen").resolution;
-  return `分辨率 ${resolution ?? "720p"}`;
+  const authMode = configuration?.settings.authMode === "oauth-bearer" ? "会员 Bearer" : "API Key";
+  return `${authMode}；分辨率 ${resolution ?? "720p"}`;
 }
 
 function credentialStatus(configurations: ServiceConfiguration[], providerId: ProviderId): string {
@@ -2885,15 +4461,34 @@ function providerLabel(configurations: ServiceConfiguration[], providerId: Provi
 function providerSettingsHint(providerId: ProviderId): string {
   switch (providerId) {
     case "heygen":
-      return "Base URL 填 https://api.heygen.com 即可；如果填了 /v1、/v2 或 /v3，软件会自动纠正。保存或检查成功后会自动读取当前账号的预设数字人。";
+      return "Base URL 填 https://api.heygen.com 即可；普通 API 账号选 API Key，会员/OAuth 通道选 Bearer Token。保存或检查成功后会自动读取当前账号的预设数字人。";
     case "asr":
       return "ASR 是可选兜底：关闭时会实际测试大模型是否支持 audio/transcriptions；不支持时请启用 ASR 并填写转写模型。";
     case "image":
       return "用于商品图生成人物拿产品图；模型名填写你的中转支持的图片模型。";
+    case "video":
+      return "用于故事板生视频、图片生视频等非数字人口播视频，例如 Seedance、即梦、可灵、Runway；可拉取 /models 并选择模型。";
     case "llm":
       return "用于分析原文案/拉片结果并生成可编辑脚本；模型名填写你的中转支持的聊天模型。";
     case "tts":
       return "MVP 默认走 HeyGen 内置语音；外部 TTS 后续接入。";
+  }
+}
+
+function providerSidebarDescription(providerId: ProviderId): string {
+  switch (providerId) {
+    case "heygen":
+      return "数字人口型同步";
+    case "llm":
+      return "文案分析与生成";
+    case "image":
+      return "人物商品图";
+    case "video":
+      return "Seedance/即梦/可灵";
+    case "asr":
+      return "转写与字幕兜底";
+    case "tts":
+      return "外部语音可选";
   }
 }
 
@@ -2912,6 +4507,7 @@ async function checkOutputServiceConfiguration(
 
   if (
     task.avatarMode === "preset-avatar" &&
+    !task.presetAvatarGroupId?.trim() &&
     !task.presetAvatarId?.trim() &&
     !heygenConfiguration?.settings.avatarId?.trim()
   ) {
@@ -2922,7 +4518,11 @@ async function checkOutputServiceConfiguration(
     providerIds.push("llm");
   }
 
-  if (task.generationMode === "product-avatar" && !hasGeneratedPresenterImages(task)) {
+  if (
+    task.generationMode === "product-avatar" &&
+    task.avatarMode === "image-presenter" &&
+    !hasGeneratedPresenterImages(task)
+  ) {
     providerIds.push("image");
   }
 
@@ -2938,13 +4538,20 @@ async function checkOutputServiceConfiguration(
 }
 
 function hasGeneratedPresenterImages(task: VideoTask): boolean {
-  return task.selectedOutputPresets.every((presetId) =>
-    task.mediaAssets.some(
+  return task.selectedOutputPresets.every((presetId) => {
+    const selectedAssetId = task.generatedPresenterImageSelections?.[presetId];
+    if (selectedAssetId) {
+      return task.mediaAssets.some(
+        (asset) => asset.id === selectedAssetId && asset.kind === "generated-presenter-image"
+      );
+    }
+
+    return task.mediaAssets.some(
       (asset) =>
         asset.kind === "generated-presenter-image" &&
-        asset.relativePath.includes(`generated-presenter-${presetId}.`)
-    )
-  );
+        asset.relativePath.includes(`generated-presenter-${presetId}-`)
+    );
+  });
 }
 
 function formatTaskMeta(task: VideoTaskSummary): string {
@@ -2961,6 +4568,11 @@ interface SettingsDraft extends ServiceConfigurationSettings {
   resolution: NonNullable<ServiceConfigurationSettings["resolution"]>;
 }
 
+interface SettingsProviderStatus {
+  label: string;
+  tone: "ok" | "pending" | "neutral";
+}
+
 function createSettingsDraft(
   configurations: ServiceConfiguration[]
 ): Record<ProviderId, SettingsDraft> {
@@ -2970,6 +4582,7 @@ function createSettingsDraft(
       {
         baseUrl: configuration.settings.baseUrl ?? "",
         modelName: configuration.settings.modelName ?? "",
+        authMode: configuration.settings.authMode ?? "api-key",
         avatarId: configuration.settings.avatarId ?? "",
         voiceId: configuration.settings.voiceId ?? "",
         resolution: configuration.settings.resolution ?? "720p",
@@ -2988,16 +4601,54 @@ function updateDraft(
   return {
     ...current,
     [providerId]: {
-      ...(current[providerId] ?? {
-        baseUrl: "",
-        modelName: "",
-        avatarId: "",
-        voiceId: "",
-        resolution: "720p",
-        enabled: true,
-        apiKey: ""
-      }),
+      ...(current[providerId] ?? createEmptySettingsDraft()),
       ...patch
     }
   };
+}
+
+function createEmptySettingsDraft(): SettingsDraft {
+  return {
+    baseUrl: "",
+    modelName: "",
+    authMode: "api-key",
+    avatarId: "",
+    voiceId: "",
+    resolution: "720p",
+    enabled: true,
+    apiKey: ""
+  };
+}
+
+function canFetchServiceModels(providerId: ProviderId): boolean {
+  if (providerId === "heygen") {
+    return false;
+  }
+
+  return true;
+}
+
+function needsServiceCredentialField(providerId: ProviderId): boolean {
+  if (providerId === "tts") {
+    return false;
+  }
+
+  return true;
+}
+
+function settingsProviderStatus(
+  configuration: ServiceConfiguration,
+  draft: SettingsDraft
+): SettingsProviderStatus {
+  if (configuration.providerId === "tts") {
+    return { label: "可选", tone: "neutral" };
+  }
+
+  if (draft.enabled === false) {
+    return { label: "已停用", tone: "neutral" };
+  }
+
+  return configuration.credentialConfigured
+    ? { label: "已配置", tone: "ok" }
+    : { label: "未配置", tone: "pending" };
 }

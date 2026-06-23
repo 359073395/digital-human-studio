@@ -8,15 +8,15 @@ The credential store lives under the app data directory, for example `D:\Codex\2
 
 The generation screen shows a compact flow guide for the active task. It lists whether each stage will use a service, which model or ID is configured, and whether the API Key is present. It never displays the API Key value.
 
-| Stage                                 | Service                             | Required setting                                                               |
-| ------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
-| Source extraction/material extraction | ASR, OpenAI-compatible              | Base URL, ASR model, API Key when transcription is needed                      |
-| Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                  |
-| Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                 |
+| Stage                                 | Service                             | Required setting                                                                                            |
+| ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Source extraction/material extraction | ASR, OpenAI-compatible              | Base URL, ASR model, API Key when transcription is needed                                                   |
+| Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                                               |
+| Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                                              |
 | Lip-synced avatar video               | HeyGen                              | Base URL, API Key, task-selected preset avatar or optional default Avatar ID, optional Voice ID, resolution |
-| Subtitle fallback                     | ASR or reusable LLM audio support   | Real `audio/transcriptions` support, only when HeyGen subtitles are unavailable |
-| External audio                        | Optional TTS or uploaded audio      | Not required for the default MVP path                                          |
-| Export                                | Local desktop app                   | Save directory, no API Key                                                     |
+| Subtitle fallback                     | ASR or reusable LLM audio support   | Real `audio/transcriptions` support, only when HeyGen subtitles are unavailable                             |
+| External audio                        | Optional TTS or uploaded audio      | Not required for the default MVP path                                                                       |
+| Export                                | Local desktop app                   | Save directory, no API Key                                                                                  |
 
 ## OpenAI-Compatible Relay
 

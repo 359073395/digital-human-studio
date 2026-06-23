@@ -4,6 +4,7 @@ import type { AvatarWorkflowService } from "../avatar/avatarWorkflowService";
 import type { PresenterImageWorkflowService } from "../image/presenterImageWorkflowService";
 import type { ScriptWorkflowService } from "../script/scriptWorkflowService";
 import type { ExportWorkflowService } from "./exportWorkflowService";
+import type { MixedCutWorkflowService } from "./mixedCutWorkflowService";
 
 export class RealWorkflowRunner {
   constructor(
@@ -11,7 +12,8 @@ export class RealWorkflowRunner {
     private readonly scriptWorkflowService: ScriptWorkflowService,
     private readonly presenterImageWorkflowService: PresenterImageWorkflowService,
     private readonly avatarWorkflowService: AvatarWorkflowService,
-    private readonly exportWorkflowService: ExportWorkflowService
+    private readonly exportWorkflowService: ExportWorkflowService,
+    private readonly mixedCutWorkflowService?: MixedCutWorkflowService
   ) {}
 
   async runTask(taskId: string): Promise<VideoTask> {
@@ -26,12 +28,35 @@ export class RealWorkflowRunner {
     }
 
     task = this.requireTask(taskId);
-    if (task.generationMode === "product-avatar" && !this.hasGeneratedPresenterImages(task)) {
+    if (
+      task.generationMode === "product-avatar" &&
+      task.avatarMode === "image-presenter" &&
+      !this.hasGeneratedPresenterImages(task)
+    ) {
       task = await this.presenterImageWorkflowService.generatePresenterImages(taskId);
       const avatarStep = task.steps.find((step) => step.id === "avatar");
       if (avatarStep?.status === "retry-ready" || avatarStep?.status === "failed") {
         return task;
       }
+    }
+
+    task = this.requireTask(taskId);
+    if (task.generationMode === "mixed-cut") {
+      if (!this.mixedCutWorkflowService) {
+        return this.taskRepository.updateStepStatus(
+          taskId,
+          "post-production",
+          "retry-ready",
+          "混剪视频服务尚未接入。"
+        );
+      }
+
+      task = this.mixedCutWorkflowService.prepareMixedCut(taskId);
+      if (task.steps.find((step) => step.id === "post-production")?.status === "retry-ready") {
+        return task;
+      }
+
+      return this.exportWorkflowService.exportTask(taskId);
     }
 
     task = this.requireTask(taskId);
@@ -75,13 +100,20 @@ export class RealWorkflowRunner {
   }
 
   private hasGeneratedPresenterImages(task: VideoTask): boolean {
-    return task.selectedOutputPresets.every((presetId) =>
-      task.mediaAssets.some(
+    return task.selectedOutputPresets.every((presetId) => {
+      const selectedAssetId = task.generatedPresenterImageSelections?.[presetId];
+      if (selectedAssetId) {
+        return task.mediaAssets.some(
+          (asset) => asset.id === selectedAssetId && asset.kind === "generated-presenter-image"
+        );
+      }
+
+      return task.mediaAssets.some(
         (asset) =>
           asset.kind === "generated-presenter-image" &&
-          asset.relativePath.includes(`generated-presenter-${presetId}.`)
-      )
-    );
+          asset.relativePath.includes(`generated-presenter-${presetId}-`)
+      );
+    });
   }
 
   private hasReferenceImage(task: VideoTask): boolean {

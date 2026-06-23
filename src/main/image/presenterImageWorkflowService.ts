@@ -4,8 +4,17 @@ import {
   OUTPUT_PRESETS,
   type MediaAsset,
   type OutputPreset,
+  type OutputPresetId,
   type VideoTask
 } from "../../shared/domain";
+import type {
+  GeneratePresenterImagesInput,
+  SelectGeneratedPresenterImageInput
+} from "../../shared/ipc";
+import {
+  buildKnowledgeContext,
+  writeKnowledgeContextPreview
+} from "../knowledge/knowledgeContextBuilder";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 import type { ImageProvider } from "./imageProvider";
@@ -37,7 +46,8 @@ export class PresenterImageWorkflowService {
       generationMode: "product-avatar",
       avatarMode: "image-presenter",
       productImageAssetId: asset.id,
-      generatedPresenterImageAssetId: null
+      generatedPresenterImageAssetId: null,
+      generatedPresenterImageSelections: {}
     });
   }
 
@@ -95,7 +105,9 @@ export class PresenterImageWorkflowService {
     });
   }
 
-  async generatePresenterImages(taskId: string): Promise<VideoTask> {
+  async generatePresenterImages(input: string | GeneratePresenterImagesInput): Promise<VideoTask> {
+    const normalizedInput = normalizeGenerateInput(input);
+    const taskId = normalizedInput.taskId;
     const task = this.requireTask(taskId);
     this.taskRepository.updateStepStatus(taskId, "avatar", "running");
 
@@ -113,23 +125,34 @@ export class PresenterImageWorkflowService {
         throw new Error("请先上传商品图片。");
       }
 
+      const knowledgeContext = buildKnowledgeContext(this.paths, task, "presenter-image");
+      writeKnowledgeContextPreview(this.paths, taskId, knowledgeContext);
+
       let latestGeneratedAsset: MediaAsset | undefined;
-      for (const presetId of task.selectedOutputPresets) {
+      const nextSelections = { ...(task.generatedPresenterImageSelections ?? {}) };
+      const presetIds = normalizePresetIds(normalizedInput.presetIds ?? task.selectedOutputPresets);
+      const batchId = createFileTimestamp();
+      for (const presetId of presetIds) {
         const preset = requireOutputPreset(presetId);
         const currentTask = this.requireTask(taskId);
         const result = await this.imageProvider.generateProductPresenterImage({
-          task: currentTask,
+          task: {
+            ...currentTask,
+            avatarDescriptionPrompt:
+              normalizedInput.promptOverride?.trim() || currentTask.avatarDescriptionPrompt
+          },
           preset,
-          productImagePath: absoluteTaskPath(this.paths, taskId, productAsset.relativePath)
+          productImagePath: absoluteTaskPath(this.paths, taskId, productAsset.relativePath),
+          knowledgeContextPrompt: knowledgeContext.promptText
         });
-        const relativePath = `avatar/generated-presenter-${preset.id}.${result.extension}`;
+        const relativePath = `avatar/generated-presenter-${preset.id}-${batchId}.${result.extension}`;
         const absolutePath = absoluteTaskPath(this.paths, taskId, relativePath);
         fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
         fs.writeFileSync(absolutePath, result.imageBytes);
         writeTaskFile(
           this.paths,
           taskId,
-          `avatar/generated-presenter-${preset.id}-prompt.txt`,
+          `avatar/generated-presenter-${preset.id}-${batchId}-prompt.txt`,
           result.promptPreview
         );
         const taskWithAsset = this.taskRepository.addMediaAsset(
@@ -142,12 +165,14 @@ export class PresenterImageWorkflowService {
           "generated-presenter-image",
           relativePath
         );
+        nextSelections[preset.id] = latestGeneratedAsset.id;
       }
 
       if (latestGeneratedAsset) {
         this.taskRepository.updateTask({
           taskId,
-          generatedPresenterImageAssetId: latestGeneratedAsset.id
+          generatedPresenterImageAssetId: latestGeneratedAsset.id,
+          generatedPresenterImageSelections: nextSelections
         });
       }
 
@@ -160,6 +185,27 @@ export class PresenterImageWorkflowService {
         error instanceof Error ? error.message : "人物商品图生成失败。"
       );
     }
+  }
+
+  selectGeneratedPresenterImage(input: SelectGeneratedPresenterImageInput): VideoTask {
+    const task = this.requireTask(input.taskId);
+    const preset = requireOutputPreset(input.presetId);
+    const asset = task.mediaAssets.find((candidate) => candidate.id === input.assetId);
+    if (!asset || asset.kind !== "generated-presenter-image") {
+      throw new Error("请选择已生成的人物商品图。");
+    }
+    if (!asset.relativePath.includes(preset.id)) {
+      throw new Error(`请选择 ${preset.label} 对应的人物商品图。`);
+    }
+
+    return this.taskRepository.updateTask({
+      taskId: input.taskId,
+      generatedPresenterImageAssetId: asset.id,
+      generatedPresenterImageSelections: {
+        ...(task.generatedPresenterImageSelections ?? {}),
+        [preset.id]: asset.id
+      }
+    });
   }
 
   private requireTask(taskId: string): VideoTask {
@@ -210,6 +256,22 @@ function requireOutputPreset(presetId: VideoTask["selectedOutputPresets"][number
   }
 
   return preset;
+}
+
+function normalizeGenerateInput(
+  input: string | GeneratePresenterImagesInput
+): GeneratePresenterImagesInput {
+  return typeof input === "string" ? { taskId: input } : input;
+}
+
+function normalizePresetIds(presetIds: OutputPresetId[]): OutputPresetId[] {
+  const available = new Set(OUTPUT_PRESETS.map((preset) => preset.id));
+  const unique = Array.from(new Set(presetIds.filter((presetId) => available.has(presetId))));
+  return unique.length > 0 ? unique : ["portrait-9-16"];
+}
+
+function createFileTimestamp(): string {
+  return new Date().toISOString().replace(/[-:.TZ]/g, "");
 }
 
 function absoluteTaskPath(paths: AppPaths, taskId: string, relativePath: string): string {

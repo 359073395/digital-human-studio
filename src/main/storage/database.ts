@@ -151,6 +151,14 @@ const MIGRATIONS = [
     sql: `
       ALTER TABLE video_tasks ADD COLUMN creative_workflow TEXT NOT NULL DEFAULT '${DEFAULT_CREATIVE_WORKFLOW_JSON}';
     `
+  },
+  {
+    id: 11,
+    name: "add-avatar-group-and-generated-image-selections",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN preset_avatar_group_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE video_tasks ADD COLUMN generated_presenter_image_selections TEXT NOT NULL DEFAULT '{}';
+    `
   }
 ] as const;
 

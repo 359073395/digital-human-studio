@@ -3,17 +3,26 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
-import type { ProviderId, SaveServiceConfigurationInput } from "../shared/serviceConfig";
+import type {
+  ListServiceModelsInput,
+  ProviderId,
+  SaveServiceConfigurationInput
+} from "../shared/serviceConfig";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type CreateHeyGenAvatarInput,
   type CreateTaskInput,
+  type GeneratePresenterImagesInput,
+  type GenerateVisualStoryboardInput,
   type ResolveTaskAssetUrlInput,
   type RetryWorkflowStepInput,
+  type SelectGeneratedPresenterImageInput,
   type UpdateTaskInput
 } from "../shared/ipc";
 import { AvatarWorkflowService } from "./avatar/avatarWorkflowService";
 import { HeyGenAvatarCatalog } from "./avatar/heyGenAvatarCatalog";
+import { HeyGenAvatarCreator } from "./avatar/heyGenAvatarCreator";
 import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
 import { OpenAiImageProvider } from "./image/openAiImageProvider";
 import { PresenterImageWorkflowService } from "./image/presenterImageWorkflowService";
@@ -30,9 +39,12 @@ import { SafeStorageCipher } from "./storage/safeStorageCipher";
 import { ScriptWorkflowService } from "./script/scriptWorkflowService";
 import { ServiceConfigurationRepository } from "./storage/serviceConfigurationRepository";
 import { SourceAssetService } from "./source/sourceAssetService";
+import { OpenAiCompatibleStoryboardProvider } from "./storyboard/openAiCompatibleStoryboardProvider";
+import { StoryboardWorkflowService } from "./storyboard/storyboardWorkflowService";
 import { OpenAiAsrSubtitleProvider } from "./subtitles/openAiAsrSubtitleProvider";
 import { TaskRepository } from "./storage/taskRepository";
 import { ExportWorkflowService } from "./workflow/exportWorkflowService";
+import { MixedCutWorkflowService } from "./workflow/mixedCutWorkflowService";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 import { RealWorkflowRunner } from "./workflow/realWorkflowRunner";
 
@@ -106,8 +118,10 @@ interface MainRepositories {
   mockWorkflowRunner: MockWorkflowRunner;
   scriptWorkflowService: ScriptWorkflowService;
   heyGenAvatarCatalog: HeyGenAvatarCatalog;
+  heyGenAvatarCreator: HeyGenAvatarCreator;
   avatarWorkflowService: AvatarWorkflowService;
   presenterImageWorkflowService: PresenterImageWorkflowService;
+  storyboardWorkflowService: StoryboardWorkflowService;
   sourceAssetService: SourceAssetService;
   realWorkflowRunner: RealWorkflowRunner;
   appPaths: ReturnType<typeof createAppPaths>;
@@ -139,36 +153,50 @@ function createRepositories(): MainRepositories {
     serviceConfigurationRepository,
     credentialStore
   );
+  const heyGenAvatarCreator = new HeyGenAvatarCreator(
+    serviceConfigurationRepository,
+    credentialStore
+  );
   const avatarWorkflowService = new AvatarWorkflowService(
     taskRepository,
     appPaths,
     new HeyGenAvatarProvider(serviceConfigurationRepository, credentialStore),
     new OpenAiAsrSubtitleProvider(serviceConfigurationRepository, credentialStore)
   );
+  const imageProvider = new OpenAiImageProvider(serviceConfigurationRepository, credentialStore);
   const presenterImageWorkflowService = new PresenterImageWorkflowService(
     taskRepository,
     appPaths,
-    new OpenAiImageProvider(serviceConfigurationRepository, credentialStore)
+    imageProvider
+  );
+  const storyboardWorkflowService = new StoryboardWorkflowService(
+    taskRepository,
+    appPaths,
+    new OpenAiCompatibleStoryboardProvider(serviceConfigurationRepository, credentialStore),
+    imageProvider
   );
   const sourceAssetService = new SourceAssetService(taskRepository, appPaths);
   const exportWorkflowService = new ExportWorkflowService(taskRepository, appPaths);
+  const mixedCutWorkflowService = new MixedCutWorkflowService(taskRepository, appPaths);
   const realWorkflowRunner = new RealWorkflowRunner(
     taskRepository,
     scriptWorkflowService,
     presenterImageWorkflowService,
     avatarWorkflowService,
-    exportWorkflowService
+    exportWorkflowService,
+    mixedCutWorkflowService
   );
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
-  taskRepository.ensureSeedTask();
   return {
     taskRepository,
     serviceConfigurationRepository,
     mockWorkflowRunner,
     scriptWorkflowService,
     heyGenAvatarCatalog,
+    heyGenAvatarCreator,
     avatarWorkflowService,
     presenterImageWorkflowService,
+    storyboardWorkflowService,
     sourceAssetService,
     realWorkflowRunner,
     appPaths
@@ -179,6 +207,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   const {
     appPaths,
     avatarWorkflowService,
+    heyGenAvatarCreator,
     heyGenAvatarCatalog,
     mockWorkflowRunner,
     presenterImageWorkflowService,
@@ -186,6 +215,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     scriptWorkflowService,
     serviceConfigurationRepository,
     sourceAssetService,
+    storyboardWorkflowService,
     taskRepository
   } = repositories;
 
@@ -212,9 +242,6 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.deleteTask, (_event, taskId: string) => {
     taskRepository.deleteTask(taskId);
-    if (taskRepository.listTasks().length === 0) {
-      taskRepository.createTask({ title: "新建视频任务" });
-    }
     return taskRepository.listTasks();
   });
 
@@ -327,8 +354,70 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return sourceAssetService.importMixedCutMaterials(taskId, result.filePaths);
   });
 
+  ipcMain.handle(IPC_CHANNELS.uploadKnowledgeDocuments, async (_event, taskId: string) => {
+    const knowledgeDialogOptions: OpenDialogOptions = {
+      title: "选择知识库文档",
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        {
+          name: "知识文档",
+          extensions: ["txt", "md", "json", "csv", "pdf", "doc", "docx"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, knowledgeDialogOptions)
+      : await dialog.showOpenDialog(knowledgeDialogOptions);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return sourceAssetService.importKnowledgeDocuments(taskId, result.filePaths);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.uploadViralCopyReferences, async (_event, taskId: string) => {
+    const referenceDialogOptions: OpenDialogOptions = {
+      title: "选择爆款文案/案例",
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        {
+          name: "爆款文案/案例",
+          extensions: ["txt", "md", "json", "csv", "pdf", "doc", "docx"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, referenceDialogOptions)
+      : await dialog.showOpenDialog(referenceDialogOptions);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return sourceAssetService.importViralCopyReferences(taskId, result.filePaths);
+  });
+
   ipcMain.handle(IPC_CHANNELS.analyzeSourceVisuals, (_event, taskId: string) =>
     sourceAssetService.analyzeSourceVisuals(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.generateStoryScriptOptions, (_event, taskId: string) =>
+    storyboardWorkflowService.generateStoryScriptOptions(taskId)
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.generateVisualStoryboard,
+    (_event, input: GenerateVisualStoryboardInput) =>
+      storyboardWorkflowService.generateVisualStoryboard(input.taskId, input.panelCount)
   );
 
   ipcMain.handle(IPC_CHANNELS.uploadProductImage, async (_event, taskId: string) => {
@@ -409,8 +498,16 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return presenterImageWorkflowService.importCustomFont(taskId, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.generatePresenterImages, (_event, taskId: string) =>
-    presenterImageWorkflowService.generatePresenterImages(taskId)
+  ipcMain.handle(
+    IPC_CHANNELS.generatePresenterImages,
+    (_event, input: string | GeneratePresenterImagesInput) =>
+      presenterImageWorkflowService.generatePresenterImages(input)
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.selectGeneratedPresenterImage,
+    (_event, input: SelectGeneratedPresenterImageInput) =>
+      presenterImageWorkflowService.selectGeneratedPresenterImage(input)
   );
 
   ipcMain.handle(IPC_CHANNELS.renderHeyGenAvatar, (_event, taskId: string) =>
@@ -418,6 +515,10 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.listHeyGenAvatarLooks, () => heyGenAvatarCatalog.listAvatarLooks());
+
+  ipcMain.handle(IPC_CHANNELS.createHeyGenAvatar, (_event, input: CreateHeyGenAvatarInput) =>
+    heyGenAvatarCreator.createPromptAvatar(input)
+  );
 
   ipcMain.handle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>
     mockWorkflowRunner.runTask(taskId)
@@ -464,6 +565,10 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.testServiceConfiguration, (_event, providerId: ProviderId) =>
     serviceConfigurationRepository.testConfiguration(providerId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.listServiceModels, (_event, input: ListServiceModelsInput) =>
+    serviceConfigurationRepository.listModels(input)
   );
 
   protocol.handle(ASSET_PROTOCOL, (request) => {

@@ -154,6 +154,91 @@ describe("HeyGenAvatarProvider", () => {
     });
   });
 
+  it("resolves an avatar group to an orientation-matching look before rendering", async () => {
+    const task = {
+      ...createTask(),
+      presetAvatarId: "",
+      presetAvatarGroupId: "group-123",
+      selectedOutputPresets: ["landscape-16-9" as const]
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).includes("/v3/avatars/looks")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              avatar_looks: [
+                {
+                  id: "look-portrait",
+                  group_id: "group-123",
+                  image_width: 720,
+                  image_height: 1280
+                },
+                {
+                  id: "look-landscape",
+                  group_id: "group-123",
+                  image_width: 1280,
+                  image_height: 720
+                }
+              ]
+            }
+          })
+        );
+      }
+
+      if (String(url).endsWith("/v3/videos") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { video_id: "video-123" } }));
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            status: "completed",
+            video_url: "https://cdn.heygen.test/video.mp4"
+          }
+        })
+      );
+    });
+
+    await createProvider({
+      fetchImpl: fetchMock,
+      configuration: createConfiguration({ avatarId: "" })
+    }).renderAvatar({
+      task,
+      preset: OUTPUT_PRESETS[1]
+    });
+    const [, createInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const createBody = JSON.parse(String(createInit.body)) as Record<string, unknown>;
+
+    expect(createBody.avatar_id).toBe("look-landscape");
+  });
+
+  it("uses Bearer auth for HeyGen member/OAuth mode", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer oauth-token");
+      if (String(url).endsWith("/v3/videos") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { video_id: "video-123" } }));
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            status: "completed",
+            video_url: "https://cdn.heygen.test/video.mp4"
+          }
+        })
+      );
+    });
+
+    await createProvider({
+      fetchImpl: fetchMock,
+      apiKey: "oauth-token",
+      configuration: createConfiguration({ authMode: "oauth-bearer" })
+    }).renderAvatar({
+      task: createTask(),
+      preset: OUTPUT_PRESETS[0]
+    });
+  });
+
   it("uploads a generated presenter image and creates an image-based HeyGen render", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dhs-heygen-image-"));
     const imagePath = path.join(tempDir, "presenter.png");
@@ -207,6 +292,47 @@ describe("HeyGenAvatarProvider", () => {
     }
   });
 
+  it("uses a built-in HeyGen voice when no voice ID is configured", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dhs-heygen-default-voice-"));
+    const imagePath = path.join(tempDir, "presenter.png");
+    fs.writeFileSync(imagePath, Buffer.from("fake-image"));
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith("/v3/assets") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { asset_id: "asset-image-123" } }));
+      }
+
+      if (String(url).endsWith("/v3/videos") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { video_id: "video-image-123" } }));
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            status: "completed",
+            video_url: "https://cdn.heygen.test/image-video.mp4"
+          }
+        })
+      );
+    });
+
+    try {
+      await createProvider({
+        fetchImpl: fetchMock,
+        configuration: createConfiguration({ avatarId: "", voiceId: "" })
+      }).renderAvatar({
+        task: createImagePresenterTask(),
+        preset: OUTPUT_PRESETS[0],
+        imagePath
+      });
+      const [, createInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+      const createBody = JSON.parse(String(createInit.body)) as Record<string, unknown>;
+
+      expect(createBody.voice_id).toBe("06e81a5d7c8b41818d3f0b38f7cf15a1");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("is unavailable when HeyGen is disabled, missing credentials, or missing avatar ID", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 
@@ -230,6 +356,24 @@ describe("HeyGenAvatarProvider", () => {
         configuration: createConfiguration({ avatarId: "" })
       }).renderAvatar({ task: createTask(), preset: OUTPUT_PRESETS[0] })
     ).rejects.toBeInstanceOf(AvatarProviderUnavailableError);
+  });
+
+  it("explains API credit failures for API Key mode", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response(
+        JSON.stringify({
+          message: "Insufficient credit. This operation requires 'api' credits."
+        }),
+        { status: 402, statusText: "Payment Required" }
+      );
+    });
+
+    await expect(
+      createProvider({ fetchImpl: fetchMock }).renderAvatar({
+        task: createTask(),
+        preset: OUTPUT_PRESETS[0]
+      })
+    ).rejects.toThrow("OAuth/Bearer Token");
   });
 
   it("redacts HeyGen error bodies", async () => {

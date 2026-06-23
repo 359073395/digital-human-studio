@@ -11,7 +11,8 @@ import { TaskRepository } from "../storage/taskRepository";
 import type {
   ImageProvider,
   ProductPresenterImageInput,
-  ProductPresenterImageResult
+  ProductPresenterImageResult,
+  VisualStoryboardImageResult
 } from "./imageProvider";
 import { PresenterImageWorkflowService } from "./presenterImageWorkflowService";
 
@@ -28,11 +29,23 @@ class SuccessfulImageProvider implements ImageProvider {
       promptPreview: `prompt-${input.preset.id}`
     };
   }
+
+  async generateVisualStoryboardImage(): Promise<VisualStoryboardImageResult> {
+    return {
+      imageBytes: Buffer.from("unused-storyboard-image"),
+      extension: "png",
+      promptPreview: "unused"
+    };
+  }
 }
 
 class FailingImageProvider implements ImageProvider {
   async generateProductPresenterImage(): Promise<ProductPresenterImageResult> {
     throw new Error("OpenAI image quota exhausted.");
+  }
+
+  async generateVisualStoryboardImage(): Promise<VisualStoryboardImageResult> {
+    throw new Error("Unused storyboard image failure.");
   }
 }
 
@@ -94,19 +107,58 @@ describe("PresenterImageWorkflowService", () => {
       "portrait-9-16",
       "landscape-16-9"
     ]);
+    expect(provider.inputs[0]?.knowledgeContextPrompt).toContain("GPT Image 2");
+    expect(provider.inputs[0]?.knowledgeContextPrompt).toContain("HeyGen");
     expect(updated.steps.find((step) => step.id === "avatar")?.status).toBe("waiting");
     expect(updated.generatedPresenterImageAssetId).toBeTruthy();
     expect(
       updated.mediaAssets.filter((asset) => asset.kind === "generated-presenter-image")
     ).toHaveLength(2);
+    expect(updated.generatedPresenterImageSelections?.["portrait-9-16"]).toBeTruthy();
+    expect(updated.generatedPresenterImageSelections?.["landscape-16-9"]).toBeTruthy();
     expect(
-      fs.existsSync(path.join(taskDirectory, "avatar", "generated-presenter-portrait-9-16.png"))
+      fs
+        .readdirSync(path.join(taskDirectory, "avatar"))
+        .some((file) => /^generated-presenter-portrait-9-16-\d+\.png$/.test(file))
     ).toBe(true);
     expect(
-      fs.existsSync(
-        path.join(taskDirectory, "avatar", "generated-presenter-landscape-16-9-prompt.txt")
-      )
+      fs
+        .readdirSync(path.join(taskDirectory, "avatar"))
+        .some((file) => /^generated-presenter-landscape-16-9-\d+-prompt\.txt$/.test(file))
     ).toBe(true);
+  });
+
+  it("keeps multiple generated images and lets a task select one per preset", async () => {
+    const provider = new SuccessfulImageProvider();
+    const service = new PresenterImageWorkflowService(repository, appPaths, provider);
+    const task = repository.createTask({ title: "Presenter image selection" });
+    const withProduct = service.importProductImage(task.id, productImagePath);
+    repository.updateTask({
+      taskId: withProduct.id,
+      avatarDescriptionPrompt: "年轻印尼女主播，手拿商品。",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const first = await service.generatePresenterImages(task.id);
+    const firstAsset = first.mediaAssets.find(
+      (asset) => asset.kind === "generated-presenter-image"
+    );
+    expect(firstAsset).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await service.generatePresenterImages(task.id);
+    const generatedAssets = second.mediaAssets.filter(
+      (asset) => asset.kind === "generated-presenter-image"
+    );
+
+    expect(generatedAssets.length).toBeGreaterThanOrEqual(2);
+    const selected = service.selectGeneratedPresenterImage({
+      taskId: task.id,
+      presetId: "portrait-9-16",
+      assetId: firstAsset?.id ?? ""
+    });
+
+    expect(selected.generatedPresenterImageSelections?.["portrait-9-16"]).toBe(firstAsset?.id);
+    expect(selected.generatedPresenterImageAssetId).toBe(firstAsset?.id);
   });
 
   it("marks avatar step retry-ready when presenter image generation fails", async () => {

@@ -52,6 +52,18 @@ _Avoid_: Final transcript, exact frame detection claim, copied shot plan
 The hidden script-generation layer that analyzes source links, source copy, product context, IP profile, or mixed-cut goals before writing the editable final script. It contains the reusable SOP thinking from reference breakdown, product selection-to-commerce, storyboard planning, personal IP planning, AI image/video prompting, and mixed-cut planning without exposing a large methodology form in the interface.
 _Avoid_: Visible workflow block, prompt clutter, direct copy
 
+**Production Workflow Registry**:
+The canonical set of built-in production methods, required inputs, workflow stages, expected outputs, and quality gates for each video generation mode. It makes learned production methods part of the product behavior instead of one-off prompt text.
+_Avoid_: Tutorial text, loose prompt snippet, user-visible course notes
+
+**Knowledge Document**:
+A user-uploaded reference document that can guide script, storyboard, or production decisions for a task, such as a creator rulebook, product policy, platform rule, or internal SOP.
+_Avoid_: API key, private password, unrelated file attachment
+
+**Viral Copy Reference**:
+A user-uploaded example of high-performing copy or a viral content case. The app may learn structure, hook function, proof path, emotion curve, and CTA logic from it, but must not copy distinctive wording or creator identity.
+_Avoid_: Copy source, clone script, protected expression
+
 **Reference Breakdown**:
 The structured analysis of a reference video's abstract mechanics, such as hook job, pacing, proof type, emotional curve, visual rhythm, and CTA placement. It must not preserve the reference's distinctive wording, creator persona, jokes, or shot signature.
 _Avoid_: Shot-for-shot copy, 1:1 rewrite, creator imitation
@@ -59,6 +71,14 @@ _Avoid_: Shot-for-shot copy, 1:1 rewrite, creator imitation
 **Storyboard Generation Method**:
 An internal planning method that converts a script goal into first frame, hook, proof/demo/story, visual action, subtitle emphasis, and edit rhythm. It can guide product shots, image lip-sync prompts, personal IP clips, or future image-to-video providers without becoming a top-level navigation item.
 _Avoid_: Separate video category, final rendered edit, fixed timeline
+
+**Drama-Commerce Storyboard Flow**:
+An internal method inside viral remix and product/commerce workflows. It first analyzes product, audience, pain points, source mechanics, and conversion logic, then generates multiple editable story script options before visual storyboard generation.
+_Avoid_: One-shot video generation, hidden final script, direct tutorial display
+
+**Story Script Options**:
+The editable candidate scripts produced after source/product analysis and before visual storyboard generation. The app may write the recommended option into the AI generated copy by default, but the user can replace or edit it before storyboarding.
+_Avoid_: Final locked script, raw prompt result, copied reference script
 
 **Personal IP Method**:
 An internal analysis path for personal IP videos. It first infers whether the task is store visit, knowledge output, opinion, daily life, industry insight, experience sharing, or commerce, then chooses an appropriate interaction goal instead of forcing every IP video into product sales.

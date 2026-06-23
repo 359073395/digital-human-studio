@@ -99,6 +99,32 @@ describe("SourceAssetService", () => {
     }
   });
 
+  it("imports knowledge documents and viral copy references as task assets", () => {
+    const service = new SourceAssetService(repository, appPaths);
+    const task = repository.createTask({ title: "Knowledge task" });
+    const knowledgePath = path.join(tempDir, "playbook.md");
+    const viralPath = path.join(tempDir, "viral-case.txt");
+    fs.writeFileSync(knowledgePath, "# Playbook\nUse first-frame analysis.", "utf8");
+    fs.writeFileSync(viralPath, "Hook -> proof -> CTA", "utf8");
+
+    const withKnowledge = service.importKnowledgeDocuments(task.id, [knowledgePath]);
+    const updated = service.importViralCopyReferences(task.id, [viralPath]);
+
+    expect(withKnowledge.mediaAssets.some((asset) => asset.kind === "knowledge-document")).toBe(
+      true
+    );
+    expect(updated.mediaAssets.some((asset) => asset.kind === "viral-copy-reference")).toBe(true);
+    for (const asset of updated.mediaAssets.filter((candidate) =>
+      ["knowledge-document", "viral-copy-reference"].includes(candidate.kind)
+    )) {
+      expect(
+        fs.existsSync(
+          path.join(getTaskDirectory(appPaths, task.id), ...asset.relativePath.split("/"))
+        )
+      ).toBe(true);
+    }
+  });
+
   it("creates a reusable visual analysis brief for script generation", () => {
     const service = new SourceAssetService(repository, appPaths);
     const task = repository.createTask({ title: "Visual brief" });

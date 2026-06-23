@@ -4,11 +4,13 @@ import type {
   CreativeWorkflow,
   ContentLanguage,
   FrameTitleStyle,
+  GeneratedPresenterImageSelections,
   GenerationStepId,
   MediaAsset,
   OutputPresetId,
   PersonalIpProfile,
   SubtitleStyle,
+  VisualStoryboardPanelCount,
   VideoGenerationMode,
   VideoTask,
   VideoTaskSummary
@@ -16,6 +18,8 @@ import type {
 import type { SourceTranscriptionResult } from "./scriptGeneration";
 import type {
   ProviderId,
+  ListServiceModelsInput,
+  ServiceModelList,
   SaveServiceConfigurationInput,
   ServiceConfiguration,
   ServiceConnectionCheck
@@ -44,13 +48,19 @@ export interface DigitalHumanStudioAPI {
   downloadOriginalVideo: (taskId: string) => Promise<VideoTask>;
   uploadSourceVideo: (taskId: string) => Promise<VideoTask>;
   uploadMixedCutMaterial: (taskId: string) => Promise<VideoTask>;
+  uploadKnowledgeDocuments: (taskId: string) => Promise<VideoTask>;
+  uploadViralCopyReferences: (taskId: string) => Promise<VideoTask>;
   analyzeSourceVisuals: (taskId: string) => Promise<VideoTask>;
+  generateStoryScriptOptions: (taskId: string) => Promise<VideoTask>;
+  generateVisualStoryboard: (input: GenerateVisualStoryboardInput) => Promise<VideoTask>;
   uploadProductImage: (taskId: string) => Promise<VideoTask>;
   uploadReferenceImage: (taskId: string) => Promise<VideoTask>;
   uploadCustomFont: (taskId: string) => Promise<VideoTask>;
-  generatePresenterImages: (taskId: string) => Promise<VideoTask>;
+  generatePresenterImages: (input: GeneratePresenterImagesInput | string) => Promise<VideoTask>;
+  selectGeneratedPresenterImage: (input: SelectGeneratedPresenterImageInput) => Promise<VideoTask>;
   renderHeyGenAvatar: (taskId: string) => Promise<VideoTask>;
   listHeyGenAvatarLooks: () => Promise<HeyGenAvatarLook[]>;
+  createHeyGenAvatar: (input: CreateHeyGenAvatarInput) => Promise<CreateHeyGenAvatarResult>;
   runRealWorkflow: (taskId: string) => Promise<VideoTask>;
   runMockWorkflow: (taskId: string) => Promise<VideoTask>;
   retryMockWorkflowStep: (input: RetryWorkflowStepInput) => Promise<VideoTask>;
@@ -60,6 +70,7 @@ export interface DigitalHumanStudioAPI {
   saveServiceConfiguration: (input: SaveServiceConfigurationInput) => Promise<ServiceConfiguration>;
   clearServiceCredential: (providerId: ProviderId) => Promise<ServiceConfiguration>;
   testServiceConfiguration: (providerId: ProviderId) => Promise<ServiceConnectionCheck>;
+  listServiceModels: (input: ListServiceModelsInput) => Promise<ServiceModelList>;
 }
 
 export const IPC_CHANNELS = {
@@ -76,13 +87,19 @@ export const IPC_CHANNELS = {
   downloadOriginalVideo: "source:download-original-video",
   uploadSourceVideo: "source:upload-source-video",
   uploadMixedCutMaterial: "source:upload-mixed-cut-material",
+  uploadKnowledgeDocuments: "source:upload-knowledge-documents",
+  uploadViralCopyReferences: "source:upload-viral-copy-references",
   analyzeSourceVisuals: "source:analyze-visuals",
+  generateStoryScriptOptions: "storyboard:generate-story-scripts",
+  generateVisualStoryboard: "storyboard:generate-visual",
   uploadProductImage: "source:upload-product-image",
   uploadReferenceImage: "source:upload-reference-image",
   uploadCustomFont: "source:upload-custom-font",
   generatePresenterImages: "image:generate-presenter-images",
+  selectGeneratedPresenterImage: "image:select-generated-presenter-image",
   renderHeyGenAvatar: "avatar:render-heygen",
   listHeyGenAvatarLooks: "avatar:list-heygen-looks",
+  createHeyGenAvatar: "avatar:create-heygen",
   runRealWorkflow: "workflow:real-run",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
@@ -91,7 +108,8 @@ export const IPC_CHANNELS = {
   listServiceConfigurations: "service-configurations:list",
   saveServiceConfiguration: "service-configurations:save",
   clearServiceCredential: "service-configurations:clear-credential",
-  testServiceConfiguration: "service-configurations:test"
+  testServiceConfiguration: "service-configurations:test",
+  listServiceModels: "service-configurations:list-models"
 } as const;
 
 export interface CreateTaskInput {
@@ -110,11 +128,13 @@ export interface UpdateTaskInput {
   generationMode?: VideoGenerationMode;
   avatarMode?: AvatarMode;
   presetAvatarId?: string;
+  presetAvatarGroupId?: string;
   avatarDescriptionPrompt?: string;
   motionPrompt?: string;
   productImageAssetId?: MediaAsset["id"] | null;
   referenceImageAssetId?: MediaAsset["id"] | null;
   generatedPresenterImageAssetId?: MediaAsset["id"] | null;
+  generatedPresenterImageSelections?: GeneratedPresenterImageSelections;
   customFontAssetId?: MediaAsset["id"] | null;
   customFontFamily?: string;
   selectedOutputPresets?: OutputPresetId[];
@@ -125,14 +145,47 @@ export interface UpdateTaskInput {
   creativeWorkflow?: CreativeWorkflow;
 }
 
+export interface GenerateVisualStoryboardInput {
+  taskId: string;
+  panelCount?: VisualStoryboardPanelCount;
+}
+
+export interface GeneratePresenterImagesInput {
+  taskId: string;
+  presetIds?: OutputPresetId[];
+  promptOverride?: string;
+}
+
+export interface SelectGeneratedPresenterImageInput {
+  taskId: string;
+  presetId: OutputPresetId;
+  assetId: MediaAsset["id"];
+}
+
 export interface HeyGenAvatarLook {
   id: string;
+  groupId?: string;
   name: string;
   previewImageUrl?: string;
   previewVideoUrl?: string;
   gender?: string;
   defaultVoiceId?: string;
   status?: string;
+  avatarType?: string;
+  orientation?: "portrait" | "landscape" | "square" | "unknown";
+  imageWidth?: number;
+  imageHeight?: number;
+}
+
+export interface CreateHeyGenAvatarInput {
+  name: string;
+  prompt: string;
+  avatarGroupId?: string;
+}
+
+export interface CreateHeyGenAvatarResult {
+  look: HeyGenAvatarLook;
+  message: string;
 }
 
 export interface RetryWorkflowStepInput {

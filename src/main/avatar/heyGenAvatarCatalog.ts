@@ -3,6 +3,7 @@ import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { defaultServiceSettings } from "../../shared/serviceConfig";
 import { redactSecret } from "../security/redaction";
 import { AvatarProviderUnavailableError } from "./avatarProvider";
+import { buildHeyGenAuthHeaders } from "./heyGenAuth";
 import { normalizeHeyGenBaseUrl } from "./heyGenUrls";
 
 interface HeyGenConfigurationReader {
@@ -39,7 +40,7 @@ export class HeyGenAvatarCatalog {
     this.limit = options.limit ?? 24;
   }
 
-  async listAvatarLooks(): Promise<HeyGenAvatarLook[]> {
+  async listAvatarLooks(groupId?: string): Promise<HeyGenAvatarLook[]> {
     const configuration = this.configurations.getConfiguration("heygen");
     if (configuration.settings.enabled === false) {
       throw new AvatarProviderUnavailableError("HeyGen 服务未启用。");
@@ -47,7 +48,7 @@ export class HeyGenAvatarCatalog {
 
     const apiKey = await this.credentials.readCredential("heygen");
     if (!apiKey) {
-      throw new AvatarProviderUnavailableError("HeyGen API Key 尚未配置。");
+      throw new AvatarProviderUnavailableError("HeyGen 凭据尚未配置。");
     }
 
     const baseUrl = configuration.settings.baseUrl || defaultServiceSettings("heygen").baseUrl;
@@ -57,12 +58,13 @@ export class HeyGenAvatarCatalog {
 
     const url = new URL(`${normalizeHeyGenBaseUrl(baseUrl)}/v3/avatars/looks`);
     url.searchParams.set("limit", String(this.limit));
+    if (groupId?.trim()) {
+      url.searchParams.set("group_id", groupId.trim());
+    }
 
     const response = await requestJson<HeyGenEnvelope<unknown>>(this.fetchImpl, url.toString(), {
       method: "GET",
-      headers: {
-        "x-api-key": apiKey
-      }
+      headers: buildHeyGenAuthHeaders(configuration, apiKey)
     });
 
     return extractLookItems(response.data).map(normalizeLook).filter(isUsableLook);
@@ -92,10 +94,13 @@ function extractLookItems(data: unknown): UnknownRecord[] {
 
 function normalizeLook(raw: UnknownRecord): HeyGenAvatarLook {
   const id = readString(raw, ["avatar_id", "avatarId", "look_id", "lookId", "id"]);
+  const imageWidth = readNumber(raw, ["image_width", "imageWidth", "width"]);
+  const imageHeight = readNumber(raw, ["image_height", "imageHeight", "height"]);
   const name = readString(raw, ["name", "avatar_name", "avatarName", "look_name", "lookName"]);
 
   return {
     id,
+    groupId: readString(raw, ["group_id", "groupId", "avatar_group_id", "avatarGroupId"]),
     name: name || id,
     previewImageUrl: readString(raw, [
       "preview_image_url",
@@ -115,7 +120,11 @@ function normalizeLook(raw: UnknownRecord): HeyGenAvatarLook {
     ]),
     gender: readString(raw, ["gender"]),
     defaultVoiceId: readString(raw, ["default_voice_id", "defaultVoiceId", "voice_id", "voiceId"]),
-    status: readString(raw, ["status", "training_status", "trainingStatus"])
+    status: readString(raw, ["status", "training_status", "trainingStatus"]),
+    avatarType: readString(raw, ["avatar_type", "avatarType", "type"]),
+    orientation: readOrientation(imageWidth, imageHeight),
+    imageWidth,
+    imageHeight
   };
 }
 
@@ -157,6 +166,32 @@ function readString(record: UnknownRecord, keys: string[]): string {
     }
   }
   return "";
+}
+
+function readNumber(record: UnknownRecord, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+  return undefined;
+}
+
+function readOrientation(
+  imageWidth: number | undefined,
+  imageHeight: number | undefined
+): HeyGenAvatarLook["orientation"] {
+  if (!imageWidth || !imageHeight) {
+    return "unknown";
+  }
+  if (imageWidth === imageHeight) {
+    return "square";
+  }
+  return imageWidth > imageHeight ? "landscape" : "portrait";
 }
 
 function isRecord(value: unknown): value is UnknownRecord {

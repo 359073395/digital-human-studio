@@ -20,6 +20,7 @@ import {
   type FrameTitleStyle,
   type GenerationStep,
   type GenerationStepId,
+  type GeneratedPresenterImageSelections,
   type MediaAsset,
   type OutputPresetId,
   type OutputVariant,
@@ -49,11 +50,13 @@ interface TaskRow {
   generation_mode: VideoGenerationMode;
   avatar_mode: AvatarMode;
   preset_avatar_id: string;
+  preset_avatar_group_id: string;
   avatar_description_prompt: string;
   motion_prompt: string;
   product_image_asset_id: string | null;
   reference_image_asset_id: string | null;
   generated_presenter_image_asset_id: string | null;
+  generated_presenter_image_selections: string;
   custom_font_asset_id: string | null;
   custom_font_family: string;
   selected_output_presets: string;
@@ -152,8 +155,10 @@ export class TaskRepository {
     const generationMode: VideoGenerationMode = "preset-avatar";
     const avatarMode: AvatarMode = "preset-avatar";
     const presetAvatarId = "";
+    const presetAvatarGroupId = "";
     const avatarDescriptionPrompt = "";
     const motionPrompt = "";
+    const generatedPresenterImageSelections: GeneratedPresenterImageSelections = {};
     const customFontAssetId = null;
     const customFontFamily = "";
     const selectedOutputPresets = defaultOutputPresetIds();
@@ -180,11 +185,13 @@ export class TaskRepository {
             generation_mode,
             avatar_mode,
             preset_avatar_id,
+            preset_avatar_group_id,
             avatar_description_prompt,
             motion_prompt,
             product_image_asset_id,
             reference_image_asset_id,
             generated_presenter_image_asset_id,
+            generated_presenter_image_selections,
             custom_font_asset_id,
             custom_font_family,
             selected_output_presets,
@@ -196,7 +203,7 @@ export class TaskRepository {
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -211,11 +218,13 @@ export class TaskRepository {
           generationMode,
           avatarMode,
           presetAvatarId,
+          presetAvatarGroupId,
           avatarDescriptionPrompt,
           motionPrompt,
           null,
           null,
           null,
+          JSON.stringify(generatedPresenterImageSelections),
           customFontAssetId,
           customFontFamily,
           JSON.stringify(selectedOutputPresets),
@@ -281,7 +290,14 @@ export class TaskRepository {
       this.database.prepare("DELETE FROM video_tasks WHERE id = ?").run(taskId);
     });
 
-    fs.rmSync(taskDirectory, { recursive: true, force: true });
+    try {
+      fs.rmSync(taskDirectory, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(
+        `Task ${taskId} was deleted from the database, but its media directory could not be removed.`,
+        error
+      );
+    }
   }
 
   updateTask(input: UpdateTaskInput): VideoTask {
@@ -316,6 +332,10 @@ export class TaskRepository {
       input.presetAvatarId === undefined
         ? (existing.presetAvatarId ?? "")
         : input.presetAvatarId.trim();
+    const presetAvatarGroupId =
+      input.presetAvatarGroupId === undefined
+        ? (existing.presetAvatarGroupId ?? "")
+        : input.presetAvatarGroupId.trim();
     const avatarDescriptionPrompt =
       input.avatarDescriptionPrompt === undefined
         ? existing.avatarDescriptionPrompt
@@ -334,6 +354,9 @@ export class TaskRepository {
       input.generatedPresenterImageAssetId === undefined
         ? existing.generatedPresenterImageAssetId
         : input.generatedPresenterImageAssetId;
+    const generatedPresenterImageSelections = normalizeGeneratedPresenterImageSelections(
+      input.generatedPresenterImageSelections ?? existing.generatedPresenterImageSelections
+    );
     const customFontAssetId =
       input.customFontAssetId === undefined ? existing.customFontAssetId : input.customFontAssetId;
     const customFontFamily =
@@ -368,11 +391,13 @@ export class TaskRepository {
                generation_mode = ?,
                avatar_mode = ?,
                preset_avatar_id = ?,
+               preset_avatar_group_id = ?,
                avatar_description_prompt = ?,
                motion_prompt = ?,
                product_image_asset_id = ?,
                reference_image_asset_id = ?,
                generated_presenter_image_asset_id = ?,
+               generated_presenter_image_selections = ?,
                custom_font_asset_id = ?,
                custom_font_family = ?,
                 selected_output_presets = ?,
@@ -394,11 +419,13 @@ export class TaskRepository {
           generationMode,
           avatarMode,
           presetAvatarId,
+          presetAvatarGroupId,
           avatarDescriptionPrompt,
           motionPrompt,
           productImageAssetId ?? null,
           referenceImageAssetId ?? null,
           generatedPresenterImageAssetId ?? null,
+          JSON.stringify(generatedPresenterImageSelections),
           customFontAssetId ?? null,
           customFontFamily,
           JSON.stringify(selectedOutputPresets),
@@ -678,11 +705,15 @@ export class TaskRepository {
       generationMode: normalizeGenerationMode(row.generation_mode),
       avatarMode: normalizeAvatarMode(row.avatar_mode),
       presetAvatarId: row.preset_avatar_id ?? "",
+      presetAvatarGroupId: row.preset_avatar_group_id ?? "",
       avatarDescriptionPrompt: row.avatar_description_prompt,
       motionPrompt: row.motion_prompt,
       productImageAssetId: row.product_image_asset_id ?? undefined,
       referenceImageAssetId: row.reference_image_asset_id ?? undefined,
       generatedPresenterImageAssetId: row.generated_presenter_image_asset_id ?? undefined,
+      generatedPresenterImageSelections: parseGeneratedPresenterImageSelections(
+        row.generated_presenter_image_selections
+      ),
       customFontAssetId: row.custom_font_asset_id ?? undefined,
       customFontFamily: row.custom_font_family ?? "",
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
@@ -837,6 +868,18 @@ function parseCreativeWorkflow(value: string | null | undefined): CreativeWorkfl
   }
 }
 
+function parseGeneratedPresenterImageSelections(
+  value: string | null | undefined
+): GeneratedPresenterImageSelections {
+  try {
+    return normalizeGeneratedPresenterImageSelections(
+      value ? (JSON.parse(value) as GeneratedPresenterImageSelections) : {}
+    );
+  } catch {
+    return {};
+  }
+}
+
 function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
   const unique = Array.from(new Set(value.filter(isOutputPresetId)));
   return unique.length > 0 ? unique : defaultOutputPresetIds();
@@ -858,11 +901,28 @@ function normalizeAvatarModeForGenerationMode(
   generationMode: VideoGenerationMode,
   avatarMode: AvatarMode
 ): AvatarMode {
-  if (generationMode === "product-avatar" || generationMode === "image-lipsync") {
+  if (generationMode === "image-lipsync") {
     return "image-presenter";
   }
 
   return normalizeAvatarMode(avatarMode);
+}
+
+function normalizeGeneratedPresenterImageSelections(
+  value: GeneratedPresenterImageSelections | undefined
+): GeneratedPresenterImageSelections {
+  const selections: GeneratedPresenterImageSelections = {};
+  if (!value || typeof value !== "object") {
+    return selections;
+  }
+
+  for (const [presetId, assetId] of Object.entries(value)) {
+    if (isOutputPresetId(presetId) && typeof assetId === "string" && assetId.trim()) {
+      selections[presetId] = assetId.trim();
+    }
+  }
+
+  return selections;
 }
 
 function normalizeSubtitleStyle(value: Partial<SubtitleStyle>): SubtitleStyle {

@@ -135,6 +135,36 @@ describe("OpenAiImageProvider", () => {
     expect(result.extension).toBe("png");
   });
 
+  it("generates a visual storyboard image through OpenAI image generations", async () => {
+    const imageBytes = Buffer.from("storyboard-image");
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return new Response(
+        JSON.stringify({
+          data: [{ b64_json: imageBytes.toString("base64") }]
+        })
+      );
+    });
+
+    const result = await createProvider({ fetchImpl: fetchMock }).generateVisualStoryboardImage({
+      prompt: "Create one visual storyboard with 8 consistent panels."
+    });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const requestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+
+    expect(url).toBe("https://api.openai.test/v1/images/generations");
+    expect(init.headers).toMatchObject({
+      authorization: `Bearer ${TEST_API_KEY}`
+    });
+    expect(requestBody).toMatchObject({
+      model: "gpt-image-2",
+      size: "1536x1024",
+      response_format: "b64_json"
+    });
+    expect(String(requestBody.prompt)).toContain("visual storyboard");
+    expect(String(init.body)).not.toContain(TEST_API_KEY);
+    expect(result.imageBytes.toString()).toBe("storyboard-image");
+  });
+
   it("is unavailable when the image provider is disabled or missing credentials", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 

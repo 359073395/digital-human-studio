@@ -220,11 +220,19 @@ function findGeneratedPresenterImagePath(
   }
 
   const matchingAsset =
+    (task.generatedPresenterImageSelections?.[preset.id]
+      ? task.mediaAssets.find(
+          (asset) =>
+            asset.id === task.generatedPresenterImageSelections?.[preset.id] &&
+            asset.kind === "generated-presenter-image"
+        )
+      : undefined) ??
     task.mediaAssets.find(
       (asset) =>
         asset.kind === "generated-presenter-image" &&
         asset.relativePath.includes(`generated-presenter-${preset.id}.`)
-    ) ?? task.mediaAssets.find((asset) => asset.id === task.generatedPresenterImageAssetId);
+    ) ??
+    task.mediaAssets.find((asset) => asset.id === task.generatedPresenterImageAssetId);
 
   if (!matchingAsset) {
     throw new Error("请先生成人物商品图。");

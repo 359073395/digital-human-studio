@@ -2,17 +2,24 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { VideoTask, VideoTaskSummary } from "../shared/domain";
 import type {
   ProviderId,
+  ListServiceModelsInput,
   SaveServiceConfigurationInput,
   ServiceConfiguration,
-  ServiceConnectionCheck
+  ServiceConnectionCheck,
+  ServiceModelList
 } from "../shared/serviceConfig";
 import type {
   AppInfo,
+  CreateHeyGenAvatarInput,
+  CreateHeyGenAvatarResult,
   CreateTaskInput,
   DigitalHumanStudioAPI,
+  GeneratePresenterImagesInput,
+  GenerateVisualStoryboardInput,
   HeyGenAvatarLook,
   ResolveTaskAssetUrlInput,
   RetryWorkflowStepInput,
+  SelectGeneratedPresenterImageInput,
   UpdateTaskInput
 } from "../shared/ipc";
 import type { SourceTranscriptionResult } from "../shared/scriptGeneration";
@@ -31,13 +38,19 @@ const IPC_CHANNELS = {
   downloadOriginalVideo: "source:download-original-video",
   uploadSourceVideo: "source:upload-source-video",
   uploadMixedCutMaterial: "source:upload-mixed-cut-material",
+  uploadKnowledgeDocuments: "source:upload-knowledge-documents",
+  uploadViralCopyReferences: "source:upload-viral-copy-references",
   analyzeSourceVisuals: "source:analyze-visuals",
+  generateStoryScriptOptions: "storyboard:generate-story-scripts",
+  generateVisualStoryboard: "storyboard:generate-visual",
   uploadProductImage: "source:upload-product-image",
   uploadReferenceImage: "source:upload-reference-image",
   uploadCustomFont: "source:upload-custom-font",
   generatePresenterImages: "image:generate-presenter-images",
+  selectGeneratedPresenterImage: "image:select-generated-presenter-image",
   renderHeyGenAvatar: "avatar:render-heygen",
   listHeyGenAvatarLooks: "avatar:list-heygen-looks",
+  createHeyGenAvatar: "avatar:create-heygen",
   runRealWorkflow: "workflow:real-run",
   runMockWorkflow: "workflow:mock-run",
   retryMockWorkflowStep: "workflow:mock-retry-step",
@@ -46,7 +59,8 @@ const IPC_CHANNELS = {
   listServiceConfigurations: "service-configurations:list",
   saveServiceConfiguration: "service-configurations:save",
   clearServiceCredential: "service-configurations:clear-credential",
-  testServiceConfiguration: "service-configurations:test"
+  testServiceConfiguration: "service-configurations:test",
+  listServiceModels: "service-configurations:list-models"
 } as const;
 
 const api: DigitalHumanStudioAPI = {
@@ -73,20 +87,32 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.uploadSourceVideo, taskId) as Promise<VideoTask>,
   uploadMixedCutMaterial: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadMixedCutMaterial, taskId) as Promise<VideoTask>,
+  uploadKnowledgeDocuments: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadKnowledgeDocuments, taskId) as Promise<VideoTask>,
+  uploadViralCopyReferences: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadViralCopyReferences, taskId) as Promise<VideoTask>,
   analyzeSourceVisuals: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.analyzeSourceVisuals, taskId) as Promise<VideoTask>,
+  generateStoryScriptOptions: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.generateStoryScriptOptions, taskId) as Promise<VideoTask>,
+  generateVisualStoryboard: (input: GenerateVisualStoryboardInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.generateVisualStoryboard, input) as Promise<VideoTask>,
   uploadProductImage: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadProductImage, taskId) as Promise<VideoTask>,
   uploadReferenceImage: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadReferenceImage, taskId) as Promise<VideoTask>,
   uploadCustomFont: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadCustomFont, taskId) as Promise<VideoTask>,
-  generatePresenterImages: (taskId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.generatePresenterImages, taskId) as Promise<VideoTask>,
+  generatePresenterImages: (input: GeneratePresenterImagesInput | string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.generatePresenterImages, input) as Promise<VideoTask>,
+  selectGeneratedPresenterImage: (input: SelectGeneratedPresenterImageInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.selectGeneratedPresenterImage, input) as Promise<VideoTask>,
   renderHeyGenAvatar: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.renderHeyGenAvatar, taskId) as Promise<VideoTask>,
   listHeyGenAvatarLooks: () =>
     ipcRenderer.invoke(IPC_CHANNELS.listHeyGenAvatarLooks) as Promise<HeyGenAvatarLook[]>,
+  createHeyGenAvatar: (input: CreateHeyGenAvatarInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.createHeyGenAvatar, input) as Promise<CreateHeyGenAvatarResult>,
   runRealWorkflow: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.runRealWorkflow, taskId) as Promise<VideoTask>,
   runMockWorkflow: (taskId: string) =>
@@ -113,7 +139,9 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(
       IPC_CHANNELS.testServiceConfiguration,
       providerId
-    ) as Promise<ServiceConnectionCheck>
+    ) as Promise<ServiceConnectionCheck>,
+  listServiceModels: (input: ListServiceModelsInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.listServiceModels, input) as Promise<ServiceModelList>
 };
 
 contextBridge.exposeInMainWorld("digitalHumanStudio", api);

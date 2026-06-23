@@ -52,6 +52,7 @@ describe("ServiceConfigurationRepository", () => {
       "heygen",
       "llm",
       "image",
+      "video",
       "asr",
       "tts"
     ]);
@@ -96,6 +97,7 @@ describe("ServiceConfigurationRepository", () => {
       providerId: "heygen",
       settings: {
         baseUrl: "https://api.heygen.test",
+        authMode: "oauth-bearer",
         avatarId: "avatar-123",
         voiceId: "voice-456",
         resolution: "1080p",
@@ -108,6 +110,7 @@ describe("ServiceConfigurationRepository", () => {
     const sqliteBytes = fs.readFileSync(createAppPaths(tempDir).databasePath, "utf8");
 
     expect(configuration.settings).toMatchObject({
+      authMode: "oauth-bearer",
       avatarId: "avatar-123",
       voiceId: "voice-456",
       resolution: "1080p"
@@ -116,10 +119,18 @@ describe("ServiceConfigurationRepository", () => {
   });
 
   it("tests HeyGen credentials with a real API-style request", async () => {
-    const seenUrls: string[] = [];
-    const fetchImpl: typeof fetch = async (url) => {
-      seenUrls.push(String(url));
-      return new Response(JSON.stringify({ data: { avatar_looks: [{ id: "avatar-123" }] } }), {
+    const seenRequests: Array<{ url: string; xApiKey?: string; authorization?: string }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      const headers = init?.headers as Record<string, string>;
+      seenRequests.push({
+        url: String(url),
+        xApiKey: headers?.["x-api-key"],
+        authorization: headers?.authorization
+      });
+      const data = String(url).endsWith("/v3/users/me")
+        ? { billing_type: "subscription" }
+        : { avatar_looks: [{ id: "avatar-123" }] };
+      return new Response(JSON.stringify({ data }), {
         status: 200,
         headers: { "content-type": "application/json" }
       });
@@ -139,9 +150,48 @@ describe("ServiceConfigurationRepository", () => {
 
     await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({
       ok: true,
-      message: "HeyGen 测试通过，API Key 可连接；预设数字人会在任务里自动读取后选择"
+      message: "HeyGen 测试通过，计费类型 subscription；预设数字人会在任务里自动读取后选择"
     });
-    expect(seenUrls).toContain("https://api.heygen.com/v3/avatars/looks?limit=1");
+    expect(seenRequests).toEqual([
+      {
+        url: "https://api.heygen.com/v3/users/me",
+        xApiKey: "heygen-key",
+        authorization: undefined
+      },
+      {
+        url: "https://api.heygen.com/v3/avatars/looks?limit=1",
+        xApiKey: "heygen-key",
+        authorization: undefined
+      }
+    ]);
+  });
+
+  it("uses Bearer auth when HeyGen member/OAuth mode is selected", async () => {
+    const seenAuthorizations: Array<string | undefined> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      seenAuthorizations.push((init?.headers as Record<string, string>).authorization);
+      const data = String(url).endsWith("/v3/users/me")
+        ? { billing_type: "subscription" }
+        : { avatar_looks: [{ id: "avatar-123" }] };
+      return new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    };
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+
+    await repository.saveConfiguration({
+      providerId: "heygen",
+      settings: {
+        baseUrl: "https://api.heygen.com",
+        authMode: "oauth-bearer",
+        enabled: true
+      },
+      apiKey: "oauth-token"
+    });
+
+    await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({ ok: true });
+    expect(seenAuthorizations).toEqual(["Bearer oauth-token", "Bearer oauth-token"]);
   });
 
   it("tests the LLM provider with the chat completions endpoint used by generation", async () => {
@@ -170,6 +220,82 @@ describe("ServiceConfigurationRepository", () => {
       ok: true,
       message: "大模型（OpenAI 兼容） 测试通过，custom-model 的 chat/completions 可用"
     });
+  });
+
+  it("lists OpenAI-compatible models from the current draft settings", async () => {
+    const seenRequests: Array<{ url: string; authorization?: string }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      seenRequests.push({
+        url: String(url),
+        authorization: (init?.headers as Record<string, string>).authorization
+      });
+      return new Response(
+        JSON.stringify({
+          data: [{ id: "gpt-5.5" }, { id: "gpt-image-2" }, { id: "gpt-5.5" }]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    };
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+
+    const result = await repository.listModels({
+      providerId: "llm",
+      settings: {
+        baseUrl: "https://relay.example/v1",
+        enabled: true
+      },
+      apiKey: "draft-key"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      models: ["gpt-5.5", "gpt-image-2"]
+    });
+    expect(seenRequests).toEqual([
+      {
+        url: "https://relay.example/v1/models",
+        authorization: "Bearer draft-key"
+      }
+    ]);
+    expect(fs.readFileSync(createAppPaths(tempDir).databasePath, "utf8")).not.toContain(
+      "draft-key"
+    );
+  });
+
+  it("fetches video models when the OpenAI-compatible video provider is selected", async () => {
+    const seenRequests: string[] = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      seenRequests.push(String(url));
+      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer video-key");
+      return new Response(
+        JSON.stringify({
+          data: [{ id: "seedance-video" }, { id: "wan-video" }]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    };
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+
+    const result = await repository.listModels({
+      providerId: "video",
+      settings: {
+        baseUrl: "https://video.example/v1",
+        enabled: true
+      },
+      apiKey: "video-key"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      models: ["seedance-video", "wan-video"]
+    });
+    expect(seenRequests).toEqual(["https://video.example/v1/models"]);
   });
 
   it("checks whether the LLM configuration can be reused for ASR when standalone ASR is disabled", async () => {

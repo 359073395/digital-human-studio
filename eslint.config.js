@@ -11,8 +11,10 @@ module.exports = tseslint.config(
       "dist-renderer/",
       "node_modules/",
       "coverage/",
+      "data/",
       "eslint.config.js",
-      ".superpowers/"
+      ".superpowers/",
+      "tmp/"
     ]
   },
   js.configs.recommended,

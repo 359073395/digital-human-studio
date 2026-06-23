@@ -62,13 +62,16 @@ export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
       path.basename(input.avatarVideoPath)
     );
 
-    const response = await this.fetchImpl(`${normalizeBaseUrl(activeConfiguration.baseUrl)}/audio/transcriptions`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${activeConfiguration.apiKey}`
-      },
-      body: formData
-    });
+    const response = await this.fetchImpl(
+      `${normalizeBaseUrl(activeConfiguration.baseUrl)}/audio/transcriptions`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${activeConfiguration.apiKey}`
+        },
+        body: formData
+      }
+    );
 
     const responseText = await response.text();
     if (!response.ok) {
@@ -199,30 +202,78 @@ function normalizeTranscriptionToSrt(responseText: string): string {
     return trimmed;
   }
 
-  const text = extractTextFromTranscriptionResponse(trimmed);
-  if (!text) {
-    return "";
+  const segmentSrt = extractSrtFromSegmentResponse(trimmed);
+  if (segmentSrt) {
+    return segmentSrt;
   }
 
-  return [
-    "1",
-    "00:00:00,000 --> 00:00:10,000",
-    text.replace(/\s+/g, " ").trim()
-  ].join("\n");
+  throw new Error(
+    "ASR 已返回文本但没有返回字幕时间轴。发布版不能使用纯估算字幕，请换用支持 SRT 或分段时间戳的 ASR 模型。"
+  );
 }
 
 function looksLikeSrt(value: string): boolean {
   return /\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}/.test(value);
 }
 
-function extractTextFromTranscriptionResponse(value: string): string {
+function extractSrtFromSegmentResponse(value: string): string {
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
-    const candidate = parsed.text ?? parsed.transcript;
-    return typeof candidate === "string" ? candidate.trim() : value;
+    if (!Array.isArray(parsed.segments)) {
+      return "";
+    }
+
+    const blocks = parsed.segments
+      .map((segment, index) => {
+        if (!isRecord(segment)) {
+          return "";
+        }
+
+        const start = readNumber(segment.start);
+        const end = readNumber(segment.end);
+        const text = readText(segment.text);
+        if (start === undefined || end === undefined || !text) {
+          return "";
+        }
+
+        return [String(index + 1), `${formatSrtTime(start)} --> ${formatSrtTime(end)}`, text].join(
+          "\n"
+        );
+      })
+      .filter(Boolean);
+
+    return blocks.join("\n\n");
   } catch {
-    return value;
+    return "";
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
+function formatSrtTime(value: number): string {
+  const totalMilliseconds = Math.max(0, Math.round(value * 1000));
+  const milliseconds = totalMilliseconds % 1000;
+  const totalSeconds = Math.floor(totalMilliseconds / 1000);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)},${String(milliseconds).padStart(3, "0")}`;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

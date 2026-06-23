@@ -155,9 +155,37 @@ describe("OpenAiAsrSubtitleProvider", () => {
     expect(result.srt).toContain("Halo");
   });
 
-  it("wraps plain text transcription responses into basic SRT for non-whisper models", async () => {
+  it("rejects plain text transcription responses without a real subtitle timeline", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => {
       return new Response("Halo dari model transcribe lain");
+    });
+
+    await expect(
+      createProvider({
+        fetchImpl: fetchMock,
+        configuration: createConfiguration({ modelName: "gpt-4o-mini-transcribe" })
+      }).createSubtitleFile({
+        task: createTask(),
+        preset: OUTPUT_PRESETS[0],
+        avatarVideoPath
+      })
+    ).rejects.toThrow("没有返回字幕时间轴");
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const formData = init.body as FormData;
+
+    expect(formData.get("model")).toBe("gpt-4o-mini-transcribe");
+    expect(formData.get("response_format")).toBe("text");
+  });
+
+  it("converts segment timestamp responses into SRT for non-whisper models", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      return Response.json({
+        segments: [
+          { start: 0, end: 1.2, text: "Halo" },
+          { start: 1.2, end: 2.6, text: "Ini subtitle nyata" }
+        ]
+      });
     });
 
     const result = await createProvider({
@@ -168,13 +196,9 @@ describe("OpenAiAsrSubtitleProvider", () => {
       preset: OUTPUT_PRESETS[0],
       avatarVideoPath
     });
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const formData = init.body as FormData;
 
-    expect(formData.get("model")).toBe("gpt-4o-mini-transcribe");
-    expect(formData.get("response_format")).toBe("text");
-    expect(result.srt).toContain("00:00:00,000 --> 00:00:10,000");
-    expect(result.srt).toContain("Halo dari model transcribe lain");
+    expect(result.srt).toContain("00:00:00,000 --> 00:00:01,200");
+    expect(result.srt).toContain("Ini subtitle nyata");
   });
 
   it("requires an ASR model name when ASR is enabled", async () => {
@@ -194,7 +218,9 @@ describe("OpenAiAsrSubtitleProvider", () => {
 
   it("reuses the LLM configuration when standalone ASR is disabled", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => {
-      return new Response("Shared LLM transcript");
+      return Response.json({
+        segments: [{ start: 0, end: 2, text: "Shared LLM transcript" }]
+      });
     });
 
     const result = await createProvider({
@@ -214,6 +240,7 @@ describe("OpenAiAsrSubtitleProvider", () => {
       authorization: `Bearer ${TEST_LLM_API_KEY}`
     });
     expect(formData.get("model")).toBe("gpt-5.5");
+    expect(result.srt).toContain("00:00:00,000 --> 00:00:02,000");
     expect(result.srt).toContain("Shared LLM transcript");
   });
 

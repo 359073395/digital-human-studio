@@ -11,7 +11,9 @@ import {
   ImageProviderUnavailableError,
   type ImageProvider,
   type ProductPresenterImageInput,
-  type ProductPresenterImageResult
+  type ProductPresenterImageResult,
+  type VisualStoryboardImageInput,
+  type VisualStoryboardImageResult
 } from "./imageProvider";
 
 interface ImageConfigurationReader {
@@ -47,29 +49,16 @@ export class OpenAiImageProvider implements ImageProvider {
   async generateProductPresenterImage(
     input: ProductPresenterImageInput
   ): Promise<ProductPresenterImageResult> {
-    const configuration = this.configurations.getConfiguration("image");
-    if (configuration.settings.enabled === false) {
-      throw new ImageProviderUnavailableError("OpenAI 图片服务未启用。");
-    }
-
-    const apiKey = await this.credentials.readCredential("image");
-    if (!apiKey) {
-      throw new ImageProviderUnavailableError("OpenAI 图片 API Key 尚未配置。");
-    }
-
-    const baseUrl = configuration.settings.baseUrl || defaultServiceSettings("image").baseUrl;
-    if (!baseUrl) {
-      throw new ImageProviderUnavailableError("OpenAI 图片 Base URL 尚未配置。");
-    }
-
+    const { apiKey, baseUrl, modelName } = await this.readActiveImageSettings();
     const promptPreview = buildProductPresenterImagePrompt({
       avatarDescriptionPrompt: input.task.avatarDescriptionPrompt,
       motionPrompt: input.task.motionPrompt,
       contentLanguage: input.task.contentLanguage,
-      preset: input.preset
+      preset: input.preset,
+      knowledgeContextPrompt: input.knowledgeContextPrompt
     });
     const formData = new FormData();
-    formData.append("model", configuration.settings.modelName || "gpt-image-2");
+    formData.append("model", modelName);
     formData.append("prompt", promptPreview);
     formData.append("size", imageSizeForPreset(input.preset));
     formData.append(
@@ -93,25 +82,77 @@ export class OpenAiImageProvider implements ImageProvider {
       );
     }
 
-    const parsed = parseImageResponse(responseText);
-    const firstImage = parsed.data?.[0];
-    if (firstImage?.b64_json) {
-      return {
-        imageBytes: Buffer.from(firstImage.b64_json, "base64"),
-        extension: "png",
-        promptPreview
-      };
+    return readImageResult(
+      this.fetchImpl,
+      responseText,
+      promptPreview,
+      "OpenAI 图片响应缺少图片数据。"
+    );
+  }
+
+  async generateVisualStoryboardImage(
+    input: VisualStoryboardImageInput
+  ): Promise<VisualStoryboardImageResult> {
+    const { apiKey, baseUrl, modelName } = await this.readActiveImageSettings();
+    const promptPreview = input.prompt.trim();
+    if (!promptPreview) {
+      throw new Error("视觉故事板提示词为空。");
     }
 
-    if (firstImage?.url) {
-      return {
-        imageBytes: await downloadImage(this.fetchImpl, firstImage.url),
-        extension: extensionFromUrl(firstImage.url),
-        promptPreview
-      };
+    const response = await this.fetchImpl(`${normalizeBaseUrl(baseUrl)}/images/generations`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: modelName,
+        prompt: promptPreview,
+        size: "1536x1024",
+        response_format: "b64_json"
+      })
+    });
+
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `OpenAI 故事板图生成失败 (${response.status}): ${redactSecret(responseText.slice(0, 800)) || response.statusText}`
+      );
     }
 
-    throw new Error("OpenAI 图片响应缺少图片数据。");
+    return readImageResult(
+      this.fetchImpl,
+      responseText,
+      promptPreview,
+      "OpenAI 故事板图响应缺少图片数据。"
+    );
+  }
+
+  private async readActiveImageSettings(): Promise<{
+    apiKey: string;
+    baseUrl: string;
+    modelName: string;
+  }> {
+    const configuration = this.configurations.getConfiguration("image");
+    if (configuration.settings.enabled === false) {
+      throw new ImageProviderUnavailableError("OpenAI 图片服务未启用。");
+    }
+
+    const apiKey = await this.credentials.readCredential("image");
+    if (!apiKey) {
+      throw new ImageProviderUnavailableError("OpenAI 图片 API Key 尚未配置。");
+    }
+
+    const baseUrl = configuration.settings.baseUrl || defaultServiceSettings("image").baseUrl;
+    if (!baseUrl) {
+      throw new ImageProviderUnavailableError("OpenAI 图片 Base URL 尚未配置。");
+    }
+
+    return {
+      apiKey,
+      baseUrl,
+      modelName: configuration.settings.modelName || "gpt-image-2"
+    };
   }
 }
 
@@ -128,6 +169,33 @@ function contentTypeFromPath(imagePath: string): string {
     return "image/webp";
   }
   return "image/png";
+}
+
+async function readImageResult<T extends ProductPresenterImageResult | VisualStoryboardImageResult>(
+  fetchImpl: typeof fetch,
+  responseText: string,
+  promptPreview: string,
+  missingImageMessage: string
+): Promise<T> {
+  const parsed = parseImageResponse(responseText);
+  const firstImage = parsed.data?.[0];
+  if (firstImage?.b64_json) {
+    return {
+      imageBytes: Buffer.from(firstImage.b64_json, "base64"),
+      extension: "png",
+      promptPreview
+    } as T;
+  }
+
+  if (firstImage?.url) {
+    return {
+      imageBytes: await downloadImage(fetchImpl, firstImage.url),
+      extension: extensionFromUrl(firstImage.url),
+      promptPreview
+    } as T;
+  }
+
+  throw new Error(missingImageMessage);
 }
 
 function parseImageResponse(responseText: string): OpenAiImageResponse {

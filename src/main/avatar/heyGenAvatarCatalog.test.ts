@@ -53,9 +53,12 @@ describe("HeyGenAvatarCatalog", () => {
             avatar_looks: [
               {
                 avatar_id: "avatar-1",
+                group_id: "group-1",
                 name: "Presenter A",
                 preview_image_url: "https://cdn.heygen.test/avatar-1.jpg",
                 preview_video_url: "https://cdn.heygen.test/avatar-1.mp4",
+                image_width: 720,
+                image_height: 1280,
                 gender: "female",
                 default_voice_id: "voice-1",
                 status: "completed"
@@ -80,21 +83,31 @@ describe("HeyGenAvatarCatalog", () => {
     expect(looks).toEqual([
       {
         id: "avatar-1",
+        groupId: "group-1",
         name: "Presenter A",
         previewImageUrl: "https://cdn.heygen.test/avatar-1.jpg",
         previewVideoUrl: "https://cdn.heygen.test/avatar-1.mp4",
         gender: "female",
         defaultVoiceId: "voice-1",
-        status: "completed"
+        status: "completed",
+        avatarType: "",
+        orientation: "portrait",
+        imageWidth: 720,
+        imageHeight: 1280
       },
       {
         id: "avatar-2",
+        groupId: "",
         name: "Presenter B",
         previewImageUrl: "https://cdn.heygen.test/avatar-2.jpg",
         previewVideoUrl: "",
         gender: "",
         defaultVoiceId: "",
-        status: ""
+        status: "",
+        avatarType: "",
+        orientation: "unknown",
+        imageWidth: undefined,
+        imageHeight: undefined
       }
     ]);
   });

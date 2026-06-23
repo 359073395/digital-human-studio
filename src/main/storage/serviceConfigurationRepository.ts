@@ -2,13 +2,16 @@ import {
   PROVIDER_DEFINITIONS,
   defaultServiceSettings,
   getProviderDefinition,
+  type ListServiceModelsInput,
   type ProviderId,
   type SaveServiceConfigurationInput,
   type ServiceConfiguration,
   type ServiceConfigurationSettings,
-  type ServiceConnectionCheck
+  type ServiceConnectionCheck,
+  type ServiceModelList
 } from "../../shared/serviceConfig";
 import { redactSecret } from "../security/redaction";
+import { buildHeyGenAuthHeaders, heyGenCredentialLabel } from "../avatar/heyGenAuth";
 import { normalizeHeyGenBaseUrl } from "../avatar/heyGenUrls";
 import type { CredentialStore } from "./credentialStore";
 import type { TaskDatabase } from "./database";
@@ -79,6 +82,86 @@ export class ServiceConfigurationRepository {
     return this.getConfiguration(providerId);
   }
 
+  async listModels(input: ListServiceModelsInput): Promise<ServiceModelList> {
+    const definition = getProviderDefinition(input.providerId);
+    const savedConfiguration = this.getConfiguration(input.providerId);
+    const settings = {
+      ...savedConfiguration.settings,
+      ...sanitizeSettings(input.settings)
+    };
+
+    if (input.providerId === "heygen") {
+      return {
+        providerId: input.providerId,
+        ok: false,
+        models: [],
+        message: "HeyGen 使用数字人 Avatar 和 Voice ID，不提供 OpenAI 兼容模型列表。"
+      };
+    }
+
+    const baseUrl = settings.baseUrl || defaultServiceSettings(input.providerId).baseUrl || "";
+    if (!baseUrl) {
+      return {
+        providerId: input.providerId,
+        ok: false,
+        models: [],
+        message: `${definition.label} Base URL 尚未配置。`
+      };
+    }
+
+    const typedApiKey = input.apiKey?.trim();
+    const savedApiKeyResult = typedApiKey
+      ? ({ ok: true, value: typedApiKey } as const)
+      : await this.readCredentialForCheck(input.providerId, definition.label);
+    const apiKey = savedApiKeyResult.ok ? savedApiKeyResult.value : "";
+    if (definition.requiresCredential && !apiKey) {
+      const message = savedApiKeyResult.ok
+        ? `${definition.label} API Key 尚未配置`
+        : savedApiKeyResult.message;
+      return {
+        providerId: input.providerId,
+        ok: false,
+        models: [],
+        message: `${message}，无法获取模型列表。`
+      };
+    }
+
+    const result = await fetchWithTimeout(this.fetchImpl, `${normalizeBaseUrl(baseUrl)}/models`, {
+      method: "GET",
+      headers: apiKey
+        ? {
+            authorization: `Bearer ${apiKey}`
+          }
+        : undefined
+    });
+
+    if (!result.ok) {
+      return {
+        providerId: input.providerId,
+        ok: false,
+        models: [],
+        message: `${definition.label} 获取模型失败：${result.message}`
+      };
+    }
+
+    const models = normalizeModelIds(result.json);
+    if (models.length === 0) {
+      return {
+        providerId: input.providerId,
+        ok: false,
+        models: [],
+        message: `${definition.label} 已连接，但 /models 响应里没有可选择的模型 ID。`
+      };
+    }
+
+    return {
+      providerId: input.providerId,
+      ok: true,
+      models,
+      message: `${definition.label} 已获取 ${models.length} 个模型，可在下拉框中选择。`
+    };
+  }
+
   async testConfiguration(providerId: ProviderId): Promise<ServiceConnectionCheck> {
     const configuration = this.getConfiguration(providerId);
     const definition = getProviderDefinition(providerId);
@@ -91,7 +174,10 @@ export class ServiceConfigurationRepository {
       return {
         providerId,
         ok: false,
-        message: `${definition.label} API Key 尚未配置`
+        message:
+          providerId === "heygen"
+            ? `${heyGenCredentialLabel(configuration)} 尚未配置`
+            : `${definition.label} API Key 尚未配置`
       };
     }
 
@@ -235,18 +321,22 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const result = await fetchWithTimeout(this.fetchImpl, `${normalizeBaseUrl(baseUrl)}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: modelName,
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 1
-      })
-    });
+    const result = await fetchWithTimeout(
+      this.fetchImpl,
+      `${normalizeBaseUrl(baseUrl)}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1
+        })
+      }
+    );
 
     if (!result.ok) {
       return {
@@ -391,27 +481,43 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const url = new URL(`${normalizeHeyGenBaseUrl(baseUrl)}/v3/avatars/looks`);
-    url.searchParams.set("limit", "1");
-    const result = await fetchWithTimeout(this.fetchImpl, url.toString(), {
-      method: "GET",
-      headers: {
-        "x-api-key": apiKey
+    const headers = buildHeyGenAuthHeaders(configuration, apiKey);
+    const userResult = await fetchWithTimeout(
+      this.fetchImpl,
+      `${normalizeHeyGenBaseUrl(baseUrl)}/v3/users/me`,
+      {
+        method: "GET",
+        headers
       }
-    });
+    );
 
-    if (!result.ok) {
+    if (!userResult.ok) {
       return {
         providerId: "heygen",
         ok: false,
-        message: `HeyGen 连接失败：${result.message}`
+        message: `HeyGen 账号认证失败：${userResult.message}`
+      };
+    }
+
+    const avatarUrl = new URL(`${normalizeHeyGenBaseUrl(baseUrl)}/v3/avatars/looks`);
+    avatarUrl.searchParams.set("limit", "1");
+    const avatarResult = await fetchWithTimeout(this.fetchImpl, avatarUrl.toString(), {
+      method: "GET",
+      headers
+    });
+
+    if (!avatarResult.ok) {
+      return {
+        providerId: "heygen",
+        ok: false,
+        message: `HeyGen 账号认证通过，但数字人列表读取失败：${avatarResult.message}`
       };
     }
 
     return {
       providerId: "heygen",
       ok: true,
-      message: "HeyGen 测试通过，API Key 可连接；预设数字人会在任务里自动读取后选择"
+      message: `HeyGen 测试通过，${describeHeyGenAccount(userResult.json)}；预设数字人会在任务里自动读取后选择`
     };
   }
 }
@@ -429,7 +535,7 @@ async function fetchWithTimeout(
   init: RequestInit
 ): Promise<FetchTestResult> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
     const response = await fetchImpl(url, { ...init, signal: controller.signal });
@@ -545,6 +651,70 @@ function isProbablyUnsupportedModelsEndpoint(status: number | undefined): boolea
   return status === 400 || status === 404 || status === 405;
 }
 
+function describeHeyGenAccount(value: unknown): string {
+  const data = isRecord(value) && isRecord(value.data) ? value.data : value;
+  if (!isRecord(data)) {
+    return "账号认证成功";
+  }
+
+  const billingType = readString(data, "billing_type") || readString(data, "billingType");
+  const subscription = readString(data, "subscription") || readString(data, "plan");
+  const remainingCredits =
+    readString(data, "remaining_credits") ||
+    readString(data, "remainingCredits") ||
+    readString(data, "credits");
+
+  const parts = [
+    billingType ? `计费类型 ${billingType}` : "",
+    subscription ? `订阅 ${subscription}` : "",
+    remainingCredits ? `剩余额度 ${remainingCredits}` : ""
+  ].filter(Boolean);
+
+  return parts.length > 0 ? parts.join("，") : "账号认证成功";
+}
+
+function normalizeModelIds(value: unknown): string[] {
+  const candidateItems = collectModelItems(value);
+  return Array.from(
+    new Set(
+      candidateItems
+        .map((item) => {
+          if (typeof item === "string") {
+            return item.trim();
+          }
+          if (isRecord(item)) {
+            return readString(item, "id").trim() || readString(item, "name").trim();
+          }
+          return "";
+        })
+        .filter(Boolean)
+    )
+  )
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, 300);
+}
+
+function collectModelItems(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const data = value.data;
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  const models = value.models;
+  if (Array.isArray(models)) {
+    return models;
+  }
+
+  return [];
+}
+
 function sanitizeSettings(settings: ServiceConfigurationSettings): ServiceConfigurationSettings {
   const sanitized: ServiceConfigurationSettings = {};
 
@@ -554,6 +724,10 @@ function sanitizeSettings(settings: ServiceConfigurationSettings): ServiceConfig
 
   if (settings.modelName !== undefined) {
     sanitized.modelName = settings.modelName.trim();
+  }
+
+  if (settings.authMode !== undefined) {
+    sanitized.authMode = settings.authMode === "oauth-bearer" ? "oauth-bearer" : "api-key";
   }
 
   if (settings.avatarId !== undefined) {

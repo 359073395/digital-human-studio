@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export const TASK_MEDIA_DIRECTORIES = ["source", "avatar", "subtitles", "post", "exports"] as const;
+export const TASK_MEDIA_DIRECTORIES = [
+  "source",
+  "avatar",
+  "storyboard",
+  "subtitles",
+  "post",
+  "exports"
+] as const;
 
 export type TaskMediaDirectory = (typeof TASK_MEDIA_DIRECTORIES)[number];
 

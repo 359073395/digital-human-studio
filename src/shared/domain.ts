@@ -35,9 +35,14 @@ export type MediaAssetKind =
   | "source-video"
   | "source-transcript"
   | "source-visual-analysis"
+  | "knowledge-document"
+  | "viral-copy-reference"
+  | "story-script-options"
+  | "visual-storyboard"
   | "product-image"
   | "reference-image"
   | "mixed-cut-material"
+  | "mixed-cut-video"
   | "custom-font"
   | "generated-presenter-image"
   | "avatar-video"
@@ -140,12 +145,80 @@ export interface MediaAsset {
   createdAt: string;
 }
 
+export type GeneratedPresenterImageSelections = Partial<Record<OutputPresetId, MediaAsset["id"]>>;
+
 export interface PublishingPackage {
   title: string;
   description: string;
   tags: string[];
   notes: string;
   exportDirectory?: string;
+}
+
+export type VisualStoryboardPanelCount = "auto" | 6 | 8 | 9 | 12;
+
+export interface StoryScriptOption {
+  id: string;
+  title: string;
+  angle: string;
+  targetAudience: string;
+  hook: string;
+  beatSheet: string[];
+  script: string;
+  reason: string;
+  riskNotes: string;
+}
+
+export interface StoryScriptPackage {
+  title: string;
+  productAnalysis: string;
+  referenceMechanics: string;
+  conversionStrategy: string;
+  options: StoryScriptOption[];
+  recommendedOptionId: string;
+  originalityNotes: string;
+}
+
+export interface VisualStoryboardShot {
+  shotNumber: number;
+  durationSeconds: number;
+  shotType: string;
+  visualAction: string;
+  subjectAction: string;
+  productAction: string;
+  voiceoverOrText: string;
+  cameraMovement: string;
+  imagePrompt: string;
+  videoMotionPrompt: string;
+  negativePrompt: string;
+  continuityNotes: string;
+}
+
+export interface VisualStoryboardBible {
+  protagonist: string;
+  product: string;
+  wardrobe: string;
+  location: string;
+  lighting: string;
+  colorPalette: string;
+  cameraStyle: string;
+  subtitleSafeSpace: string;
+  consistencyLocks: string[];
+}
+
+export interface VisualStoryboardPackage {
+  title: string;
+  sourceSummary: string;
+  remakeStrategy: string;
+  productAnalysis: string;
+  referenceMechanics: string;
+  selectedScript: string;
+  panelCount: number;
+  layout: string;
+  visualBible: VisualStoryboardBible;
+  shots: VisualStoryboardShot[];
+  boardImagePrompt: string;
+  wholeVideoPrompt: string;
 }
 
 export interface VideoTask {
@@ -161,11 +234,13 @@ export interface VideoTask {
   generationMode: VideoGenerationMode;
   avatarMode: AvatarMode;
   presetAvatarId?: string;
+  presetAvatarGroupId?: string;
   avatarDescriptionPrompt: string;
   motionPrompt: string;
   productImageAssetId?: string;
   referenceImageAssetId?: string;
   generatedPresenterImageAssetId?: string;
+  generatedPresenterImageSelections?: GeneratedPresenterImageSelections;
   customFontAssetId?: string;
   customFontFamily?: string;
   selectedOutputPresets: OutputPresetId[];

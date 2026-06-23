@@ -10,6 +10,7 @@ import {
   type AvatarRenderInput,
   type AvatarRenderResult
 } from "./avatarProvider";
+import { buildHeyGenAuthHeaders } from "./heyGenAuth";
 import { normalizeHeyGenBaseUrl } from "./heyGenUrls";
 
 interface HeyGenConfigurationReader {
@@ -53,6 +54,8 @@ interface HeyGenVideoStatusData {
   failureReason?: string;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
 interface HeyGenEnvelope<T> {
   data?: T;
   error?: unknown;
@@ -60,6 +63,12 @@ interface HeyGenEnvelope<T> {
 }
 
 const FINAL_FAILURE_STATUSES = new Set(["failed", "failure", "error"]);
+const API_CREDIT_ERROR_MARKERS = ["insufficient credit", "requires 'api' credits"];
+const DEFAULT_HEYGEN_VOICE_IDS: Record<VideoTask["contentLanguage"], string> = {
+  "zh-CN": "dMkR1XwIkarpNqWUJLnX",
+  "en-US": "d2f4f24783d04e22ab49ee8fdc3715e0",
+  "id-ID": "06e81a5d7c8b41818d3f0b38f7cf15a1"
+};
 
 export class HeyGenAvatarProvider implements AvatarProvider {
   private readonly pollIntervalMs: number;
@@ -84,12 +93,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
     const apiKey = await this.credentials.readCredential("heygen");
     if (!apiKey) {
-      throw new AvatarProviderUnavailableError("HeyGen API Key 尚未配置。");
-    }
-
-    const avatarId = input.task.presetAvatarId?.trim() || configuration.settings.avatarId?.trim();
-    if (input.task.avatarMode === "preset-avatar" && !avatarId) {
-      throw new AvatarProviderUnavailableError("HeyGen Avatar ID 尚未配置。");
+      throw new AvatarProviderUnavailableError("HeyGen 凭据尚未配置。");
     }
 
     const baseUrl = configuration.settings.baseUrl || defaultServiceSettings("heygen").baseUrl;
@@ -97,20 +101,33 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       throw new AvatarProviderUnavailableError("HeyGen Base URL 尚未配置。");
     }
 
-    const created = await this.createVideo({
+    const avatarId = await this.resolveAvatarId({
       apiKey,
       baseUrl,
       configuration,
-      input,
-      avatarId: avatarId || undefined
-    });
-
-    return this.pollVideo({
-      apiKey,
-      baseUrl,
-      providerVideoId: created,
+      task: input.task,
       preset: input.preset
     });
+
+    try {
+      const created = await this.createVideo({
+        apiKey,
+        baseUrl,
+        configuration,
+        input,
+        avatarId: avatarId || undefined
+      });
+
+      return await this.pollVideo({
+        apiKey,
+        baseUrl,
+        configuration,
+        providerVideoId: created,
+        preset: input.preset
+      });
+    } catch (error) {
+      throw decorateHeyGenRenderError(error, configuration);
+    }
   }
 
   private async createVideo(input: {
@@ -123,7 +140,12 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const script = selectScript(input.input.task);
     const heyGenImageAssetId =
       input.input.task.avatarMode === "image-presenter"
-        ? await this.uploadImageAsset(input.apiKey, input.baseUrl, input.input.imagePath)
+        ? await this.uploadImageAsset(
+            input.apiKey,
+            input.baseUrl,
+            input.configuration,
+            input.input.imagePath
+          )
         : undefined;
     const response = await requestJson<HeyGenEnvelope<HeyGenCreateVideoData>>(
       this.fetchImpl,
@@ -133,7 +155,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         headers: {
           "content-type": "application/json",
           "idempotency-key": `${input.input.task.id}-${input.input.preset.id}`,
-          "x-api-key": input.apiKey
+          ...buildHeyGenAuthHeaders(input.configuration, input.apiKey)
         },
         body: JSON.stringify(
           buildCreateVideoBody({
@@ -158,6 +180,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   private async uploadImageAsset(
     apiKey: string,
     baseUrl: string,
+    configuration: ServiceConfiguration,
     imagePath: string | undefined
   ): Promise<string> {
     if (!imagePath) {
@@ -171,9 +194,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       `${normalizeHeyGenBaseUrl(baseUrl)}/v3/assets`,
       {
         method: "POST",
-        headers: {
-          "x-api-key": apiKey
-        },
+        headers: buildHeyGenAuthHeaders(configuration, apiKey),
         body: formData
       }
     );
@@ -189,6 +210,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   private async pollVideo(input: {
     apiKey: string;
     baseUrl: string;
+    configuration: ServiceConfiguration;
     providerVideoId: string;
     preset: OutputPreset;
   }): Promise<AvatarRenderResult> {
@@ -198,9 +220,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         `${normalizeHeyGenBaseUrl(input.baseUrl)}/v3/videos/${encodeURIComponent(input.providerVideoId)}`,
         {
           method: "GET",
-          headers: {
-            "x-api-key": input.apiKey
-          }
+          headers: buildHeyGenAuthHeaders(input.configuration, input.apiKey)
         }
       );
 
@@ -234,6 +254,72 @@ export class HeyGenAvatarProvider implements AvatarProvider {
 
     throw new Error("HeyGen 视频生成超时，请稍后重试。");
   }
+
+  private async resolveAvatarId(input: {
+    apiKey: string;
+    baseUrl: string;
+    configuration: ServiceConfiguration;
+    task: VideoTask;
+    preset: OutputPreset;
+  }): Promise<string | undefined> {
+    if (input.task.avatarMode !== "preset-avatar") {
+      return undefined;
+    }
+
+    const groupId = input.task.presetAvatarGroupId?.trim();
+    const fallbackAvatarId =
+      input.task.presetAvatarId?.trim() || input.configuration.settings.avatarId?.trim();
+
+    if (!groupId) {
+      if (!fallbackAvatarId) {
+        throw new AvatarProviderUnavailableError("HeyGen Avatar ID 尚未配置。");
+      }
+      return fallbackAvatarId;
+    }
+
+    try {
+      const looks = await this.listAvatarLooksForGroup(input, groupId);
+      const preferredOrientation = input.preset.aspectRatio === "16:9" ? "landscape" : "portrait";
+      const selected =
+        looks.find((look) => readLookOrientation(look) === preferredOrientation) ??
+        looks.find((look) => readLookOrientation(look) === "square") ??
+        looks.find((look) => readLookId(look) === fallbackAvatarId) ??
+        looks[0];
+      const selectedId = selected ? readLookId(selected) : "";
+      if (selectedId) {
+        return selectedId;
+      }
+    } catch {
+      if (fallbackAvatarId) {
+        return fallbackAvatarId;
+      }
+      throw new AvatarProviderUnavailableError("HeyGen Avatar Group 已配置，但未读取到可用 Look。");
+    }
+
+    if (fallbackAvatarId) {
+      return fallbackAvatarId;
+    }
+    throw new AvatarProviderUnavailableError("HeyGen Avatar Group 下没有可用 Look。");
+  }
+
+  private async listAvatarLooksForGroup(
+    input: {
+      apiKey: string;
+      baseUrl: string;
+      configuration: ServiceConfiguration;
+    },
+    groupId: string
+  ): Promise<UnknownRecord[]> {
+    const url = new URL(`${normalizeHeyGenBaseUrl(input.baseUrl)}/v3/avatars/looks`);
+    url.searchParams.set("limit", "50");
+    url.searchParams.set("group_id", groupId);
+    const response = await requestJson<HeyGenEnvelope<unknown>>(this.fetchImpl, url.toString(), {
+      method: "GET",
+      headers: buildHeyGenAuthHeaders(input.configuration, input.apiKey)
+    });
+
+    return extractLookItems(response.data);
+  }
 }
 
 function buildCreateVideoBody(options: {
@@ -244,7 +330,7 @@ function buildCreateVideoBody(options: {
   heyGenImageAssetId?: string;
 }) {
   const baseBody = {
-    voice_id: options.configuration.settings.voiceId || undefined,
+    voice_id: resolveVoiceId(options.configuration, options.input.task),
     script: options.script,
     title: `${options.input.task.title} - ${options.input.preset.label}`,
     aspect_ratio: options.input.preset.aspectRatio,
@@ -278,6 +364,14 @@ function buildCreateVideoBody(options: {
   };
 }
 
+function resolveVoiceId(configuration: ServiceConfiguration, task: VideoTask): string {
+  return (
+    configuration.settings.voiceId?.trim() ||
+    DEFAULT_HEYGEN_VOICE_IDS[task.contentLanguage] ||
+    DEFAULT_HEYGEN_VOICE_IDS["en-US"]
+  );
+}
+
 function selectScript(task: VideoTask): string {
   const script = (task.finalScript || task.sourceScript).trim();
   if (!script) {
@@ -285,6 +379,71 @@ function selectScript(task: VideoTask): string {
   }
 
   return script;
+}
+
+function extractLookItems(data: unknown): UnknownRecord[] {
+  if (Array.isArray(data)) {
+    return data.filter(isRecord);
+  }
+  if (!isRecord(data)) {
+    return [];
+  }
+
+  const candidates = [
+    data.avatar_looks,
+    data.avatarLooks,
+    data.looks,
+    data.avatars,
+    data.items,
+    data.list
+  ];
+  const list = candidates.find(Array.isArray);
+  return Array.isArray(list) ? list.filter(isRecord) : [];
+}
+
+function readLookId(record: UnknownRecord): string {
+  return readString(record, ["avatar_id", "avatarId", "look_id", "lookId", "id"]);
+}
+
+function readLookOrientation(
+  record: UnknownRecord
+): "portrait" | "landscape" | "square" | "unknown" {
+  const width = readNumber(record, ["image_width", "imageWidth", "width"]);
+  const height = readNumber(record, ["image_height", "imageHeight", "height"]);
+  if (!width || !height) {
+    return "unknown";
+  }
+  if (width === height) {
+    return "square";
+  }
+  return width > height ? "landscape" : "portrait";
+}
+
+function readString(record: UnknownRecord, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function readNumber(record: UnknownRecord, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function requestJson<T>(fetchImpl: typeof fetch, url: string, init: RequestInit): Promise<T> {
@@ -311,6 +470,26 @@ async function requestJson<T>(fetchImpl: typeof fetch, url: string, init: Reques
     }
     throw error;
   }
+}
+
+function decorateHeyGenRenderError(error: unknown, configuration: ServiceConfiguration): Error {
+  if (!(error instanceof Error)) {
+    return new Error(String(error));
+  }
+
+  const lowerMessage = error.message.toLowerCase();
+  const isApiCreditError = API_CREDIT_ERROR_MARKERS.some((marker) => lowerMessage.includes(marker));
+  if (!isApiCreditError) {
+    return error;
+  }
+
+  const authMode = configuration.settings.authMode ?? "api-key";
+  const hint =
+    authMode === "oauth-bearer"
+      ? "当前已使用 HeyGen 会员 Bearer 通道，请确认该 Token 对应账号是否开通 API 视频生成权限或仍有可用额度。"
+      : "当前 HeyGen 使用 API Key 通道，普通会员额度可能不能抵扣 API credits；如果你有会员/OAuth 通道，请在设置里把认证方式切到 OAuth/Bearer Token 后重新保存。";
+
+  return new Error(`${error.message}。${hint}`, { cause: error });
 }
 
 function createImageBlob(imagePath: string): Blob {

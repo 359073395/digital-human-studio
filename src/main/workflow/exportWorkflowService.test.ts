@@ -8,6 +8,7 @@ import { createAppPaths, getTaskDirectory, type AppPaths } from "../storage/appP
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "../storage/database";
 import { TaskRepository } from "../storage/taskRepository";
 import { ExportWorkflowService } from "./exportWorkflowService";
+import { CopyFinishedVideoRenderer } from "./finishedVideoRenderer";
 
 let tempDir: string;
 let appPaths: AppPaths;
@@ -29,7 +30,11 @@ afterEach(() => {
 
 describe("ExportWorkflowService", () => {
   it("copies real avatar videos into final exports", () => {
-    const service = new ExportWorkflowService(repository, appPaths);
+    const service = new ExportWorkflowService(
+      repository,
+      appPaths,
+      new CopyFinishedVideoRenderer()
+    );
     const task = repository.createTask({
       title: "Real export",
       sourceScript: "Source script."
@@ -51,6 +56,18 @@ describe("ExportWorkflowService", () => {
     fs.mkdirSync(path.dirname(frameCoverPath), { recursive: true });
     fs.writeFileSync(frameCoverPath, Buffer.from("first-frame-cover"));
     repository.addMediaAsset(task.id, "cover-image", "post/video-frame-cover-portrait-9-16.jpg");
+    const subtitlePath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "subtitles",
+      "provider-subtitles-portrait-9-16.srt"
+    );
+    fs.mkdirSync(path.dirname(subtitlePath), { recursive: true });
+    fs.writeFileSync(subtitlePath, "1\n00:00:00,000 --> 00:00:01,000\nFinal script.");
+    repository.addMediaAsset(
+      task.id,
+      "subtitle-file",
+      "subtitles/provider-subtitles-portrait-9-16.srt"
+    );
 
     const exported = service.exportTask(task.id);
     const finalPath = path.join(
@@ -77,7 +94,11 @@ describe("ExportWorkflowService", () => {
   });
 
   it("copies final outputs into the selected export directory", () => {
-    const service = new ExportWorkflowService(repository, appPaths);
+    const service = new ExportWorkflowService(
+      repository,
+      appPaths,
+      new CopyFinishedVideoRenderer()
+    );
     const selectedExportDirectory = path.join(tempDir, "selected-exports");
     const task = repository.createTask({
       title: "External Export Test",
@@ -127,7 +148,11 @@ describe("ExportWorkflowService", () => {
   });
 
   it("rejects mock placeholder avatar files", () => {
-    const service = new ExportWorkflowService(repository, appPaths);
+    const service = new ExportWorkflowService(
+      repository,
+      appPaths,
+      new CopyFinishedVideoRenderer()
+    );
     const task = repository.createTask({
       title: "Mock export",
       sourceScript: "Source script."

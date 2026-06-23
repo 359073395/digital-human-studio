@@ -1,4 +1,5 @@
 import type { PersonalIpProfile, VideoGenerationMode } from "../../shared/domain";
+import { productionMethodLibraryLines } from "./productionMethodLibrary";
 
 export interface MethodAnalysisInput {
   sourceScript: string;
@@ -15,7 +16,8 @@ export function methodAnalysisInstructionLines(input: MethodAnalysisInput): stri
     "3. Convert the analysis into a content strategy: target viewer, first-frame job, 0-3s hook, 0-6s core value, proof/trust, retention rhythm, CTA or interaction goal.",
     "4. Write the final script from that strategy only.",
     "5. In the JSON notes field, include a concise analysis summary and the main originality changes.",
-    ...modeMethodLines(input)
+    ...modeMethodLines(input),
+    ...productionMethodLibraryLines(input)
   ];
 }
 

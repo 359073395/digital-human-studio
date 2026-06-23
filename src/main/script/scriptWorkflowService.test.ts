@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { VideoTask } from "../../shared/domain";
 import type { ScriptGenerationResult } from "../../shared/scriptGeneration";
 import { createAppPaths, getTaskDirectory } from "../storage/appPaths";
 import type { AppPaths } from "../storage/appPaths";
@@ -21,6 +22,20 @@ class UnavailableScriptProvider implements ScriptProvider {
 class FailingScriptProvider implements ScriptProvider {
   async generate(): Promise<ScriptGenerationResult> {
     throw new Error("Provider exploded.");
+  }
+}
+
+class CapturingScriptProvider implements ScriptProvider {
+  task?: VideoTask;
+
+  async generate(task: VideoTask): Promise<ScriptGenerationResult> {
+    this.task = task;
+    return {
+      finalScript: "Captured script.",
+      similarityRisk: "low",
+      notes: "Captured uploaded knowledge.",
+      promptPreview: "captured prompt"
+    };
   }
 }
 
@@ -89,6 +104,41 @@ describe("ScriptWorkflowService", () => {
 
     expect(scriptStep?.status).toBe("retry-ready");
     expect(scriptStep?.errorMessage).toBe("Provider exploded.");
+  });
+
+  it("passes uploaded knowledge and viral-copy assets into script generation", async () => {
+    const provider = new CapturingScriptProvider();
+    service = new ScriptWorkflowService(repository, appPaths, provider);
+    const task = repository.createTask({ title: "Knowledge-aware script" });
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const knowledgeRelativePath = "source/knowledge/playbook.md";
+    const viralRelativePath = "source/viral-copy/case.txt";
+    fs.mkdirSync(path.join(taskDirectory, "source", "knowledge"), { recursive: true });
+    fs.mkdirSync(path.join(taskDirectory, "source", "viral-copy"), { recursive: true });
+    fs.writeFileSync(
+      path.join(taskDirectory, ...knowledgeRelativePath.split("/")),
+      "# Content rules\nUse first-frame analysis before writing.",
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(taskDirectory, ...viralRelativePath.split("/")),
+      "Hook, proof, objection, CTA.",
+      "utf8"
+    );
+    repository.addMediaAsset(task.id, "knowledge-document", knowledgeRelativePath);
+    repository.addMediaAsset(task.id, "viral-copy-reference", viralRelativePath);
+
+    await service.generateScript(task.id);
+
+    expect(provider.task?.sourceScript).toContain("Layer 1 - Built-in summarized knowledge");
+    expect(provider.task?.sourceScript).toContain("Layer 2 - User uploaded long-term knowledge");
+    expect(provider.task?.sourceScript).toContain("Use first-frame analysis before writing.");
+    expect(provider.task?.sourceScript).toContain("Hook, proof, objection, CTA.");
+    expect(
+      fs
+        .readFileSync(path.join(taskDirectory, "source", "knowledge-context-preview.txt"), "utf8")
+        .includes("Knowledge Context Preview")
+    ).toBe(true);
   });
 
   it("mock-transcribes source material into the selected language", () => {

@@ -10,11 +10,13 @@ import {
 } from "../../shared/domain";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
+import { FfmpegFinishedVideoRenderer, type FinishedVideoRenderer } from "./finishedVideoRenderer";
 
 export class ExportWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
-    private readonly paths: AppPaths
+    private readonly paths: AppPaths,
+    private readonly finishedVideoRenderer: FinishedVideoRenderer = new FfmpegFinishedVideoRenderer()
   ) {}
 
   exportTask(taskId: string): VideoTask {
@@ -27,7 +29,7 @@ export class ExportWorkflowService {
       for (const presetId of task.selectedOutputPresets) {
         const preset = requireOutputPreset(presetId);
         this.taskRepository.updateOutputVariant(taskId, preset.id, { status: "rendering" });
-        const avatarVideoPath = requireAvatarVideoPath(
+        const renderSourceVideoPath = requireRenderSourceVideoPath(
           this.paths,
           taskId,
           this.requireTask(taskId),
@@ -35,8 +37,14 @@ export class ExportWorkflowService {
         );
         const relativePath = `exports/${preset.id}/finished-${preset.id}.mp4`;
         const absolutePath = absoluteTaskPath(this.paths, taskId, relativePath);
-        fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-        fs.copyFileSync(avatarVideoPath, absolutePath);
+        this.finishedVideoRenderer.render({
+          task: this.requireTask(taskId),
+          preset,
+          taskDirectory: getTaskDirectory(this.paths, taskId),
+          sourceVideoPath: renderSourceVideoPath,
+          subtitlePath: findSubtitlePath(this.paths, taskId, this.requireTask(taskId), preset),
+          outputPath: absolutePath
+        });
         this.taskRepository.addMediaAsset(taskId, "finished-video", relativePath);
 
         const coverPath = `post/cover-${preset.id}.svg`;
@@ -123,6 +131,19 @@ export class ExportWorkflowService {
   }
 }
 
+function requireRenderSourceVideoPath(
+  paths: AppPaths,
+  taskId: string,
+  task: VideoTask,
+  preset: OutputPreset
+): string {
+  if (task.generationMode === "mixed-cut") {
+    return requireMixedCutVideoPath(paths, taskId, task, preset);
+  }
+
+  return requireAvatarVideoPath(paths, taskId, task, preset);
+}
+
 function requireAvatarVideoPath(
   paths: AppPaths,
   taskId: string,
@@ -145,6 +166,57 @@ function requireAvatarVideoPath(
   const header = fs.readFileSync(absolutePath).subarray(0, 32).toString("utf8");
   if (header.startsWith("Digital Human Studio mock")) {
     throw new Error("当前数字人视频仍是 Mock 占位文件，请先生成 HeyGen 数字人视频。");
+  }
+
+  return absolutePath;
+}
+
+function requireMixedCutVideoPath(
+  paths: AppPaths,
+  taskId: string,
+  task: VideoTask,
+  preset: OutputPreset
+): string {
+  const matchingAsset = task.mediaAssets.find(
+    (asset) =>
+      asset.kind === "mixed-cut-video" &&
+      asset.relativePath === `post/mixed-cut-base-${preset.id}.mp4`
+  );
+  if (!matchingAsset) {
+    throw new Error(`请先生成 ${preset.label} 的混剪基础视频。`);
+  }
+
+  const absolutePath = absoluteTaskPath(paths, taskId, matchingAsset.relativePath);
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`混剪基础视频文件不存在：${matchingAsset.relativePath}`);
+  }
+
+  return absolutePath;
+}
+
+function findSubtitlePath(
+  paths: AppPaths,
+  taskId: string,
+  task: VideoTask,
+  preset: OutputPreset
+): string | undefined {
+  if (!task.subtitleStyle.enabled) {
+    return undefined;
+  }
+
+  const matchingAsset =
+    [...task.mediaAssets]
+      .reverse()
+      .find((asset) => asset.kind === "subtitle-file" && asset.relativePath.includes(preset.id)) ??
+    [...task.mediaAssets].reverse().find((asset) => asset.kind === "subtitle-file");
+
+  if (!matchingAsset) {
+    throw new Error(`请先生成 ${preset.label} 的字幕文件，再导出最终视频。`);
+  }
+
+  const absolutePath = absoluteTaskPath(paths, taskId, matchingAsset.relativePath);
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`字幕文件不存在：${matchingAsset.relativePath}`);
   }
 
   return absolutePath;
