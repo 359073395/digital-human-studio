@@ -27,6 +27,8 @@ import { HeyGenAvatarCreator } from "./avatar/heyGenAvatarCreator";
 import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
 import { OpenAiImageProvider } from "./image/openAiImageProvider";
 import { PresenterImageWorkflowService } from "./image/presenterImageWorkflowService";
+import { OpenAiCompatibleSourceTranscriptionProvider } from "./media/sourceTranscriptionProvider";
+import { OpenAiCompatibleVisualAnalysisProvider } from "./media/visualAnalysisProvider";
 import {
   createAppPaths,
   ensureAppPaths,
@@ -151,7 +153,8 @@ function createRepositories(): MainRepositories {
   const scriptWorkflowService = new ScriptWorkflowService(
     taskRepository,
     appPaths,
-    new OpenAiCompatibleScriptProvider(serviceConfigurationRepository, credentialStore)
+    new OpenAiCompatibleScriptProvider(serviceConfigurationRepository, credentialStore),
+    new OpenAiCompatibleSourceTranscriptionProvider(serviceConfigurationRepository, credentialStore)
   );
   const heyGenAvatarCatalog = new HeyGenAvatarCatalog(
     serviceConfigurationRepository,
@@ -186,7 +189,8 @@ function createRepositories(): MainRepositories {
     fetch,
     serviceConfigurationRepository,
     credentialStore,
-    appSettingsRepository
+    appSettingsRepository,
+    new OpenAiCompatibleVisualAnalysisProvider(serviceConfigurationRepository, credentialStore)
   );
   const exportWorkflowService = new ExportWorkflowService(
     taskRepository,

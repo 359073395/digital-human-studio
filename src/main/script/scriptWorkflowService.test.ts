@@ -141,14 +141,14 @@ describe("ScriptWorkflowService", () => {
     ).toBe(true);
   });
 
-  it("mock-transcribes source material into the selected language", () => {
+  it("mock-transcribes source material into the selected language", async () => {
     const task = repository.createTask({ title: "Transcription" });
     repository.updateTask({
       taskId: task.id,
       contentLanguage: "id-ID"
     });
 
-    const result = service.transcribeSource(task.id);
+    const result = await service.transcribeSource(task.id);
     const updated = repository.getTask(task.id);
 
     expect(result.contentLanguage).toBe("id-ID");

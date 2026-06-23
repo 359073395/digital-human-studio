@@ -6,6 +6,7 @@ import {
   buildKnowledgeContext,
   writeKnowledgeContextPreview
 } from "../knowledge/knowledgeContextBuilder";
+import type { SourceTranscriptionProvider } from "../media/sourceTranscriptionProvider";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 import { MockAsrProvider } from "./mockAsrProvider";
@@ -17,7 +18,7 @@ export class ScriptWorkflowService {
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
     private readonly scriptProvider: ScriptProvider = new MockScriptProvider(),
-    private readonly asrProvider = new MockAsrProvider(),
+    private readonly asrProvider: SourceTranscriptionProvider = new MockAsrProvider(),
     private readonly fallbackScriptProvider: ScriptProvider = new MockScriptProvider()
   ) {}
 
@@ -75,12 +76,12 @@ export class ScriptWorkflowService {
     }
   }
 
-  transcribeSource(taskId: string): SourceTranscriptionResult {
+  async transcribeSource(taskId: string): Promise<SourceTranscriptionResult> {
     const task = this.requireTask(taskId);
     this.taskRepository.updateStepStatus(taskId, "source", "running");
 
     try {
-      const result = this.asrProvider.transcribe(task.contentLanguage);
+      const result = await this.asrProvider.transcribe(task, this.paths);
       this.taskRepository.updateTask({
         taskId,
         sourceScript: result.transcript,
@@ -92,6 +93,18 @@ export class ScriptWorkflowService {
         "source-transcript",
         "source/source-transcript.txt"
       );
+      const sourceSubtitlePath = path.join(
+        getTaskDirectory(this.paths, taskId),
+        "subtitles",
+        "source-transcript.srt"
+      );
+      if (fs.existsSync(sourceSubtitlePath)) {
+        this.taskRepository.addMediaAsset(
+          taskId,
+          "subtitle-file",
+          "subtitles/source-transcript.srt"
+        );
+      }
       this.taskRepository.updateStepStatus(taskId, "source", "complete");
       return result;
     } catch (error) {

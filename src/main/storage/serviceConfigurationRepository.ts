@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   PROVIDER_DEFINITIONS,
   defaultServiceSettings,
@@ -238,6 +242,8 @@ export class ServiceConfigurationRepository {
   }
 
   private async testSharedLlmAudioTranscription(): Promise<ServiceConnectionCheck> {
+    const asrConfiguration = this.getConfiguration("asr");
+    const asrDefaults = defaultServiceSettings("asr");
     const llmConfiguration = this.getConfiguration("llm");
     if (llmConfiguration.settings.enabled === false) {
       return {
@@ -256,8 +262,16 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const baseUrl = llmConfiguration.settings.baseUrl || defaultServiceSettings("llm").baseUrl;
-    const modelName = llmConfiguration.settings.modelName?.trim();
+    const baseUrl =
+      asrConfiguration.settings.baseUrl ||
+      asrDefaults.baseUrl ||
+      llmConfiguration.settings.baseUrl ||
+      defaultServiceSettings("llm").baseUrl;
+    const modelName =
+      asrConfiguration.settings.modelName?.trim() ||
+      asrDefaults.modelName ||
+      llmConfiguration.settings.modelName?.trim();
+    const asrMode = asrConfiguration.settings.asrMode || asrDefaults.asrMode || "chat-audio";
     if (!baseUrl || !modelName) {
       return {
         providerId: "asr",
@@ -266,11 +280,18 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const result = await testAudioTranscriptionEndpoint(this.fetchImpl, {
-      apiKey: apiKey.value,
-      baseUrl,
-      modelName
-    });
+    const result =
+      asrMode === "chat-audio"
+        ? await testChatAudioTranscriptionEndpoint(this.fetchImpl, {
+            apiKey: apiKey.value,
+            baseUrl,
+            modelName
+          })
+        : await testAudioTranscriptionEndpoint(this.fetchImpl, {
+            apiKey: apiKey.value,
+            baseUrl,
+            modelName
+          });
 
     if (!result.ok) {
       return {
@@ -385,11 +406,20 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const result = await testAudioTranscriptionEndpoint(this.fetchImpl, {
-      apiKey,
-      baseUrl,
-      modelName
-    });
+    const asrMode =
+      configuration.settings.asrMode || defaultServiceSettings(configuration.providerId).asrMode;
+    const result =
+      asrMode === "chat-audio"
+        ? await testChatAudioTranscriptionEndpoint(this.fetchImpl, {
+            apiKey,
+            baseUrl,
+            modelName
+          })
+        : await testAudioTranscriptionEndpoint(this.fetchImpl, {
+            apiKey,
+            baseUrl,
+            modelName
+          });
 
     if (!result.ok) {
       return {
@@ -402,7 +432,10 @@ export class ServiceConfigurationRepository {
     return {
       providerId: configuration.providerId,
       ok: true,
-      message: `${definition.label} 测试通过，${modelName} 可以完成 audio/transcriptions 音频转写`
+      message:
+        asrMode === "chat-audio"
+          ? `${definition.label} 测试通过，${modelName} 可以通过 chat/completions 音频输入返回转写结果`
+          : `${definition.label} 测试通过，${modelName} 可以完成 audio/transcriptions 音频转写`
     };
   }
 
@@ -639,11 +672,182 @@ async function testAudioTranscriptionEndpoint(
   });
 }
 
+async function testChatAudioTranscriptionEndpoint(
+  fetchImpl: typeof fetch,
+  input: {
+    apiKey: string;
+    baseUrl: string;
+    modelName: string;
+  }
+): Promise<FetchTestResult> {
+  const audioBase64 = createAsrProbeWavBuffer().toString("base64");
+  const result = await fetchWithTimeout(
+    fetchImpl,
+    `${normalizeBaseUrl(input.baseUrl)}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${input.apiKey}`
+      },
+      body: JSON.stringify({
+        model: input.modelName,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: 'Transcribe the attached audio and return JSON only: {"transcript":"...","segments":[{"start_seconds":0,"end_seconds":0.1,"text":"..."}]}.'
+              },
+              {
+                type: "input_audio",
+                input_audio: {
+                  data: audioBase64,
+                  format: "wav"
+                }
+              }
+            ]
+          }
+        ],
+        temperature: 0
+      })
+    }
+  );
+
+  if (!result.ok) {
+    return result;
+  }
+
+  const content = readChatCompletionText(result.json);
+  const parsed = parseJsonFromText(content);
+  if (!hasTimedSegments(parsed)) {
+    return {
+      ok: false,
+      status: result.status,
+      json: result.json,
+      message:
+        "HTTP OK but the model did not return JSON segments with start/end timestamps for the audio."
+    };
+  }
+
+  return result;
+}
+
+function readChatCompletionText(value: unknown): string {
+  if (!isRecord(value)) {
+    return "";
+  }
+  const choices = Array.isArray(value.choices) ? value.choices : [];
+  const first = choices[0];
+  if (!isRecord(first) || !isRecord(first.message)) {
+    return "";
+  }
+
+  const content = first.message.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content.map((part) => (isRecord(part) ? readString(part, "text") : "")).join("\n");
+  }
+
+  return "";
+}
+
+function parseJsonFromText(value: string): Record<string, unknown> | undefined {
+  const trimmed = value
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return undefined;
+    }
+    try {
+      const parsed = JSON.parse(match[0]) as unknown;
+      return isRecord(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function hasTimedSegments(value: Record<string, unknown> | undefined): boolean {
+  if (!value || !Array.isArray(value.segments)) {
+    return false;
+  }
+
+  return value.segments.some((segment) => {
+    if (!isRecord(segment)) {
+      return false;
+    }
+    return (
+      readFiniteNumber(segment, "start_seconds") !== undefined &&
+      readFiniteNumber(segment, "end_seconds") !== undefined &&
+      readString(segment, "text").length > 0
+    );
+  });
+}
+
+function readFiniteNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 function createTinyWavBlob(): Blob {
-  const buffer = createSilentWavBuffer();
+  const buffer = createAsrProbeWavBuffer();
   const bytes = new Uint8Array(buffer.length);
   bytes.set(buffer);
   return new Blob([bytes], { type: "audio/wav" });
+}
+
+function createAsrProbeWavBuffer(): Buffer {
+  const spokenProbe = createWindowsSpeechProbeWavBuffer();
+  return spokenProbe ?? createSilentWavBuffer();
+}
+
+function createWindowsSpeechProbeWavBuffer(): Buffer | undefined {
+  if (process.platform !== "win32") {
+    return undefined;
+  }
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "dhs-asr-probe-"));
+  const outputPath = path.join(directory, "probe.wav");
+  try {
+    const script = [
+      "Add-Type -AssemblyName System.Speech",
+      "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
+      `$s.SetOutputToWaveFile('${outputPath.replace(/'/g, "''")}')`,
+      "$s.Speak('hello world')",
+      "$s.Dispose()"
+    ].join("; ");
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout: 15000,
+      windowsHide: true
+    });
+    if (result.status !== 0 || !fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+      return undefined;
+    }
+    return fs.readFileSync(outputPath);
+  } catch {
+    return undefined;
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 function createSilentWavBuffer(): Buffer {
@@ -802,6 +1006,10 @@ function sanitizeSettings(settings: ServiceConfigurationSettings): ServiceConfig
 
   if (settings.authMode !== undefined) {
     sanitized.authMode = settings.authMode === "oauth-bearer" ? "oauth-bearer" : "api-key";
+  }
+
+  if (settings.asrMode !== undefined) {
+    sanitized.asrMode = settings.asrMode === "chat-audio" ? "chat-audio" : "audio-transcriptions";
   }
 
   if (settings.avatarId !== undefined) {

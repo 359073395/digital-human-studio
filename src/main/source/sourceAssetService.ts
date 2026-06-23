@@ -5,6 +5,7 @@ import type { MediaAsset, VideoTask } from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { defaultServiceSettings } from "../../shared/serviceConfig";
 import { redactSecret } from "../security/redaction";
+import type { VisualAnalysisProvider } from "../media/visualAnalysisProvider";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 
@@ -68,7 +69,8 @@ export class SourceAssetService {
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly sourceParserConfigurations?: SourceParserConfigurationReader,
     private readonly sourceParserCredentials?: SourceParserCredentialReader,
-    private readonly pathSettingsReader?: PathSettingsReader
+    private readonly pathSettingsReader?: PathSettingsReader,
+    private readonly visualAnalysisProvider?: VisualAnalysisProvider
   ) {}
 
   async downloadOriginalVideo(taskId: string): Promise<VideoTask> {
@@ -293,34 +295,47 @@ export class SourceAssetService {
     return this.importKnowledgeFiles(taskId, filePaths, "viral-copy-reference", "viral-copy");
   }
 
-  analyzeSourceVisuals(taskId: string): VideoTask {
+  async analyzeSourceVisuals(taskId: string): Promise<VideoTask> {
     const task = this.requireTask(taskId);
     const sourceAssets = task.mediaAssets.filter((asset) =>
-      [
-        "source-video",
-        "source-audio",
-        "mixed-cut-material",
-        "product-image",
-        "reference-image"
-      ].includes(asset.kind)
+      ["source-video", "mixed-cut-material", "product-image", "reference-image"].includes(
+        asset.kind
+      )
     );
     const originalVideoUrl = task.originalVideoUrl?.trim();
 
-    if (!originalVideoUrl && sourceAssets.length === 0) {
-      throw new Error("请先粘贴原视频链接，或上传原视频/混剪素材后再做画面分析。");
+    if (sourceAssets.length === 0) {
+      throw new Error("??????????/????????????");
     }
 
     this.taskRepository.updateStepStatus(taskId, "source", "running");
 
-    const markdown = buildVisualAnalysisBrief({
-      originalVideoUrl,
-      sourceAssets,
-      task
-    });
-    const relativePath = "source/visual-analysis.md";
-    writeTaskFile(this.paths, taskId, relativePath, markdown);
-    this.taskRepository.addMediaAsset(taskId, "source-visual-analysis", relativePath);
-    return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+    try {
+      const markdown = this.visualAnalysisProvider
+        ? await this.visualAnalysisProvider.analyze({
+            originalVideoUrl,
+            paths: this.paths,
+            sourceAssets,
+            task
+          })
+        : buildVisualAnalysisBrief({
+            originalVideoUrl,
+            sourceAssets,
+            task
+          });
+      const relativePath = "source/visual-analysis.md";
+      writeTaskFile(this.paths, taskId, relativePath, markdown);
+      this.taskRepository.addMediaAsset(taskId, "source-visual-analysis", relativePath);
+      return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+    } catch (error) {
+      this.taskRepository.updateStepStatus(
+        taskId,
+        "source",
+        "retry-ready",
+        error instanceof Error ? error.message : "???????"
+      );
+      throw error;
+    }
   }
 
   private requireTask(taskId: string): VideoTask {

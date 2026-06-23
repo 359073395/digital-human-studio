@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAppPaths, getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "../storage/database";
 import { TaskRepository } from "../storage/taskRepository";
+import type { VisualAnalysisProvider } from "../media/visualAnalysisProvider";
 import { SourceAssetService } from "./sourceAssetService";
 
 let tempDir: string;
@@ -374,16 +375,19 @@ describe("SourceAssetService", () => {
     }
   });
 
-  it("creates a reusable visual analysis brief for script generation", () => {
+  it("creates a reusable visual analysis brief for script generation", async () => {
     const service = new SourceAssetService(repository, appPaths);
     const task = repository.createTask({ title: "Visual brief" });
+    const videoPath = path.join(tempDir, "reference.mp4");
+    fs.writeFileSync(videoPath, Buffer.from("video"));
     repository.updateTask({
       taskId: task.id,
       originalVideoUrl: "https://example.com/reference.mp4",
       generationMode: "viral-remix"
     });
+    service.importSourceVideo(task.id, videoPath);
 
-    const updated = service.analyzeSourceVisuals(task.id);
+    const updated = await service.analyzeSourceVisuals(task.id);
     const asset = updated.mediaAssets.find(
       (mediaAsset) => mediaAsset.kind === "source-visual-analysis"
     );
@@ -398,5 +402,35 @@ describe("SourceAssetService", () => {
         }
       )
     ).toContain("## 复刻边界");
+  });
+
+  it("saves real visual analysis provider output for script context", async () => {
+    const visualProvider: VisualAnalysisProvider = {
+      analyze: async ({ sourceAssets }) =>
+        `# 画面分析\n\n## 镜头时间线\n- assets: ${sourceAssets.length}\n\n## 可复刻方法\n- keep structure, rewrite expression.`
+    };
+    const service = new SourceAssetService(
+      repository,
+      appPaths,
+      fetch,
+      undefined,
+      undefined,
+      undefined,
+      visualProvider
+    );
+    const task = repository.createTask({ title: "Real visual provider" });
+    const imagePath = path.join(tempDir, "frame.jpg");
+    fs.writeFileSync(imagePath, Buffer.from("image"));
+    service.importMixedCutMaterials(task.id, [imagePath]);
+
+    const updated = await service.analyzeSourceVisuals(task.id);
+    const analysisPath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "source",
+      "visual-analysis.md"
+    );
+
+    expect(updated.mediaAssets.some((asset) => asset.kind === "source-visual-analysis")).toBe(true);
+    expect(fs.readFileSync(analysisPath, "utf8")).toContain("## 镜头时间线");
   });
 });

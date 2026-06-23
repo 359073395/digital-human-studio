@@ -66,7 +66,10 @@ describe("ServiceConfigurationRepository", () => {
     ).toBe("gpt-image-2");
     expect(
       configurations.find((configuration) => configuration.providerId === "asr")?.settings.modelName
-    ).toBe("");
+    ).toBe("gemini-3.1-flash-lite");
+    expect(
+      configurations.find((configuration) => configuration.providerId === "asr")?.settings.asrMode
+    ).toBe("chat-audio");
     expect(
       configurations.find((configuration) => configuration.providerId === "asr")?.settings.enabled
     ).toBe(false);
@@ -351,14 +354,24 @@ describe("ServiceConfigurationRepository", () => {
 
   it("checks whether the LLM configuration can be reused for ASR when standalone ASR is disabled", async () => {
     const fetchImpl: typeof fetch = async (url, init) => {
-      expect(url).toBe("https://example.test/v1/audio/transcriptions");
+      expect(url).toBe("https://api.hyjiexi.eu.org/v1/chat/completions");
       expect(init?.method).toBe("POST");
       expect((init?.headers as Record<string, string>).authorization).toBe("Bearer llm-key");
-      const formData = init?.body as FormData;
-      expect(formData.get("model")).toBe("gpt-5.5");
-      expect(formData.get("response_format")).toBe("text");
-      expect(formData.getAll("file")).toHaveLength(1);
-      return new Response("ok", { status: 200 });
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        model: "gemini-3.1-flash-lite"
+      });
+      return Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                transcript: "ok",
+                segments: [{ start_seconds: 0, end_seconds: 0.1, text: "ok" }]
+              })
+            }
+          }
+        ]
+      });
     };
     repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
     await repository.saveConfiguration({
@@ -373,7 +386,7 @@ describe("ServiceConfigurationRepository", () => {
 
     await expect(repository.testConfiguration("asr")).resolves.toMatchObject({
       ok: true,
-      message: "ASR 独立配置未启用；已确认大模型 gpt-5.5 可以复用完成音频转写。"
+      message: "ASR 独立配置未启用；已确认大模型 gemini-3.1-flash-lite 可以复用完成音频转写。"
     });
   });
 
@@ -394,6 +407,7 @@ describe("ServiceConfigurationRepository", () => {
       settings: {
         baseUrl: "https://asr.example.test/v1",
         modelName: "gpt-4o-mini-transcribe",
+        asrMode: "audio-transcriptions",
         enabled: true
       },
       apiKey: "asr-key"

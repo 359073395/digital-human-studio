@@ -1,6 +1,7 @@
 export type ProviderId = "heygen" | "source-parser" | "llm" | "image" | "video" | "asr" | "tts";
 
 export type HeyGenAuthMode = "api-key" | "oauth-bearer";
+export type AsrMode = "audio-transcriptions" | "chat-audio";
 
 export type ProviderKind =
   | "avatar"
@@ -23,6 +24,7 @@ export interface ServiceConfigurationSettings {
   baseUrl?: string;
   modelName?: string;
   authMode?: HeyGenAuthMode;
+  asrMode?: AsrMode;
   avatarId?: string;
   voiceId?: string;
   resolution?: "720p" | "1080p" | "4k";
@@ -145,7 +147,12 @@ export function defaultServiceSettings(providerId: ProviderId): ServiceConfigura
         enabled: false
       };
     case "asr":
-      return { baseUrl: "https://api.openai.com/v1", modelName: "", enabled: false };
+      return {
+        baseUrl: "https://api.hyjiexi.eu.org/v1",
+        modelName: "gemini-3.1-flash-lite",
+        asrMode: "chat-audio",
+        enabled: false
+      };
     case "tts":
       return { baseUrl: "", modelName: "", enabled: false };
   }

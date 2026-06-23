@@ -20,6 +20,12 @@ const { TaskRepository } = require("../dist-electron/main/storage/taskRepository
 const {
   OpenAiCompatibleScriptProvider
 } = require("../dist-electron/main/script/openAiCompatibleScriptProvider");
+const {
+  OpenAiCompatibleSourceTranscriptionProvider
+} = require("../dist-electron/main/media/sourceTranscriptionProvider");
+const {
+  OpenAiCompatibleVisualAnalysisProvider
+} = require("../dist-electron/main/media/visualAnalysisProvider");
 const { ScriptWorkflowService } = require("../dist-electron/main/script/scriptWorkflowService");
 const { OpenAiImageProvider } = require("../dist-electron/main/image/openAiImageProvider");
 const {
@@ -218,6 +224,7 @@ function providerEnvSettings(providerId) {
     return {
       baseUrl: env("ASR_BASE_URL") || openAiBaseUrl,
       modelName: env("ASR_MODEL"),
+      asrMode: env("ASR_MODE"),
       enabled: Boolean(env("ASR_MODEL"))
     };
   }
@@ -315,7 +322,11 @@ function createServices(runtime) {
   const scriptWorkflowService = new ScriptWorkflowService(
     runtime.taskRepository,
     runtime.appPaths,
-    new OpenAiCompatibleScriptProvider(runtime.serviceRepository, runtime.credentialStore)
+    new OpenAiCompatibleScriptProvider(runtime.serviceRepository, runtime.credentialStore),
+    new OpenAiCompatibleSourceTranscriptionProvider(
+      runtime.serviceRepository,
+      runtime.credentialStore
+    )
   );
   const imageProvider = new OpenAiImageProvider(runtime.serviceRepository, runtime.credentialStore);
   const presenterImageWorkflowService = new PresenterImageWorkflowService(
@@ -339,7 +350,9 @@ function createServices(runtime) {
     runtime.appPaths,
     fetch,
     runtime.serviceRepository,
-    runtime.credentialStore
+    runtime.credentialStore,
+    undefined,
+    new OpenAiCompatibleVisualAnalysisProvider(runtime.serviceRepository, runtime.credentialStore)
   );
   const storyboardWorkflowService = new StoryboardWorkflowService(
     runtime.taskRepository,
@@ -473,14 +486,15 @@ async function runMode(runtime, services, materials, exportRoot, avatarLook, mod
   }
   if (mode.importSourceVideo) {
     services.sourceAssetService.importSourceVideo(task.id, materials.sampleVideo);
-    services.sourceAssetService.analyzeSourceVisuals(task.id);
+    await services.scriptWorkflowService.transcribeSource(task.id);
+    await services.sourceAssetService.analyzeSourceVisuals(task.id);
   }
   if (mode.importMixedMaterials) {
     services.sourceAssetService.importMixedCutMaterials(task.id, [
       materials.sampleVideo,
       materials.productImage
     ]);
-    services.sourceAssetService.analyzeSourceVisuals(task.id);
+    await services.sourceAssetService.analyzeSourceVisuals(task.id);
   }
   if (mode.storyboard) {
     const storyTask = await services.storyboardWorkflowService.generateStoryScriptOptions(task.id);
@@ -573,12 +587,72 @@ function validateCompletedTask(runtime, task) {
     language: task.contentLanguage,
     variants: variantResults,
     publishingPackageDirectory: task.publishingPackage.exportDirectory,
+    sourceProcessing: validateSourceProcessing(runtime, task),
     mediaAssets: task.mediaAssets.map((asset) => ({
       kind: asset.kind,
       relativePath: asset.relativePath
     })),
     steps: task.steps
   };
+}
+
+function validateSourceProcessing(runtime, task) {
+  const taskDirectory = getTaskDirectory(runtime.appPaths, task.id);
+  const requiresTranscript = task.generationMode === "viral-remix";
+  const requiresVisualAnalysis =
+    task.generationMode === "viral-remix" || task.generationMode === "mixed-cut";
+  const result = {
+    transcript: undefined,
+    visualAnalysis: undefined
+  };
+
+  if (requiresTranscript) {
+    const transcriptAsset = [...task.mediaAssets]
+      .reverse()
+      .find((asset) => asset.kind === "source-transcript");
+    if (!transcriptAsset) {
+      throw new Error(`${task.title} 缺少真实提取文案产物。`);
+    }
+    const transcriptPath = path.join(taskDirectory, ...transcriptAsset.relativePath.split("/"));
+    if (!fs.existsSync(transcriptPath) || !fs.readFileSync(transcriptPath, "utf8").trim()) {
+      throw new Error(`${task.title} 提取文案文件为空。`);
+    }
+    const sourceSubtitlePath = path.join(taskDirectory, "subtitles", "source-transcript.srt");
+    if (
+      !fs.existsSync(sourceSubtitlePath) ||
+      !fs.readFileSync(sourceSubtitlePath, "utf8").includes("-->")
+    ) {
+      throw new Error(`${task.title} 提取文案缺少真实时间轴 SRT。`);
+    }
+    result.transcript = {
+      relativePath: transcriptAsset.relativePath,
+      bytes: fs.statSync(transcriptPath).size,
+      subtitleRelativePath: "subtitles/source-transcript.srt"
+    };
+  }
+
+  if (requiresVisualAnalysis) {
+    const visualAsset = [...task.mediaAssets]
+      .reverse()
+      .find((asset) => asset.kind === "source-visual-analysis");
+    if (!visualAsset) {
+      throw new Error(`${task.title} 缺少真实画面分析产物。`);
+    }
+    const visualPath = path.join(taskDirectory, ...visualAsset.relativePath.split("/"));
+    if (!fs.existsSync(visualPath)) {
+      throw new Error(`${task.title} 画面分析文件不存在。`);
+    }
+    const content = fs.readFileSync(visualPath, "utf8");
+    if (!content.includes("#") || !/画面|visual|镜头|storyboard/i.test(content)) {
+      throw new Error(`${task.title} 画面分析内容不像有效分析结果。`);
+    }
+    result.visualAnalysis = {
+      relativePath: visualAsset.relativePath,
+      bytes: fs.statSync(visualPath).size
+    };
+  }
+
+  return result;
 }
 
 function modeCases() {
@@ -741,12 +815,14 @@ async function main() {
           finishedAt: new Date().toISOString()
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         const failure = {
           mode: mode.generationMode,
           title: mode.title,
           startedAt: modeStartedAt,
           failedAt: new Date().toISOString(),
-          message: error instanceof Error ? error.message : String(error)
+          message,
+          externalAccountBlocker: classifyExternalBlocker(message)
         };
         report.failures.push(failure);
         report.modes.push({ ok: false, ...failure });
@@ -754,10 +830,12 @@ async function main() {
       }
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     report.failures.push({
       stage: "setup",
       failedAt: new Date().toISOString(),
-      message: error instanceof Error ? error.message : String(error)
+      message,
+      externalAccountBlocker: classifyExternalBlocker(message)
     });
   } finally {
     report.finishedAt = new Date().toISOString();
@@ -771,6 +849,19 @@ async function main() {
   if (!report.ok) {
     process.exitCode = 1;
   }
+}
+
+function classifyExternalBlocker(message) {
+  if (/insufficient credit|api credits|requires 'api' credits/i.test(message)) {
+    return "heygen-api-credits";
+  }
+  if (/unauthorized|forbidden|invalid api key|invalid token/i.test(message)) {
+    return "credential-auth";
+  }
+  if (/quota|rate limit|billing/i.test(message)) {
+    return "provider-quota-or-billing";
+  }
+  return undefined;
 }
 
 main().catch((error) => {

@@ -1,14 +1,16 @@
-import type { ContentLanguage } from "../../shared/domain";
+import type { ContentLanguage, VideoTask } from "../../shared/domain";
 import type { SourceTranscriptionResult } from "../../shared/scriptGeneration";
+import type { SourceTranscriptionProvider } from "../media/sourceTranscriptionProvider";
 
-export class MockAsrProvider {
-  transcribe(contentLanguage: ContentLanguage): SourceTranscriptionResult {
-    const transcript = createTranscript(contentLanguage);
+export class MockAsrProvider implements SourceTranscriptionProvider {
+  async transcribe(task: VideoTask): Promise<SourceTranscriptionResult> {
+    const transcript = createTranscript(task.contentLanguage);
 
     return {
       transcript,
-      contentLanguage,
-      notes: "Mock ASR 已生成源素材转写文本；真实 ASR 接入后会替换为音视频识别结果。"
+      contentLanguage: task.contentLanguage,
+      notes:
+        "Mock ASR has generated a source transcript. Configure real ASR to replace this development fallback."
     };
   }
 }

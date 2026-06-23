@@ -1,5 +1,7 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import ffmpegStaticPath from "ffmpeg-static";
 import type { ContentLanguage } from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { defaultServiceSettings } from "../../shared/serviceConfig";
@@ -29,6 +31,7 @@ interface ActiveTranscriptionConfiguration {
   apiKey: string;
   baseUrl: string;
   modelName: string;
+  mode: "audio-transcriptions" | "chat-audio";
   providerLabel: string;
   usingSharedLlm: boolean;
 }
@@ -46,21 +49,123 @@ export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
 
   async createSubtitleFile(input: SubtitleFallbackInput): Promise<SubtitleFallbackResult> {
     const activeConfiguration = await this.resolveTranscriptionConfiguration();
+    const uploadPath =
+      activeConfiguration.mode === "chat-audio"
+        ? prepareWavAudio(input.avatarVideoPath)
+        : input.avatarVideoPath;
 
-    const sizeBytes = fs.statSync(input.avatarVideoPath).size;
+    const sizeBytes = fs.statSync(uploadPath).size;
     if (sizeBytes > OPENAI_AUDIO_UPLOAD_LIMIT_BYTES) {
-      throw new Error("ASR 文件超过 OpenAI 25MB 上传限制，请先使用较短视频或后续音频抽取流程。");
+      throw new Error(
+        "ASR file is larger than 25MB. Please use a shorter video or compressed audio."
+      );
     }
 
+    const srt =
+      activeConfiguration.mode === "chat-audio"
+        ? await this.createSubtitleFileWithChatAudio(
+            activeConfiguration,
+            uploadPath,
+            input.task.contentLanguage
+          )
+        : await this.createSubtitleFileWithAudioEndpoint(
+            activeConfiguration,
+            uploadPath,
+            input.task.contentLanguage
+          );
+
+    if (!srt) {
+      throw new Error("ASR returned an empty subtitle response.");
+    }
+
+    return { srt };
+  }
+
+  private async resolveTranscriptionConfiguration(): Promise<ActiveTranscriptionConfiguration> {
+    const asrConfiguration = this.configurations.getConfiguration("asr");
+    const asrDefaults = defaultServiceSettings("asr");
+    const configuredAsrModelName = asrConfiguration.settings.modelName?.trim();
+
+    if (asrConfiguration.settings.enabled !== false) {
+      if (!configuredAsrModelName) {
+        throw new SubtitleFallbackProviderUnavailableError(
+          "ASR is enabled but the model name is empty. Choose an audio-capable model or disable standalone ASR."
+        );
+      }
+
+      const apiKey = await this.credentials.readCredential("asr");
+      if (!apiKey) {
+        throw new SubtitleFallbackProviderUnavailableError(
+          "ASR is enabled but no ASR API Key is saved. Save an ASR key, or disable standalone ASR to reuse the LLM key."
+        );
+      }
+
+      const baseUrl = asrConfiguration.settings.baseUrl || asrDefaults.baseUrl;
+      if (!baseUrl) {
+        throw new SubtitleFallbackProviderUnavailableError("ASR Base URL is not configured.");
+      }
+
+      return {
+        apiKey,
+        baseUrl,
+        modelName: configuredAsrModelName,
+        mode: asrConfiguration.settings.asrMode || asrDefaults.asrMode || "chat-audio",
+        providerLabel: "ASR",
+        usingSharedLlm: false
+      };
+    }
+
+    const llmConfiguration = this.configurations.getConfiguration("llm");
+    if (llmConfiguration.settings.enabled === false) {
+      throw new SubtitleFallbackProviderUnavailableError(
+        "Standalone ASR is disabled and the LLM service is disabled, so subtitle fallback cannot run."
+      );
+    }
+
+    const apiKey = await this.credentials.readCredential("llm");
+    if (!apiKey) {
+      throw new SubtitleFallbackProviderUnavailableError(
+        "Standalone ASR is disabled and no LLM API Key is saved, so audio transcription cannot run."
+      );
+    }
+
+    const baseUrl =
+      asrConfiguration.settings.baseUrl ||
+      asrDefaults.baseUrl ||
+      llmConfiguration.settings.baseUrl ||
+      defaultServiceSettings("llm").baseUrl;
+    const modelName =
+      configuredAsrModelName ||
+      asrDefaults.modelName ||
+      llmConfiguration.settings.modelName?.trim();
+    const mode = asrConfiguration.settings.asrMode || asrDefaults.asrMode || "chat-audio";
+
+    if (!baseUrl || !modelName) {
+      throw new SubtitleFallbackProviderUnavailableError(
+        "ASR default Base URL or model name is empty. Configure the ASR section or enable standalone ASR."
+      );
+    }
+
+    return {
+      apiKey,
+      baseUrl,
+      modelName,
+      mode,
+      providerLabel: "ASR default model with shared LLM key",
+      usingSharedLlm: true
+    };
+  }
+
+  private async createSubtitleFileWithAudioEndpoint(
+    activeConfiguration: ActiveTranscriptionConfiguration,
+    mediaPath: string,
+    language: ContentLanguage
+  ): Promise<string> {
     const formData = new FormData();
     formData.append("model", activeConfiguration.modelName);
-    formData.append("response_format", responseFormatForModel(activeConfiguration.modelName));
-    formData.append("language", languageCode(input.task.contentLanguage));
-    formData.append(
-      "file",
-      createMediaBlob(input.avatarVideoPath),
-      path.basename(input.avatarVideoPath)
-    );
+    formData.append("response_format", "srt");
+    formData.append("language", languageCode(language));
+    formData.append("file", createMediaBlob(mediaPath), path.basename(mediaPath));
 
     const response = await this.fetchImpl(
       `${normalizeBaseUrl(activeConfiguration.baseUrl)}/audio/transcriptions`,
@@ -76,84 +181,69 @@ export class OpenAiAsrSubtitleProvider implements SubtitleFallbackProvider {
     const responseText = await response.text();
     if (!response.ok) {
       throw new Error(
-        `${activeConfiguration.providerLabel} 音频转写失败 (${response.status}): ${
+        `${activeConfiguration.providerLabel} audio transcription failed (${response.status}): ${
           redactSecret(responseText.slice(0, 800)) || response.statusText
-        }${activeConfiguration.usingSharedLlm ? "。当前复用的大模型配置不能完成音频转写，请在设置里启用 ASR 转写并填写支持音频转写的模型。" : ""}`
+        }${activeConfiguration.usingSharedLlm ? ". Configure a real audio-capable ASR model if this model cannot transcribe audio." : ""}`
       );
     }
 
-    const srt = normalizeTranscriptionToSrt(responseText);
-    if (!srt) {
-      throw new Error("ASR 字幕响应为空。");
-    }
-
-    return { srt };
+    return normalizeTranscriptionToSrt(responseText);
   }
 
-  private async resolveTranscriptionConfiguration(): Promise<ActiveTranscriptionConfiguration> {
-    const asrConfiguration = this.configurations.getConfiguration("asr");
-    const asrModelName = asrConfiguration.settings.modelName?.trim();
-    if (asrConfiguration.settings.enabled !== false) {
-      if (!asrModelName) {
-        throw new SubtitleFallbackProviderUnavailableError(
-          "ASR 已启用但模型名为空。请填写支持音频转写的模型，或关闭 ASR 复用大模型配置。"
-        );
+  private async createSubtitleFileWithChatAudio(
+    activeConfiguration: ActiveTranscriptionConfiguration,
+    audioPath: string,
+    language: ContentLanguage
+  ): Promise<string> {
+    const response = await this.fetchImpl(
+      `${normalizeBaseUrl(activeConfiguration.baseUrl)}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${activeConfiguration.apiKey}`
+        },
+        body: JSON.stringify({
+          model: activeConfiguration.modelName,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    "Transcribe the attached audio for final subtitles.",
+                    "Return JSON only, without markdown fences.",
+                    "Every segment must include numeric start_seconds, end_seconds, and text.",
+                    `Target language hint: ${languageCode(language)}.`,
+                    'Schema: {"transcript":"...","segments":[{"start_seconds":0,"end_seconds":1.2,"text":"..."}]}'
+                  ].join("\n")
+                },
+                {
+                  type: "input_audio",
+                  input_audio: {
+                    data: fs.readFileSync(audioPath).toString("base64"),
+                    format: "wav"
+                  }
+                }
+              ]
+            }
+          ],
+          temperature: 0
+        })
       }
+    );
 
-      const apiKey = await this.credentials.readCredential("asr");
-      if (!apiKey) {
-        throw new SubtitleFallbackProviderUnavailableError(
-          "ASR 已启用但 API Key 尚未配置。可以关闭 ASR 复用大模型配置，或填写 ASR API Key。"
-        );
-      }
-
-      const baseUrl = asrConfiguration.settings.baseUrl || defaultServiceSettings("asr").baseUrl;
-      if (!baseUrl) {
-        throw new SubtitleFallbackProviderUnavailableError("ASR Base URL 尚未配置。");
-      }
-
-      return {
-        apiKey,
-        baseUrl,
-        modelName: asrModelName,
-        providerLabel: "ASR",
-        usingSharedLlm: false
-      };
-    }
-
-    const llmConfiguration = this.configurations.getConfiguration("llm");
-    if (llmConfiguration.settings.enabled === false) {
-      throw new SubtitleFallbackProviderUnavailableError(
-        "ASR 未单独启用，且大模型服务未启用，无法做字幕兜底。"
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `${activeConfiguration.providerLabel} Chat audio transcription failed (${response.status}): ${
+          redactSecret(responseText.slice(0, 800)) || response.statusText
+        }`
       );
     }
 
-    const apiKey = await this.credentials.readCredential("llm");
-    if (!apiKey) {
-      throw new SubtitleFallbackProviderUnavailableError(
-        "ASR 未单独启用，且大模型 API Key 尚未配置，无法复用大模型做音频转写。"
-      );
-    }
-
-    const modelName = llmConfiguration.settings.modelName?.trim();
-    if (!modelName) {
-      throw new SubtitleFallbackProviderUnavailableError(
-        "ASR 未单独启用，且大模型模型名为空，无法复用大模型做音频转写。"
-      );
-    }
-
-    const baseUrl = llmConfiguration.settings.baseUrl || defaultServiceSettings("llm").baseUrl;
-    if (!baseUrl) {
-      throw new SubtitleFallbackProviderUnavailableError("大模型 Base URL 尚未配置。");
-    }
-
-    return {
-      apiKey,
-      baseUrl,
-      modelName,
-      providerLabel: "大模型复用 ASR",
-      usingSharedLlm: true
-    };
+    return normalizeTranscriptionToSrt(readChatCompletionText(responseText));
   }
 }
 
@@ -178,6 +268,40 @@ function contentTypeFromPath(mediaPath: string): string {
   return "video/mp4";
 }
 
+function prepareWavAudio(mediaPath: string): string {
+  if (path.extname(mediaPath).toLowerCase() === ".wav") {
+    return mediaPath;
+  }
+
+  const outputPath = path.join(
+    path.dirname(mediaPath),
+    `${path.basename(mediaPath, path.extname(mediaPath))}-asr.wav`
+  );
+  const result = spawnSync(
+    requireFfmpegPath(),
+    ["-y", "-i", mediaPath, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", outputPath],
+    {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 10 * 60 * 1000
+    }
+  );
+
+  if (result.error) {
+    throw new Error(`ASR audio extraction failed: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `ASR audio extraction failed: ${(result.stderr || result.stdout || "").slice(-1200)}`
+    );
+  }
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+    throw new Error("ASR audio extraction produced an empty wav file.");
+  }
+
+  return outputPath;
+}
+
 function languageCode(language: ContentLanguage): "zh" | "en" | "id" {
   if (language === "en-US") {
     return "en";
@@ -188,8 +312,27 @@ function languageCode(language: ContentLanguage): "zh" | "en" | "id" {
   return "zh";
 }
 
-function responseFormatForModel(modelName: string): "srt" | "text" {
-  return modelName.toLowerCase().includes("whisper") ? "srt" : "text";
+function readChatCompletionText(responseText: string): string {
+  try {
+    const parsed = JSON.parse(responseText) as Record<string, unknown>;
+    const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
+    const first = choices[0];
+    if (!isRecord(first) || !isRecord(first.message)) {
+      return "";
+    }
+
+    const content = first.message.content;
+    if (typeof content === "string") {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content.map((part) => (isRecord(part) ? readText(part.text) : "")).join("\n");
+    }
+  } catch {
+    return responseText;
+  }
+
+  return "";
 }
 
 function normalizeTranscriptionToSrt(responseText: string): string {
@@ -208,7 +351,7 @@ function normalizeTranscriptionToSrt(responseText: string): string {
   }
 
   throw new Error(
-    "ASR 已返回文本但没有返回字幕时间轴。发布版不能使用纯估算字幕，请换用支持 SRT 或分段时间戳的 ASR 模型。"
+    "ASR returned text without subtitle timestamps. The release build cannot use estimated subtitles; choose an ASR model that returns SRT or segmented timestamps."
   );
 }
 
@@ -217,34 +360,65 @@ function looksLikeSrt(value: string): boolean {
 }
 
 function extractSrtFromSegmentResponse(value: string): string {
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    if (!Array.isArray(parsed.segments)) {
-      return "";
-    }
-
-    const blocks = parsed.segments
-      .map((segment, index) => {
-        if (!isRecord(segment)) {
-          return "";
-        }
-
-        const start = readNumber(segment.start);
-        const end = readNumber(segment.end);
-        const text = readText(segment.text);
-        if (start === undefined || end === undefined || !text) {
-          return "";
-        }
-
-        return [String(index + 1), `${formatSrtTime(start)} --> ${formatSrtTime(end)}`, text].join(
-          "\n"
-        );
-      })
-      .filter(Boolean);
-
-    return blocks.join("\n\n");
-  } catch {
+  const parsed = parseJsonFromText(value);
+  if (!parsed) {
     return "";
+  }
+
+  const inlineSrt = readText(parsed.srt);
+  if (inlineSrt && looksLikeSrt(inlineSrt)) {
+    return inlineSrt;
+  }
+
+  if (!Array.isArray(parsed.segments)) {
+    return "";
+  }
+
+  const blocks = parsed.segments
+    .map((segment, index) => {
+      if (!isRecord(segment)) {
+        return "";
+      }
+
+      const start =
+        readNumber(segment.start_seconds) ??
+        readNumber(segment.start) ??
+        readNumber(segment.startTime);
+      const end =
+        readNumber(segment.end_seconds) ?? readNumber(segment.end) ?? readNumber(segment.endTime);
+      const text = readText(segment.text);
+      if (start === undefined || end === undefined || !text) {
+        return "";
+      }
+
+      return [String(index + 1), `${formatSrtTime(start)} --> ${formatSrtTime(end)}`, text].join(
+        "\n"
+      );
+    })
+    .filter(Boolean);
+
+  return blocks.join("\n\n");
+}
+
+function parseJsonFromText(value: string): Record<string, unknown> | undefined {
+  const trimmed = value
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return undefined;
+    }
+    try {
+      const parsed = JSON.parse(match[0]) as unknown;
+      return isRecord(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }
 
@@ -253,7 +427,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function readText(value: unknown): string {
@@ -278,4 +459,11 @@ function pad(value: number): string {
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
+}
+
+function requireFfmpegPath(): string {
+  if (!ffmpegStaticPath) {
+    throw new Error("Built-in FFmpeg was not found, so ASR audio extraction cannot run.");
+  }
+  return ffmpegStaticPath;
 }

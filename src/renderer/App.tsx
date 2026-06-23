@@ -1596,6 +1596,7 @@ export function App() {
         baseUrl: draft.baseUrl,
         modelName: draft.modelName,
         authMode: draft.authMode,
+        asrMode: draft.asrMode,
         avatarId: draft.avatarId,
         voiceId: draft.voiceId,
         resolution: draft.resolution,
@@ -3005,6 +3006,31 @@ export function App() {
                           >
                             <option value="720p">720p</option>
                             <option value="1080p">1080p</option>
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {activeSettingsConfiguration.providerId === "asr" ? (
+                      <div className="settings-form-grid">
+                        <label>
+                          ASR æŽ¥å£æ¨¡å¼
+                          <select
+                            value={activeSettingsDraft.asrMode ?? "audio-transcriptions"}
+                            onChange={(event) =>
+                              setSettingsDraft((current) =>
+                                updateDraft(current, activeSettingsConfiguration.providerId, {
+                                  asrMode: event.target.value as SettingsDraft["asrMode"]
+                                })
+                              )
+                            }
+                          >
+                            <option value="chat-audio">
+                              OpenAI Chat éŸ³é¢‘è¾“å…¥ï¼ˆGemini ä¸­è½¬æŽ¨èï¼‰
+                            </option>
+                            <option value="audio-transcriptions">
+                              OpenAI audio/transcriptions
+                            </option>
                           </select>
                         </label>
                       </div>
@@ -4811,6 +4837,7 @@ function createSettingsDraft(
         baseUrl: configuration.settings.baseUrl ?? "",
         modelName: configuration.settings.modelName ?? "",
         authMode: configuration.settings.authMode ?? "api-key",
+        asrMode: configuration.settings.asrMode ?? "audio-transcriptions",
         avatarId: configuration.settings.avatarId ?? "",
         voiceId: configuration.settings.voiceId ?? "",
         resolution: configuration.settings.resolution ?? "720p",
@@ -4840,6 +4867,7 @@ function createEmptySettingsDraft(): SettingsDraft {
     baseUrl: "",
     modelName: "",
     authMode: "api-key",
+    asrMode: "audio-transcriptions",
     avatarId: "",
     voiceId: "",
     resolution: "720p",
