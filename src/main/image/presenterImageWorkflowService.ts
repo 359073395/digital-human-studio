@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { AppPathSettings } from "../../shared/appSettings";
 import {
   OUTPUT_PRESETS,
   type MediaAsset,
@@ -23,11 +24,16 @@ const SUPPORTED_PRODUCT_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".w
 const SUPPORTED_FONT_EXTENSIONS = new Set([".ttf", ".otf", ".woff", ".woff2"]);
 const CUSTOM_FONT_FAMILY = "DHS Custom Font";
 
+interface PathSettingsReader {
+  getPathSettings: () => AppPathSettings;
+}
+
 export class PresenterImageWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
-    private readonly imageProvider: ImageProvider
+    private readonly imageProvider: ImageProvider,
+    private readonly pathSettingsReader?: PathSettingsReader
   ) {}
 
   importProductImage(taskId: string, sourcePath: string): VideoTask {
@@ -149,6 +155,11 @@ export class PresenterImageWorkflowService {
         const absolutePath = absoluteTaskPath(this.paths, taskId, relativePath);
         fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
         fs.writeFileSync(absolutePath, result.imageBytes);
+        this.copyGeneratedImageToConfiguredDirectory(
+          path.basename(relativePath),
+          result.imageBytes,
+          result.promptPreview
+        );
         writeTaskFile(
           this.paths,
           taskId,
@@ -214,6 +225,26 @@ export class PresenterImageWorkflowService {
       throw new Error(`Task ${taskId} was not found.`);
     }
     return task;
+  }
+
+  private copyGeneratedImageToConfiguredDirectory(
+    fileName: string,
+    imageBytes: Buffer,
+    promptPreview: string
+  ): void {
+    const targetDirectory =
+      this.pathSettingsReader?.getPathSettings().generatedImageDirectory.trim() ?? "";
+    if (!targetDirectory) {
+      return;
+    }
+
+    fs.mkdirSync(targetDirectory, { recursive: true });
+    fs.writeFileSync(path.join(targetDirectory, fileName), imageBytes);
+    fs.writeFileSync(
+      path.join(targetDirectory, `${path.basename(fileName, path.extname(fileName))}-prompt.txt`),
+      promptPreview,
+      "utf8"
+    );
   }
 }
 

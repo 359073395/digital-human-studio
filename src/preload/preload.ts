@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { VideoTask, VideoTaskSummary } from "../shared/domain";
+import type { AppPathSettingKind, AppPathSettings } from "../shared/appSettings";
 import type {
   ProviderId,
   ListServiceModelsInput,
@@ -60,7 +61,10 @@ const IPC_CHANNELS = {
   saveServiceConfiguration: "service-configurations:save",
   clearServiceCredential: "service-configurations:clear-credential",
   testServiceConfiguration: "service-configurations:test",
-  listServiceModels: "service-configurations:list-models"
+  listServiceModels: "service-configurations:list-models",
+  getAppPathSettings: "app-settings:get-paths",
+  chooseAppPathSetting: "app-settings:choose-path",
+  clearAppPathSetting: "app-settings:clear-path"
 } as const;
 
 const api: DigitalHumanStudioAPI = {
@@ -141,7 +145,13 @@ const api: DigitalHumanStudioAPI = {
       providerId
     ) as Promise<ServiceConnectionCheck>,
   listServiceModels: (input: ListServiceModelsInput) =>
-    ipcRenderer.invoke(IPC_CHANNELS.listServiceModels, input) as Promise<ServiceModelList>
+    ipcRenderer.invoke(IPC_CHANNELS.listServiceModels, input) as Promise<ServiceModelList>,
+  getAppPathSettings: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getAppPathSettings) as Promise<AppPathSettings>,
+  chooseAppPathSetting: (kind: AppPathSettingKind) =>
+    ipcRenderer.invoke(IPC_CHANNELS.chooseAppPathSetting, kind) as Promise<AppPathSettings>,
+  clearAppPathSetting: (kind: AppPathSettingKind) =>
+    ipcRenderer.invoke(IPC_CHANNELS.clearAppPathSetting, kind) as Promise<AppPathSettings>
 };
 
 contextBridge.exposeInMainWorld("digitalHumanStudio", api);

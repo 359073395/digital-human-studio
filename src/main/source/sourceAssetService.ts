@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { AppPathSettings } from "../../shared/appSettings";
 import type { MediaAsset, VideoTask } from "../../shared/domain";
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { defaultServiceSettings } from "../../shared/serviceConfig";
@@ -41,6 +42,10 @@ interface SourceParserRuntime {
   apiKey: string;
 }
 
+interface PathSettingsReader {
+  getPathSettings: () => AppPathSettings;
+}
+
 interface SourceParserCreateJobResponse {
   job_id?: string;
   jobId?: string;
@@ -62,7 +67,8 @@ export class SourceAssetService {
     private readonly paths: AppPaths,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly sourceParserConfigurations?: SourceParserConfigurationReader,
-    private readonly sourceParserCredentials?: SourceParserCredentialReader
+    private readonly sourceParserCredentials?: SourceParserCredentialReader,
+    private readonly pathSettingsReader?: PathSettingsReader
   ) {}
 
   async downloadOriginalVideo(taskId: string): Promise<VideoTask> {
@@ -172,6 +178,7 @@ export class SourceAssetService {
       "parsed-video";
     const relativePath = `source/original-video-${Date.now()}-${fileNameStem}${extension}`;
     writeTaskFile(this.paths, taskId, relativePath, bytes);
+    this.copyDownloadedSourceToConfiguredDirectory(relativePath, bytes);
     this.taskRepository.addMediaAsset(taskId, mediaKindFromExtension(extension), relativePath);
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
@@ -236,6 +243,7 @@ export class SourceAssetService {
 
     const relativePath = `source/original-video-${Date.now()}${extension || ".mp4"}`;
     writeTaskFile(this.paths, taskId, relativePath, bytes);
+    this.copyDownloadedSourceToConfiguredDirectory(relativePath, bytes);
     this.taskRepository.addMediaAsset(taskId, mediaKindFromExtension(extension), relativePath);
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
@@ -313,6 +321,17 @@ export class SourceAssetService {
       throw new Error(`Task ${taskId} was not found.`);
     }
     return task;
+  }
+
+  private copyDownloadedSourceToConfiguredDirectory(relativePath: string, bytes: Buffer): void {
+    const targetDirectory =
+      this.pathSettingsReader?.getPathSettings().sourceDownloadDirectory.trim() ?? "";
+    if (!targetDirectory) {
+      return;
+    }
+
+    fs.mkdirSync(targetDirectory, { recursive: true });
+    fs.writeFileSync(path.join(targetDirectory, path.basename(relativePath)), bytes);
   }
 
   private importKnowledgeFiles(

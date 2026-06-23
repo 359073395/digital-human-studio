@@ -8,6 +8,7 @@ import type {
   ProviderId,
   SaveServiceConfigurationInput
 } from "../shared/serviceConfig";
+import type { AppPathSettingKind } from "../shared/appSettings";
 import {
   IPC_CHANNELS,
   type AppInfo,
@@ -32,6 +33,7 @@ import {
   getTaskDirectory,
   getTaskMediaDirectory
 } from "./storage/appPaths";
+import { AppSettingsRepository } from "./storage/appSettingsRepository";
 import { CredentialStore, createCredentialFilePath } from "./storage/credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./storage/database";
 import { OpenAiCompatibleScriptProvider } from "./script/openAiCompatibleScriptProvider";
@@ -114,6 +116,7 @@ function createMainWindow(): void {
 
 interface MainRepositories {
   taskRepository: TaskRepository;
+  appSettingsRepository: AppSettingsRepository;
   serviceConfigurationRepository: ServiceConfigurationRepository;
   mockWorkflowRunner: MockWorkflowRunner;
   scriptWorkflowService: ScriptWorkflowService;
@@ -140,6 +143,7 @@ function createRepositories(): MainRepositories {
     new SafeStorageCipher(appDataDir)
   );
   const taskRepository = new TaskRepository(taskDatabase, appPaths);
+  const appSettingsRepository = new AppSettingsRepository(taskDatabase);
   const serviceConfigurationRepository = new ServiceConfigurationRepository(
     taskDatabase,
     credentialStore
@@ -167,7 +171,8 @@ function createRepositories(): MainRepositories {
   const presenterImageWorkflowService = new PresenterImageWorkflowService(
     taskRepository,
     appPaths,
-    imageProvider
+    imageProvider,
+    appSettingsRepository
   );
   const storyboardWorkflowService = new StoryboardWorkflowService(
     taskRepository,
@@ -180,9 +185,15 @@ function createRepositories(): MainRepositories {
     appPaths,
     fetch,
     serviceConfigurationRepository,
-    credentialStore
+    credentialStore,
+    appSettingsRepository
   );
-  const exportWorkflowService = new ExportWorkflowService(taskRepository, appPaths);
+  const exportWorkflowService = new ExportWorkflowService(
+    taskRepository,
+    appPaths,
+    undefined,
+    appSettingsRepository
+  );
   const mixedCutWorkflowService = new MixedCutWorkflowService(taskRepository, appPaths);
   const realWorkflowRunner = new RealWorkflowRunner(
     taskRepository,
@@ -195,6 +206,7 @@ function createRepositories(): MainRepositories {
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   return {
     taskRepository,
+    appSettingsRepository,
     serviceConfigurationRepository,
     mockWorkflowRunner,
     scriptWorkflowService,
@@ -212,6 +224,7 @@ function createRepositories(): MainRepositories {
 function registerIpcHandlers(repositories: MainRepositories): void {
   const {
     appPaths,
+    appSettingsRepository,
     avatarWorkflowService,
     heyGenAvatarCreator,
     heyGenAvatarCatalog,
@@ -237,6 +250,30 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   ipcMain.handle(IPC_CHANNELS.openSettings, () => {
     mainWindow?.webContents.send(IPC_CHANNELS.openSettings);
   });
+
+  ipcMain.handle(IPC_CHANNELS.getAppPathSettings, () => appSettingsRepository.getPathSettings());
+
+  ipcMain.handle(IPC_CHANNELS.chooseAppPathSetting, async (_event, kind: AppPathSettingKind) => {
+    const current = appSettingsRepository.getPathSettings();
+    const options: OpenDialogOptions = {
+      title: pathSettingDialogTitle(kind),
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: current[kind] || defaultPathSettingDirectory(kind)
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    if (result.canceled || !result.filePaths[0]) {
+      return current;
+    }
+
+    return appSettingsRepository.updatePathSetting(kind, result.filePaths[0]);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.clearAppPathSetting, (_event, kind: AppPathSettingKind) =>
+    appSettingsRepository.clearPathSetting(kind)
+  );
 
   ipcMain.handle(IPC_CHANNELS.listTasks, () => taskRepository.listTasks());
 
@@ -264,7 +301,10 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     const exportDirectoryDialogOptions: OpenDialogOptions = {
       title: "选择保存目录",
       properties: ["openDirectory", "createDirectory"],
-      defaultPath: task.exportDirectory || app.getPath("videos")
+      defaultPath:
+        task.exportDirectory ||
+        appSettingsRepository.getPathSettings().generatedVideoDirectory ||
+        app.getPath("videos")
     };
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, exportDirectoryDialogOptions)
@@ -652,6 +692,28 @@ function resolveExportDirectory(
   }
 
   return path.join(getTaskDirectory(appPaths, taskId), ...exportDirectory.split("/"));
+}
+
+function pathSettingDialogTitle(kind: AppPathSettingKind): string {
+  switch (kind) {
+    case "sourceDownloadDirectory":
+      return "选择原视频下载目录";
+    case "generatedImageDirectory":
+      return "选择生成图片保存目录";
+    case "generatedVideoDirectory":
+      return "选择生成视频保存目录";
+  }
+}
+
+function defaultPathSettingDirectory(kind: AppPathSettingKind): string {
+  switch (kind) {
+    case "sourceDownloadDirectory":
+      return app.getPath("downloads");
+    case "generatedImageDirectory":
+      return app.getPath("pictures");
+    case "generatedVideoDirectory":
+      return app.getPath("videos");
+  }
 }
 
 app.whenReady().then(() => {

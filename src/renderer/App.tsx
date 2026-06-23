@@ -19,6 +19,11 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import {
+  DEFAULT_APP_PATH_SETTINGS,
+  type AppPathSettingKind,
+  type AppPathSettings
+} from "../shared/appSettings";
+import {
   CONTENT_LANGUAGES,
   DEFAULT_COVER_STYLE,
   DEFAULT_CREATIVE_WORKFLOW,
@@ -58,6 +63,12 @@ import { countCompleteSteps } from "../shared/workbench";
 const now = new Date().toISOString();
 
 type PreviewMode = "finished" | "cover";
+type ActiveOperation = "download-original" | "extract-copy" | "visual-analysis";
+type OperationNotice = {
+  tone: "running" | "success" | "error";
+  title: string;
+  detail?: string;
+};
 type TaskNameDialog =
   | {
       mode: "create";
@@ -214,7 +225,12 @@ export function App() {
   const [activeSettingsProviderId, setActiveSettingsProviderId] = useState<ProviderId | "">("");
   const [settingsBusyProviderId, setSettingsBusyProviderId] = useState<ProviderId | "">("");
   const [settingsMessage, setSettingsMessage] = useState("");
+  const [appPathSettings, setAppPathSettings] =
+    useState<AppPathSettings>(DEFAULT_APP_PATH_SETTINGS);
+  const [pathSettingsMessage, setPathSettingsMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
+  const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null);
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
   const [taskNameDialog, setTaskNameDialog] = useState<TaskNameDialog | null>(null);
   const [isTaskNameSaving, setIsTaskNameSaving] = useState(false);
@@ -399,6 +415,11 @@ export function App() {
     return null;
   }
 
+  function showOperationNotice(notice: OperationNotice): void {
+    setOperationNotice(notice);
+    setActionMessage(notice.detail ? `${notice.title}: ${notice.detail}` : notice.title);
+  }
+
   useEffect(() => {
     if (!window.digitalHumanStudio) {
       return;
@@ -409,6 +430,7 @@ export function App() {
       .then((info) => setAppVersion(`${info.name} ${info.version}`))
       .catch(() => setAppVersion("自媒体视频工作台"));
     void loadServiceConfigurations();
+    void loadAppPathSettings();
   }, []);
 
   useEffect(() => {
@@ -907,7 +929,12 @@ export function App() {
     }
 
     setIsWorkflowRunning(true);
-    setActionMessage("正在尝试下载原视频...");
+    setActiveOperation("download-original");
+    showOperationNotice({
+      tone: "running",
+      title: "正在下载原视频",
+      detail: "解析完成后会自动保存到任务素材，并复制到你设置的下载目录。"
+    });
 
     try {
       await api.updateTask({
@@ -915,11 +942,28 @@ export function App() {
         originalVideoUrl: selectedTask.originalVideoUrl ?? ""
       });
       const task = await api.downloadOriginalVideo(selectedTask.id);
-      setActionMessage("原视频已下载并保存到当前任务素材中");
+      const latestSource = latestTaskAsset(task, ["source-video", "source-audio"]);
+      showOperationNotice({
+        tone: "success",
+        title: "下载视频完成",
+        detail: [
+          latestSource ? `文件：${assetFileName(latestSource.relativePath)}` : "",
+          appPathSettings.sourceDownloadDirectory
+            ? `已复制到：${appPathSettings.sourceDownloadDirectory}`
+            : "已保存到当前任务素材中"
+        ]
+          .filter(Boolean)
+          .join("；")
+      });
       await refreshTaskState(task.id, task);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "原视频下载失败");
+      showOperationNotice({
+        tone: "error",
+        title: "下载视频失败",
+        detail: error instanceof Error ? error.message : "原视频下载失败"
+      });
     } finally {
+      setActiveOperation(null);
       setIsWorkflowRunning(false);
     }
   }
@@ -1073,7 +1117,12 @@ export function App() {
     }
 
     setIsWorkflowRunning(true);
-    setActionMessage("正在提取参考文案...");
+    setActiveOperation("extract-copy");
+    showOperationNotice({
+      tone: "running",
+      title: "正在提取文案",
+      detail: "完成后会写入左侧参考文案，并保存转写文件。"
+    });
 
     try {
       await api.updateTask({
@@ -1084,15 +1133,22 @@ export function App() {
       });
       const result = await api.transcribeSource(selectedTask.id);
       const task = await api.getTask(selectedTask.id);
-      setActionMessage(
-        `已提取${result.contentLanguage === "id-ID" ? "印尼语" : result.contentLanguage === "en-US" ? "英文" : "中文"}参考文案，可继续修改后生成 AI 文案`
-      );
+      showOperationNotice({
+        tone: "success",
+        title: "提取文案完成",
+        detail: `已写入${result.contentLanguage === "id-ID" ? "印尼语" : result.contentLanguage === "en-US" ? "英文" : "中文"}参考文案，并保存 source-transcript.txt`
+      });
       if (task) {
         await refreshTaskState(task.id, task);
       }
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "一键提取文案失败");
+      showOperationNotice({
+        tone: "error",
+        title: "提取文案失败",
+        detail: error instanceof Error ? error.message : "一键提取文案失败"
+      });
     } finally {
+      setActiveOperation(null);
       setIsWorkflowRunning(false);
     }
   }
@@ -1104,7 +1160,12 @@ export function App() {
     }
 
     setIsWorkflowRunning(true);
-    setActionMessage("正在生成画面分析 brief...");
+    setActiveOperation("visual-analysis");
+    showOperationNotice({
+      tone: "running",
+      title: "正在画面分析",
+      detail: "完成后会生成 visual-analysis.md，并纳入 AI 生成文案上下文。"
+    });
 
     try {
       await api.updateTask({
@@ -1114,11 +1175,23 @@ export function App() {
         generationMode: selectedTask.generationMode
       });
       const task = await api.analyzeSourceVisuals(selectedTask.id);
-      setActionMessage("画面分析已生成，后续一键 AI 生成文案会自动参考这份分析");
+      const analysisAsset = latestTaskAsset(task, ["source-visual-analysis"]);
+      showOperationNotice({
+        tone: "success",
+        title: "画面分析完成",
+        detail: analysisAsset
+          ? `已生成 ${analysisAsset.relativePath}，后续 AI 文案会自动参考`
+          : "已生成画面分析，后续 AI 文案会自动参考"
+      });
       await refreshTaskState(task.id, task);
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "画面分析失败");
+      showOperationNotice({
+        tone: "error",
+        title: "画面分析失败",
+        detail: error instanceof Error ? error.message : "画面分析失败"
+      });
     } finally {
+      setActiveOperation(null);
       setIsWorkflowRunning(false);
     }
   }
@@ -1439,6 +1512,57 @@ export function App() {
   async function openSettingsModal() {
     setSettingsOpen(true);
     void loadServiceConfigurations();
+    void loadAppPathSettings();
+  }
+
+  async function loadAppPathSettings() {
+    if (!window.digitalHumanStudio) {
+      setAppPathSettings(DEFAULT_APP_PATH_SETTINGS);
+      return;
+    }
+
+    try {
+      const settings = await window.digitalHumanStudio.getAppPathSettings();
+      setAppPathSettings(settings);
+    } catch (error) {
+      setPathSettingsMessage(
+        error instanceof Error ? `路径设置读取失败：${error.message}` : "路径设置读取失败"
+      );
+    }
+  }
+
+  async function chooseAppPathSetting(kind: AppPathSettingKind) {
+    if (!window.digitalHumanStudio) {
+      setPathSettingsMessage("本地预览模式无法选择保存路径");
+      return;
+    }
+
+    try {
+      const settings = await window.digitalHumanStudio.chooseAppPathSetting(kind);
+      setAppPathSettings(settings);
+      setPathSettingsMessage(`${appPathSettingLabel(kind)}已更新`);
+    } catch (error) {
+      setPathSettingsMessage(
+        error instanceof Error ? error.message : `${appPathSettingLabel(kind)}设置失败`
+      );
+    }
+  }
+
+  async function clearAppPathSetting(kind: AppPathSettingKind) {
+    if (!window.digitalHumanStudio) {
+      setPathSettingsMessage("本地预览模式无法清除保存路径");
+      return;
+    }
+
+    try {
+      const settings = await window.digitalHumanStudio.clearAppPathSetting(kind);
+      setAppPathSettings(settings);
+      setPathSettingsMessage(`${appPathSettingLabel(kind)}已清除`);
+    } catch (error) {
+      setPathSettingsMessage(
+        error instanceof Error ? error.message : `${appPathSettingLabel(kind)}清除失败`
+      );
+    }
   }
 
   async function loadServiceConfigurations() {
@@ -1659,6 +1783,18 @@ export function App() {
         </div>
       </header>
 
+      {operationNotice ? (
+        <div className={`operation-notice ${operationNotice.tone}`} role="status">
+          <span>
+            <strong>{operationNotice.title}</strong>
+            {operationNotice.detail ? <small>{operationNotice.detail}</small> : null}
+          </span>
+          <button type="button" onClick={() => setOperationNotice(null)}>
+            关闭
+          </button>
+        </div>
+      ) : null}
+
       <section className="task-strip" aria-label="任务列表">
         <button
           className="icon-button small"
@@ -1770,7 +1906,7 @@ export function App() {
                   onClick={() => void downloadOriginalVideo()}
                 >
                   <Download size={16} />
-                  下载原视频
+                  {activeOperation === "download-original" ? "下载中..." : "下载原视频"}
                 </button>
                 <button
                   type="button"
@@ -1786,7 +1922,7 @@ export function App() {
                   onClick={() => void extractSourceCopy()}
                 >
                   <FileSearch size={16} />
-                  提取文案
+                  {activeOperation === "extract-copy" ? "提取中..." : "提取文案"}
                 </button>
                 <button
                   type="button"
@@ -1794,7 +1930,7 @@ export function App() {
                   onClick={() => void analyzeSourceVisuals()}
                 >
                   <WandSparkles size={16} />
-                  画面分析
+                  {activeOperation === "visual-analysis" ? "分析中..." : "画面分析"}
                 </button>
               </div>
               <AssetList
@@ -2216,7 +2352,7 @@ export function App() {
                       onClick={() => void analyzeSourceVisuals()}
                     >
                       <WandSparkles size={16} />
-                      画面分析
+                      {activeOperation === "visual-analysis" ? "分析中..." : "画面分析"}
                     </button>
                   </div>
                   <AssetList
@@ -2265,7 +2401,7 @@ export function App() {
                       onClick={() => void analyzeSourceVisuals()}
                     >
                       <WandSparkles size={16} />
-                      画面分析
+                      {activeOperation === "visual-analysis" ? "分析中..." : "画面分析"}
                     </button>
                   </div>
                   <AssetList
@@ -2682,6 +2818,12 @@ export function App() {
               </button>
             </div>
             <p className="settings-note">API Key 只保存在本机安全存储里，不写入任务数据库。</p>
+            <LocalPathSettingsPanel
+              message={pathSettingsMessage}
+              onChoose={(kind) => void chooseAppPathSetting(kind)}
+              onClear={(kind) => void clearAppPathSetting(kind)}
+              settings={appPathSettings}
+            />
             <div className="settings-layout">
               <nav className="settings-provider-nav" aria-label="服务列表">
                 {serviceConfigurations.map((configuration) => {
@@ -2975,6 +3117,75 @@ export function App() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function LocalPathSettingsPanel({
+  message,
+  onChoose,
+  onClear,
+  settings
+}: {
+  message: string;
+  onChoose: (kind: AppPathSettingKind) => void;
+  onClear: (kind: AppPathSettingKind) => void;
+  settings: AppPathSettings;
+}) {
+  const rows: Array<{
+    kind: AppPathSettingKind;
+    label: string;
+    hint: string;
+    value: string;
+  }> = [
+    {
+      kind: "sourceDownloadDirectory",
+      label: "原视频下载目录",
+      hint: "点击下载原视频后，除任务素材外会额外复制一份到这里。",
+      value: settings.sourceDownloadDirectory
+    },
+    {
+      kind: "generatedImageDirectory",
+      label: "生成图片保存目录",
+      hint: "人物商品图、重生成图片会额外复制到这里，并保存同名 prompt。",
+      value: settings.generatedImageDirectory
+    },
+    {
+      kind: "generatedVideoDirectory",
+      label: "生成视频保存目录",
+      hint: "一键输出视频和封面时，未选择任务目录则默认复制到这里。",
+      value: settings.generatedVideoDirectory
+    }
+  ];
+
+  return (
+    <section className="local-path-settings" aria-label="本地保存路径">
+      <div className="local-path-heading">
+        <strong>本地保存路径</strong>
+        <span>这些路径只保存在本机，用来快速找到下载素材、生成图片和最终成片。</span>
+      </div>
+      <div className="local-path-grid">
+        {rows.map((row) => (
+          <div className="local-path-row" key={row.kind}>
+            <div>
+              <strong>{row.label}</strong>
+              <small>{row.hint}</small>
+              <code title={row.value || "未设置"}>
+                {row.value || "未设置，使用软件内部任务目录"}
+              </code>
+            </div>
+            <span>
+              <button type="button" onClick={() => onChoose(row.kind)}>
+                选择
+              </button>
+              <button type="button" onClick={() => onClear(row.kind)}>
+                清除
+              </button>
+            </span>
+          </div>
+        ))}
+      </div>
+      {message ? <p className="local-path-message">{message}</p> : null}
+    </section>
   );
 }
 
@@ -4286,6 +4497,22 @@ function builtInKnowledgeCount(mode: VideoGenerationMode): number {
 
 function assetFileName(relativePath: string): string {
   return relativePath.split("/").filter(Boolean).pop() ?? relativePath;
+}
+
+function latestTaskAsset(task: VideoTask, kinds: MediaAsset["kind"][]): MediaAsset | undefined {
+  const allowedKinds = new Set(kinds);
+  return [...task.mediaAssets].reverse().find((asset) => allowedKinds.has(asset.kind));
+}
+
+function appPathSettingLabel(kind: AppPathSettingKind): string {
+  switch (kind) {
+    case "sourceDownloadDirectory":
+      return "原视频下载目录";
+    case "generatedImageDirectory":
+      return "生成图片保存目录";
+    case "generatedVideoDirectory":
+      return "生成视频保存目录";
+  }
 }
 
 function parseVisualStoryboardPanelCount(value: string): VisualStoryboardPanelCount {

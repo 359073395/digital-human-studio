@@ -53,6 +53,35 @@ describe("SourceAssetService", () => {
     ).toEqual(Buffer.from([0, 1, 2, 3]));
   });
 
+  it("copies downloaded source media to the configured download directory", async () => {
+    const downloadDirectory = path.join(tempDir, "external-downloads");
+    const fetchImpl: typeof fetch = async () =>
+      new Response(new Uint8Array([9, 8, 7, 6]), {
+        headers: { "content-type": "video/mp4" },
+        status: 200
+      });
+    const service = new SourceAssetService(repository, appPaths, fetchImpl, undefined, undefined, {
+      getPathSettings: () => ({
+        sourceDownloadDirectory: downloadDirectory,
+        generatedImageDirectory: "",
+        generatedVideoDirectory: ""
+      })
+    });
+    const task = repository.createTask({ title: "External source copy" });
+    repository.updateTask({
+      taskId: task.id,
+      originalVideoUrl: "https://cdn.example.com/reference.mp4"
+    });
+
+    const updated = await service.downloadOriginalVideo(task.id);
+    const asset = updated.mediaAssets.find((mediaAsset) => mediaAsset.kind === "source-video");
+
+    expect(asset).toBeDefined();
+    expect(
+      fs.readFileSync(path.join(downloadDirectory, path.basename(asset?.relativePath ?? "")))
+    ).toEqual(Buffer.from([9, 8, 7, 6]));
+  });
+
   it("downloads source videos through the configured parser API", async () => {
     const seenRequests: Array<{ url: string; method?: string; xApiKey?: string }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {

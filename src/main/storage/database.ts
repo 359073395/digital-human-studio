@@ -159,6 +159,17 @@ const MIGRATIONS = [
       ALTER TABLE video_tasks ADD COLUMN preset_avatar_group_id TEXT NOT NULL DEFAULT '';
       ALTER TABLE video_tasks ADD COLUMN generated_presenter_image_selections TEXT NOT NULL DEFAULT '{}';
     `
+  },
+  {
+    id: 12,
+    name: "create-app-preferences",
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_preferences (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `
   }
 ] as const;
 

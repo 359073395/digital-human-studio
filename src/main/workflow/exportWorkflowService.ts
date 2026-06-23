@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { AppPathSettings } from "../../shared/appSettings";
 import {
   OUTPUT_PRESETS,
   type CoverStyle,
@@ -12,11 +13,16 @@ import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 import { FfmpegFinishedVideoRenderer, type FinishedVideoRenderer } from "./finishedVideoRenderer";
 
+interface PathSettingsReader {
+  getPathSettings: () => AppPathSettings;
+}
+
 export class ExportWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
-    private readonly finishedVideoRenderer: FinishedVideoRenderer = new FfmpegFinishedVideoRenderer()
+    private readonly finishedVideoRenderer: FinishedVideoRenderer = new FfmpegFinishedVideoRenderer(),
+    private readonly pathSettingsReader?: PathSettingsReader
   ) {}
 
   exportTask(taskId: string): VideoTask {
@@ -88,7 +94,8 @@ export class ExportWorkflowService {
         this.paths,
         taskId,
         this.requireTask(taskId),
-        publishingPackage
+        publishingPackage,
+        this.pathSettingsReader?.getPathSettings().generatedVideoDirectory
       );
       if (externalExportDirectory) {
         this.taskRepository.updatePublishingPackage(taskId, {
@@ -278,9 +285,10 @@ function copyToSelectedExportDirectory(
   paths: AppPaths,
   taskId: string,
   task: VideoTask,
-  publishingPackage: PublishingPackage
+  publishingPackage: PublishingPackage,
+  generatedVideoDirectory?: string
 ): string | undefined {
-  const selectedDirectory = task.exportDirectory?.trim();
+  const selectedDirectory = task.exportDirectory?.trim() || generatedVideoDirectory?.trim();
   if (!selectedDirectory) {
     return undefined;
   }

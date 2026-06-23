@@ -128,6 +128,35 @@ describe("PresenterImageWorkflowService", () => {
     ).toBe(true);
   });
 
+  it("copies generated presenter images and prompts to the configured image directory", async () => {
+    const provider = new SuccessfulImageProvider();
+    const imageDirectory = path.join(tempDir, "external-images");
+    const service = new PresenterImageWorkflowService(repository, appPaths, provider, {
+      getPathSettings: () => ({
+        sourceDownloadDirectory: "",
+        generatedImageDirectory: imageDirectory,
+        generatedVideoDirectory: ""
+      })
+    });
+    const task = repository.createTask({ title: "Presenter external image" });
+    const withProduct = service.importProductImage(task.id, productImagePath);
+    repository.updateTask({
+      taskId: withProduct.id,
+      avatarDescriptionPrompt: "Young presenter holding the product.",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    await service.generatePresenterImages(task.id);
+    const externalFiles = fs.readdirSync(imageDirectory);
+
+    expect(
+      externalFiles.some((file) => /^generated-presenter-portrait-9-16-\d+\.png$/.test(file))
+    ).toBe(true);
+    expect(
+      externalFiles.some((file) => /^generated-presenter-portrait-9-16-\d+-prompt\.txt$/.test(file))
+    ).toBe(true);
+  });
+
   it("keeps multiple generated images and lets a task select one per preset", async () => {
     const provider = new SuccessfulImageProvider();
     const service = new PresenterImageWorkflowService(repository, appPaths, provider);

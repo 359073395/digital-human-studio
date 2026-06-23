@@ -83,6 +83,67 @@ button:disabled {
   gap: 8px;
 }
 
+.operation-notice {
+  position: fixed;
+  top: 74px;
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: min(860px, calc(100vw - 40px));
+  padding: 12px 14px;
+  border: 1px solid #c8d1df;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(41, 53, 73, 0.18);
+  transform: translateX(-50%);
+}
+
+.operation-notice span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.operation-notice strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.operation-notice small {
+  min-width: 0;
+  overflow: hidden;
+  color: #52647a;
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operation-notice button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.operation-notice.running {
+  border-color: #9fb6d6;
+  background: #f8fbff;
+}
+
+.operation-notice.success {
+  border-color: #9dceb8;
+  background: #f5fcf8;
+}
+
+.operation-notice.error {
+  border-color: #e4a6a6;
+  background: #fff7f7;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(560px, 1fr) minmax(420px, 500px);
@@ -1414,11 +1475,19 @@ label {
 .action-message {
   flex: 1 1 auto;
   min-width: 0;
+  max-width: min(100%, 620px);
   margin-right: auto;
-  color: #46576d;
+  overflow: hidden;
+  padding: 7px 10px;
+  border: 1px solid #d9e4f1;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #233047;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .export-directory-control {
@@ -1843,7 +1912,7 @@ label {
   width: min(980px, calc(100vw - 40px));
   max-height: calc(100vh - 60px);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   padding: 16px;
   border: 1px solid rgba(130, 152, 182, 0.36);
@@ -1877,6 +1946,105 @@ label {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.local-path-settings {
+  min-height: 0;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.54);
+}
+
+.local-path-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.local-path-heading strong {
+  flex: 0 0 auto;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.local-path-heading span {
+  min-width: 0;
+  overflow: hidden;
+  color: #a7b5c8;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-path-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.local-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(248, 251, 255, 0.08);
+}
+
+.local-path-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.local-path-row strong {
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.local-path-row small,
+.local-path-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: #b6c2d2;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-path-row code {
+  display: block;
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: rgba(8, 13, 24, 0.42);
+  color: #dce7f5;
+  font-family: inherit;
+}
+
+.local-path-row span {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.local-path-row button {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.local-path-message {
+  margin: 8px 0 0;
+  color: #68d7ac;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .settings-layout {

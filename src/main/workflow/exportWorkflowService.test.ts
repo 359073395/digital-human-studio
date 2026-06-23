@@ -147,6 +147,54 @@ describe("ExportWorkflowService", () => {
     expect(fs.existsSync(path.join(externalDirectory ?? "", "manifest.json"))).toBe(true);
   });
 
+  it("uses the configured generated video directory when a task has no export directory", () => {
+    const generatedVideoDirectory = path.join(tempDir, "global-video-exports");
+    const service = new ExportWorkflowService(
+      repository,
+      appPaths,
+      new CopyFinishedVideoRenderer(),
+      {
+        getPathSettings: () => ({
+          sourceDownloadDirectory: "",
+          generatedImageDirectory: "",
+          generatedVideoDirectory
+        })
+      }
+    );
+    const task = repository.createTask({
+      title: "Global Export Test",
+      sourceScript: "Source script."
+    });
+    repository.updateFinalScript(task.id, "Final script.");
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const avatarPath = path.join(taskDirectory, "avatar", "avatar-portrait-9-16.mp4");
+    fs.mkdirSync(path.dirname(avatarPath), { recursive: true });
+    fs.writeFileSync(avatarPath, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    repository.addMediaAsset(task.id, "avatar-video", "avatar/avatar-portrait-9-16.mp4");
+
+    const subtitlePath = path.join(
+      taskDirectory,
+      "subtitles",
+      "provider-subtitles-portrait-9-16.srt"
+    );
+    fs.mkdirSync(path.dirname(subtitlePath), { recursive: true });
+    fs.writeFileSync(subtitlePath, "1\n00:00:00,000 --> 00:00:01,000\nFinal script.");
+    repository.addMediaAsset(
+      task.id,
+      "subtitle-file",
+      "subtitles/provider-subtitles-portrait-9-16.srt"
+    );
+
+    const exported = service.exportTask(task.id);
+    const externalDirectory = exported.publishingPackage.exportDirectory;
+
+    expect(externalDirectory?.startsWith(generatedVideoDirectory)).toBe(true);
+    expect(
+      fs.existsSync(path.join(externalDirectory ?? "", "videos", "finished-portrait-9-16.mp4"))
+    ).toBe(true);
+    expect(fs.existsSync(path.join(externalDirectory ?? "", "manifest.json"))).toBe(true);
+  });
+
   it("rejects mock placeholder avatar files", () => {
     const service = new ExportWorkflowService(
       repository,

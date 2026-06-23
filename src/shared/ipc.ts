@@ -24,6 +24,7 @@ import type {
   ServiceConfiguration,
   ServiceConnectionCheck
 } from "./serviceConfig";
+import type { AppPathSettingKind, AppPathSettings } from "./appSettings";
 
 export type AppEnvironment = "development" | "production";
 
@@ -71,6 +72,9 @@ export interface DigitalHumanStudioAPI {
   clearServiceCredential: (providerId: ProviderId) => Promise<ServiceConfiguration>;
   testServiceConfiguration: (providerId: ProviderId) => Promise<ServiceConnectionCheck>;
   listServiceModels: (input: ListServiceModelsInput) => Promise<ServiceModelList>;
+  getAppPathSettings: () => Promise<AppPathSettings>;
+  chooseAppPathSetting: (kind: AppPathSettingKind) => Promise<AppPathSettings>;
+  clearAppPathSetting: (kind: AppPathSettingKind) => Promise<AppPathSettings>;
 }
 
 export const IPC_CHANNELS = {
@@ -109,7 +113,10 @@ export const IPC_CHANNELS = {
   saveServiceConfiguration: "service-configurations:save",
   clearServiceCredential: "service-configurations:clear-credential",
   testServiceConfiguration: "service-configurations:test",
-  listServiceModels: "service-configurations:list-models"
+  listServiceModels: "service-configurations:list-models",
+  getAppPathSettings: "app-settings:get-paths",
+  chooseAppPathSetting: "app-settings:choose-path",
+  clearAppPathSetting: "app-settings:clear-path"
 } as const;
 
 export interface CreateTaskInput {
