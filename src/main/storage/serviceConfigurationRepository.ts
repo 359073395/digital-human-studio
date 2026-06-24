@@ -73,6 +73,16 @@ export class ServiceConfigurationRepository {
       ...defaultServiceSettings(input.providerId),
       ...sanitizeSettings(input.settings)
     };
+    if (
+      input.providerId === "heygen" &&
+      settings.authMode === "oauth-bearer" &&
+      input.apiKey !== undefined &&
+      looksLikeHeyGenApiKey(input.apiKey)
+    ) {
+      throw new Error(
+        "当前选择的是 HeyGen 会员/OAuth Token，但填入内容像 API Key。请粘贴真正的 OAuth/Bearer Token，或使用“完成会员授权”；普通 API Key 请切换到 API Key 认证方式。"
+      );
+    }
 
     this.database
       .prepare(
@@ -388,6 +398,17 @@ export class ServiceConfigurationRepository {
         return {
           ok: false,
           message: `${heyGenCredentialLabel(configuration)} 尚未配置`
+        };
+      }
+      if (
+        (configuration.settings.authMode ?? defaultServiceSettings("heygen").authMode) ===
+          "oauth-bearer" &&
+        looksLikeHeyGenApiKey(value)
+      ) {
+        return {
+          ok: false,
+          message:
+            "当前选择的是 HeyGen 会员/OAuth Token，但本机保存的凭据像 API Key，会继续消耗 API credits 并导致会员额度不可用。请清除该凭据后重新完成会员授权，或切换到 API Key 认证方式。"
         };
       }
       return { ok: true, value };
@@ -1044,7 +1065,7 @@ function describeHeyGenGenerationPath(
   const hasSubscription =
     isRecord(data) &&
     (readString(data, "billing_type") === "subscription" || isRecord(data.subscription));
-  const keyLooksLikeApiKey = /^sk[_-]/i.test(apiKey.trim());
+  const keyLooksLikeApiKey = looksLikeHeyGenApiKey(apiKey);
 
   if (authMode === "oauth-bearer" && keyLooksLikeApiKey) {
     return "当前选择会员/Bearer，但填入内容像 API Key；读取账号可能成功，生成时仍可能要求 API credits。要消耗会员计划额度，请填真正的 OAuth/Bearer Token，或使用 Codex/HeyGen MCP 会员通道";
@@ -1080,6 +1101,10 @@ function describeSourceParserQuota(value: unknown): string {
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join("，") : "额度信息已读取";
+}
+
+function looksLikeHeyGenApiKey(value: string): boolean {
+  return /^sk[_-]/i.test(value.trim());
 }
 
 function readNumber(record: Record<string, unknown>, key: string): number | undefined {

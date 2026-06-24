@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppPaths } from "./appPaths";
 import { CredentialStore, type SecretCipher } from "./credentialStore";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "./database";
@@ -128,6 +128,20 @@ describe("ServiceConfigurationRepository", () => {
     expect(sqliteBytes).not.toContain("heygen-secret");
   });
 
+  it("rejects a HeyGen API key when OAuth/Bearer mode is selected", async () => {
+    await expect(
+      repository.saveConfiguration({
+        providerId: "heygen",
+        settings: {
+          baseUrl: "https://api.heygen.com",
+          authMode: "oauth-bearer",
+          enabled: true
+        },
+        apiKey: "sk_wrong_channel"
+      })
+    ).rejects.toThrow("会员/OAuth Token");
+  });
+
   it("tests HeyGen credentials with a real API-style request", async () => {
     const seenRequests: Array<{ url: string; xApiKey?: string; authorization?: string }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
@@ -203,6 +217,35 @@ describe("ServiceConfigurationRepository", () => {
 
     await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({ ok: true });
     expect(seenAuthorizations).toEqual(["Bearer oauth-token", "Bearer oauth-token"]);
+  });
+
+  it("does not treat a saved API key as a valid HeyGen OAuth credential", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+
+    await repository.saveConfiguration({
+      providerId: "heygen",
+      settings: {
+        baseUrl: "https://api.heygen.com",
+        authMode: "api-key",
+        enabled: true
+      },
+      apiKey: "sk_heygen_api_key"
+    });
+    await repository.saveConfiguration({
+      providerId: "heygen",
+      settings: {
+        baseUrl: "https://api.heygen.com",
+        authMode: "oauth-bearer",
+        enabled: true
+      }
+    });
+
+    await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining("凭据像 API Key")
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("starts and completes HeyGen OAuth with PKCE", async () => {

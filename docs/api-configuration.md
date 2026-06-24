@@ -92,7 +92,8 @@ HeyGen can be replaced directly from the settings modal:
 - Base URL should normally be `https://api.heygen.com`. If the user enters `/v1`, `/v2`, or `/v3`, the app normalizes it back to the HeyGen API root before calling v3 endpoints.
 - Choose the auth mode:
   - `API Key` sends `X-Api-Key` and is the right choice for accounts with HeyGen API credits.
-  - `会员/OAuth Token` sends `Authorization: Bearer ...` and is intended for a real HeyGen OAuth access token. A value starting with `sk_` may still be an API Key, even if HeyGen accepts it for account reads.
+  - `会员/OAuth Token` sends `Authorization: Bearer ...` and is intended for a real HeyGen OAuth access token. A value starting with `sk_` is treated as an API Key, not a member OAuth token.
+- If `会员/OAuth Token` is selected, the app refuses to save or test a `sk_` API Key as a valid member token. This prevents a false "connected" state that can still fail later with API-credit errors.
 - Choose the generation route:
   - `自动` uses Video Agent first when the auth mode is `会员/OAuth Token`; otherwise it uses Direct Video and falls back to Video Agent only when Direct Video reports API credits are required.
   - `Direct Video` calls `POST /v3/videos` and is the most deterministic script-to-lip-sync path, but HeyGen may require API credits.
