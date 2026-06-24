@@ -106,6 +106,7 @@ describe("ServiceConfigurationRepository", () => {
       settings: {
         baseUrl: "https://api.heygen.test",
         authMode: "oauth-bearer",
+        generationRoute: "video-agent",
         avatarId: "avatar-123",
         voiceId: "voice-456",
         resolution: "1080p",
@@ -119,6 +120,7 @@ describe("ServiceConfigurationRepository", () => {
 
     expect(configuration.settings).toMatchObject({
       authMode: "oauth-bearer",
+      generationRoute: "video-agent",
       avatarId: "avatar-123",
       voiceId: "voice-456",
       resolution: "1080p"
@@ -158,7 +160,8 @@ describe("ServiceConfigurationRepository", () => {
 
     await expect(repository.testConfiguration("heygen")).resolves.toMatchObject({
       ok: true,
-      message: "HeyGen 测试通过，计费类型 subscription；预设数字人会在任务里自动读取后选择"
+      message:
+        "HeyGen 测试通过，计费类型 subscription；当前为 API Key 直连，生成路由 auto；如果账号只有会员计划额度但没有 API credits，Direct Video 生成会失败；预设数字人会在任务里自动读取后选择"
     });
     expect(seenRequests).toEqual([
       {

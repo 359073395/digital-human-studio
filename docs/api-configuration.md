@@ -8,16 +8,16 @@ The credential store lives under the app data directory, for example `D:\Codex\2
 
 The generation screen shows a compact flow guide for the active task. It lists whether each stage will use a service, which model or ID is configured, and whether the API Key is present. It never displays the API Key value.
 
-| Stage                                 | Service                             | Required setting                                                                                            |
-| ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Source download                       | Source parser API                   | Base URL, API Key                                                                                           |
-| Source extraction/material extraction | ASR, OpenAI-compatible              | Base URL, ASR model, API Key when transcription is needed                                                   |
-| Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                                               |
-| Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                                              |
-| Lip-synced avatar video               | HeyGen                              | Base URL, API Key, task-selected preset avatar or optional default Avatar ID, optional Voice ID, resolution |
-| Subtitle fallback                     | ASR or reusable LLM audio support   | Real `audio/transcriptions` support, only when HeyGen subtitles are unavailable                             |
-| External audio                        | Optional TTS or uploaded audio      | Not required for the default MVP path                                                                       |
-| Export                                | Local desktop app                   | Save directory, no API Key                                                                                  |
+| Stage                                 | Service                             | Required setting                                                                                                                |
+| ------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Source download                       | Source parser API                   | Base URL, API Key                                                                                                               |
+| Source extraction/material extraction | ASR, OpenAI-compatible              | Base URL, ASR model, API Key when transcription is needed                                                                       |
+| Analysis and script generation        | LLM, OpenAI-compatible              | Base URL, chat model, API Key                                                                                                   |
+| Product presenter image generation    | Image generation, OpenAI-compatible | Base URL, image model, API Key                                                                                                  |
+| Lip-synced avatar video               | HeyGen                              | Base URL, auth mode, generation route, task-selected preset avatar or optional default Avatar ID, optional Voice ID, resolution |
+| Subtitle fallback                     | ASR or reusable LLM audio support   | Real `audio/transcriptions` support, only when HeyGen subtitles are unavailable                                                 |
+| External audio                        | Optional TTS or uploaded audio      | Not required for the default MVP path                                                                                           |
+| Export                                | Local desktop app                   | Save directory, no API Key                                                                                                      |
 
 ## OpenAI-Compatible Relay
 
@@ -90,7 +90,14 @@ npm run configure:services
 HeyGen can be replaced directly from the settings modal:
 
 - Base URL should normally be `https://api.heygen.com`. If the user enters `/v1`, `/v2`, or `/v3`, the app normalizes it back to the HeyGen API root before calling v3 endpoints.
-- Enter a new HeyGen API Key and save to replace the previous key.
+- Choose the auth mode:
+  - `API Key` sends `X-Api-Key` and is the right choice for accounts with HeyGen API credits.
+  - `会员/OAuth Token` sends `Authorization: Bearer ...` and is intended for a real HeyGen OAuth/Bearer token. A value starting with `sk_` may still be an API Key, even if HeyGen accepts it for account reads.
+- Choose the generation route:
+  - `自动` uses Video Agent first when the auth mode is `会员/OAuth Token`; otherwise it uses Direct Video and falls back to Video Agent only when Direct Video reports API credits are required.
+  - `Direct Video` calls `POST /v3/videos` and is the most deterministic script-to-lip-sync path, but HeyGen may require API credits.
+  - `Video Agent` calls `POST /v3/video-agents` and is the route that best matches HeyGen's member/OAuth flow.
+- Enter a new HeyGen API Key or Bearer token and save to replace the previous credential.
 - Leave the API Key field empty and save to keep the previous key.
 - Saving or checking a valid HeyGen API Key automatically reads the account's preset avatar list. Choose the avatar in the video task.
 - The settings Avatar ID is only an optional default fallback. You do not need to fill it when configuring the API.
@@ -98,13 +105,15 @@ HeyGen can be replaced directly from the settings modal:
 
 The MVP stores one active HeyGen configuration at a time.
 
-`一键输出视频和封面` runs the real API workflow and requires a HeyGen account with API credits. For product/commerce mode, it may also require the image-generation provider before HeyGen rendering starts.
+`一键输出视频和封面` runs the real API workflow. Direct Video may require HeyGen API credits; Video Agent with a true member/OAuth token should use the member/OAuth route. For product/commerce mode, it may also require the image-generation provider before HeyGen rendering starts.
 
 PowerShell setup example:
 
 ```powershell
 $env:DHS_APP_DATA_DIR="D:\Codex\2026-06-13\digital-human-studio\data"
 $env:HEYGEN_API_KEY="your-heygen-key"
+$env:HEYGEN_AUTH_MODE="api-key"
+$env:HEYGEN_GENERATION_ROUTE="auto"
 $env:HEYGEN_AVATAR_ID="optional-default-avatar-id"
 $env:HEYGEN_VOICE_ID="your-voice-id"
 $env:HEYGEN_RESOLUTION="720p"

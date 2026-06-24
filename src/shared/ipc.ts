@@ -49,6 +49,12 @@ export interface DigitalHumanStudioAPI {
   downloadOriginalVideo: (taskId: string) => Promise<VideoTask>;
   uploadSourceVideo: (taskId: string) => Promise<VideoTask>;
   uploadMixedCutMaterial: (taskId: string) => Promise<VideoTask>;
+  chooseMixedCutMaterialDirectory: (taskId: string) => Promise<VideoTask>;
+  setMixedCutTargetCount: (input: SetMixedCutTargetCountInput) => Promise<VideoTask>;
+  renderMixedCutBatch: (taskId: string) => Promise<VideoTask>;
+  importDedupSourceVideo: (taskId: string) => Promise<VideoTask>;
+  runVideoDedup: (taskId: string) => Promise<VideoTask>;
+  runOriginalityScore: (taskId: string) => Promise<VideoTask>;
   uploadKnowledgeDocuments: (taskId: string) => Promise<VideoTask>;
   uploadViralCopyReferences: (taskId: string) => Promise<VideoTask>;
   analyzeSourceVisuals: (taskId: string) => Promise<VideoTask>;
@@ -90,6 +96,12 @@ export const IPC_CHANNELS = {
   downloadOriginalVideo: "source:download-original-video",
   uploadSourceVideo: "source:upload-source-video",
   uploadMixedCutMaterial: "source:upload-mixed-cut-material",
+  chooseMixedCutMaterialDirectory: "source:choose-mixed-cut-material-directory",
+  setMixedCutTargetCount: "mixed-cut:set-target-count",
+  renderMixedCutBatch: "mixed-cut:render-batch",
+  importDedupSourceVideo: "dedup:import-source-video",
+  runVideoDedup: "dedup:run",
+  runOriginalityScore: "dedup:score",
   uploadKnowledgeDocuments: "source:upload-knowledge-documents",
   uploadViralCopyReferences: "source:upload-viral-copy-references",
   analyzeSourceVisuals: "source:analyze-visuals",
@@ -140,6 +152,19 @@ export interface UpdateTaskInput {
   referenceImageAssetId?: MediaAsset["id"] | null;
   generatedPresenterImageAssetId?: MediaAsset["id"] | null;
   generatedPresenterImageSelections?: GeneratedPresenterImageSelections;
+  mixedCutTargetCount?: number;
+  mixedCutMaterialDirectory?: string;
+  mixedCutBackgroundMusicDirectory?: string;
+  mixedCutDubbingDirectory?: string;
+  mixedCutChapterMode?: VideoTask["mixedCutChapterMode"];
+  mixedCutReuseRate?: number;
+  mixedCutRemoveOriginalAudio?: boolean;
+  mixedCutEnableTransitions?: boolean;
+  mixedCutBgmVolume?: number;
+  dedupSourceVideoAssetId?: MediaAsset["id"] | null;
+  dedupTargetScore?: number;
+  dedupStrategy?: VideoTask["dedupStrategy"];
+  dedupAttemptCount?: number;
   customFontAssetId?: MediaAsset["id"] | null;
   customFontFamily?: string;
   selectedOutputPresets?: OutputPresetId[];
@@ -165,6 +190,11 @@ export interface SelectGeneratedPresenterImageInput {
   taskId: string;
   presetId: OutputPresetId;
   assetId: MediaAsset["id"];
+}
+
+export interface SetMixedCutTargetCountInput {
+  taskId: string;
+  count: number;
 }
 
 export interface HeyGenAvatarLook {

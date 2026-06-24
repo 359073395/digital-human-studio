@@ -17,10 +17,12 @@ import {
   type CoverStyle,
   type CreativeWorkflow,
   type ContentLanguage,
+  type DedupStrategy,
   type FrameTitleStyle,
   type GenerationStep,
   type GenerationStepId,
   type GeneratedPresenterImageSelections,
+  type MixedCutChapterMode,
   type MediaAsset,
   type OutputPresetId,
   type OutputVariant,
@@ -57,6 +59,19 @@ interface TaskRow {
   reference_image_asset_id: string | null;
   generated_presenter_image_asset_id: string | null;
   generated_presenter_image_selections: string;
+  mixed_cut_target_count: number;
+  mixed_cut_material_directory: string;
+  mixed_cut_background_music_directory: string;
+  mixed_cut_dubbing_directory: string;
+  mixed_cut_chapter_mode: MixedCutChapterMode;
+  mixed_cut_reuse_rate: number;
+  mixed_cut_remove_original_audio: number;
+  mixed_cut_enable_transitions: number;
+  mixed_cut_bgm_volume: number;
+  dedup_source_video_asset_id: string;
+  dedup_target_score: number;
+  dedup_strategy: DedupStrategy;
+  dedup_attempt_count: number;
   custom_font_asset_id: string | null;
   custom_font_family: string;
   selected_output_presets: string;
@@ -159,6 +174,19 @@ export class TaskRepository {
     const avatarDescriptionPrompt = "";
     const motionPrompt = "";
     const generatedPresenterImageSelections: GeneratedPresenterImageSelections = {};
+    const mixedCutTargetCount = 1;
+    const mixedCutMaterialDirectory = "";
+    const mixedCutBackgroundMusicDirectory = "";
+    const mixedCutDubbingDirectory = "";
+    const mixedCutChapterMode: MixedCutChapterMode = "fill-with-bgm";
+    const mixedCutReuseRate = 35;
+    const mixedCutRemoveOriginalAudio = false;
+    const mixedCutEnableTransitions = false;
+    const mixedCutBgmVolume = 70;
+    const dedupSourceVideoAssetId = "";
+    const dedupTargetScore = 80;
+    const dedupStrategy: DedupStrategy = "content-rewrite";
+    const dedupAttemptCount = 0;
     const customFontAssetId = null;
     const customFontFamily = "";
     const selectedOutputPresets = defaultOutputPresetIds();
@@ -192,6 +220,19 @@ export class TaskRepository {
             reference_image_asset_id,
             generated_presenter_image_asset_id,
             generated_presenter_image_selections,
+            mixed_cut_target_count,
+            mixed_cut_material_directory,
+            mixed_cut_background_music_directory,
+            mixed_cut_dubbing_directory,
+            mixed_cut_chapter_mode,
+            mixed_cut_reuse_rate,
+            mixed_cut_remove_original_audio,
+            mixed_cut_enable_transitions,
+            mixed_cut_bgm_volume,
+            dedup_source_video_asset_id,
+            dedup_target_score,
+            dedup_strategy,
+            dedup_attempt_count,
             custom_font_asset_id,
             custom_font_family,
             selected_output_presets,
@@ -203,7 +244,7 @@ export class TaskRepository {
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -225,6 +266,19 @@ export class TaskRepository {
           null,
           null,
           JSON.stringify(generatedPresenterImageSelections),
+          mixedCutTargetCount,
+          mixedCutMaterialDirectory,
+          mixedCutBackgroundMusicDirectory,
+          mixedCutDubbingDirectory,
+          mixedCutChapterMode,
+          mixedCutReuseRate,
+          mixedCutRemoveOriginalAudio ? 1 : 0,
+          mixedCutEnableTransitions ? 1 : 0,
+          mixedCutBgmVolume,
+          dedupSourceVideoAssetId,
+          dedupTargetScore,
+          dedupStrategy,
+          dedupAttemptCount,
           customFontAssetId,
           customFontFamily,
           JSON.stringify(selectedOutputPresets),
@@ -357,6 +411,47 @@ export class TaskRepository {
     const generatedPresenterImageSelections = normalizeGeneratedPresenterImageSelections(
       input.generatedPresenterImageSelections ?? existing.generatedPresenterImageSelections
     );
+    const mixedCutTargetCount = normalizeMixedCutTargetCount(
+      input.mixedCutTargetCount ?? existing.mixedCutTargetCount
+    );
+    const mixedCutMaterialDirectory =
+      input.mixedCutMaterialDirectory === undefined
+        ? existing.mixedCutMaterialDirectory
+        : input.mixedCutMaterialDirectory.trim();
+    const mixedCutBackgroundMusicDirectory =
+      input.mixedCutBackgroundMusicDirectory === undefined
+        ? existing.mixedCutBackgroundMusicDirectory
+        : input.mixedCutBackgroundMusicDirectory.trim();
+    const mixedCutDubbingDirectory =
+      input.mixedCutDubbingDirectory === undefined
+        ? existing.mixedCutDubbingDirectory
+        : input.mixedCutDubbingDirectory.trim();
+    const mixedCutChapterMode = normalizeMixedCutChapterMode(
+      input.mixedCutChapterMode ?? existing.mixedCutChapterMode
+    );
+    const mixedCutReuseRate = normalizePercent(
+      input.mixedCutReuseRate ?? existing.mixedCutReuseRate,
+      35
+    );
+    const mixedCutRemoveOriginalAudio =
+      input.mixedCutRemoveOriginalAudio ?? existing.mixedCutRemoveOriginalAudio;
+    const mixedCutEnableTransitions =
+      input.mixedCutEnableTransitions ?? existing.mixedCutEnableTransitions;
+    const mixedCutBgmVolume = normalizePercent(
+      input.mixedCutBgmVolume ?? existing.mixedCutBgmVolume,
+      70
+    );
+    const dedupSourceVideoAssetId =
+      input.dedupSourceVideoAssetId === undefined
+        ? (existing.dedupSourceVideoAssetId ?? "")
+        : (input.dedupSourceVideoAssetId ?? "").trim();
+    const dedupTargetScore = normalizeDedupTargetScore(
+      input.dedupTargetScore ?? existing.dedupTargetScore
+    );
+    const dedupStrategy = normalizeDedupStrategy(input.dedupStrategy ?? existing.dedupStrategy);
+    const dedupAttemptCount = normalizeDedupAttemptCount(
+      input.dedupAttemptCount ?? existing.dedupAttemptCount
+    );
     const customFontAssetId =
       input.customFontAssetId === undefined ? existing.customFontAssetId : input.customFontAssetId;
     const customFontFamily =
@@ -398,6 +493,19 @@ export class TaskRepository {
                reference_image_asset_id = ?,
                generated_presenter_image_asset_id = ?,
                generated_presenter_image_selections = ?,
+               mixed_cut_target_count = ?,
+               mixed_cut_material_directory = ?,
+               mixed_cut_background_music_directory = ?,
+               mixed_cut_dubbing_directory = ?,
+               mixed_cut_chapter_mode = ?,
+               mixed_cut_reuse_rate = ?,
+               mixed_cut_remove_original_audio = ?,
+               mixed_cut_enable_transitions = ?,
+               mixed_cut_bgm_volume = ?,
+               dedup_source_video_asset_id = ?,
+               dedup_target_score = ?,
+               dedup_strategy = ?,
+               dedup_attempt_count = ?,
                custom_font_asset_id = ?,
                custom_font_family = ?,
                 selected_output_presets = ?,
@@ -426,6 +534,19 @@ export class TaskRepository {
           referenceImageAssetId ?? null,
           generatedPresenterImageAssetId ?? null,
           JSON.stringify(generatedPresenterImageSelections),
+          mixedCutTargetCount,
+          mixedCutMaterialDirectory,
+          mixedCutBackgroundMusicDirectory,
+          mixedCutDubbingDirectory,
+          mixedCutChapterMode,
+          mixedCutReuseRate,
+          mixedCutRemoveOriginalAudio ? 1 : 0,
+          mixedCutEnableTransitions ? 1 : 0,
+          mixedCutBgmVolume,
+          dedupSourceVideoAssetId,
+          dedupTargetScore,
+          dedupStrategy,
+          dedupAttemptCount,
           customFontAssetId ?? null,
           customFontFamily,
           JSON.stringify(selectedOutputPresets),
@@ -641,6 +762,22 @@ export class TaskRepository {
     return task;
   }
 
+  removeMediaAssetsByKind(taskId: string, kind: MediaAsset["kind"]): VideoTask {
+    const now = new Date().toISOString();
+    runInTransaction(this.database, () => {
+      this.database
+        .prepare("DELETE FROM media_assets WHERE task_id = ? AND kind = ?")
+        .run(taskId, kind);
+      this.database.prepare("UPDATE video_tasks SET updated_at = ? WHERE id = ?").run(now, taskId);
+    });
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after media asset cleanup.`);
+    }
+    return task;
+  }
+
   updateStepStatus(
     taskId: string,
     stepId: GenerationStepId,
@@ -714,6 +851,19 @@ export class TaskRepository {
       generatedPresenterImageSelections: parseGeneratedPresenterImageSelections(
         row.generated_presenter_image_selections
       ),
+      mixedCutTargetCount: normalizeMixedCutTargetCount(row.mixed_cut_target_count),
+      mixedCutMaterialDirectory: row.mixed_cut_material_directory ?? "",
+      mixedCutBackgroundMusicDirectory: row.mixed_cut_background_music_directory ?? "",
+      mixedCutDubbingDirectory: row.mixed_cut_dubbing_directory ?? "",
+      mixedCutChapterMode: normalizeMixedCutChapterMode(row.mixed_cut_chapter_mode),
+      mixedCutReuseRate: normalizePercent(row.mixed_cut_reuse_rate, 35),
+      mixedCutRemoveOriginalAudio: Boolean(row.mixed_cut_remove_original_audio),
+      mixedCutEnableTransitions: Boolean(row.mixed_cut_enable_transitions),
+      mixedCutBgmVolume: normalizePercent(row.mixed_cut_bgm_volume, 70),
+      dedupSourceVideoAssetId: row.dedup_source_video_asset_id || undefined,
+      dedupTargetScore: normalizeDedupTargetScore(row.dedup_target_score),
+      dedupStrategy: normalizeDedupStrategy(row.dedup_strategy),
+      dedupAttemptCount: normalizeDedupAttemptCount(row.dedup_attempt_count),
       customFontAssetId: row.custom_font_asset_id ?? undefined,
       customFontFamily: row.custom_font_family ?? "",
       selectedOutputPresets: parseOutputPresetIds(row.selected_output_presets),
@@ -906,6 +1056,34 @@ function normalizeAvatarModeForGenerationMode(
   }
 
   return normalizeAvatarMode(avatarMode);
+}
+
+function normalizeMixedCutTargetCount(value: unknown): number {
+  return clampNumber(value, 1, 30, 1);
+}
+
+function normalizeMixedCutChapterMode(value: unknown): MixedCutChapterMode {
+  if (value === "fixed-material-count" || value === "minimum-duration") {
+    return value;
+  }
+
+  return "fill-with-bgm";
+}
+
+function normalizePercent(value: unknown, fallback: number): number {
+  return clampNumber(value, 0, 100, fallback);
+}
+
+function normalizeDedupTargetScore(value: unknown): number {
+  return clampNumber(value, 60, 95, 80);
+}
+
+function normalizeDedupStrategy(value: unknown): DedupStrategy {
+  return value === "light-polish" ? "light-polish" : "content-rewrite";
+}
+
+function normalizeDedupAttemptCount(value: unknown): number {
+  return clampNumber(value, 0, 10, 0);
 }
 
 function normalizeGeneratedPresenterImageSelections(

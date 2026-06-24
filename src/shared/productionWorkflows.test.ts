@@ -14,7 +14,8 @@ const MODES: VideoGenerationMode[] = [
   "image-lipsync",
   "personal-ip",
   "viral-remix",
-  "mixed-cut"
+  "mixed-cut",
+  "video-dedup"
 ];
 
 describe("production workflow registry", () => {
@@ -34,12 +35,15 @@ describe("production workflow registry", () => {
     const viralLines = productionWorkflowPromptLines("viral-remix").join("\n");
     const productLines = productionWorkflowPromptLines("product-avatar").join("\n");
     const mixedCutLines = productionWorkflowPromptLines("mixed-cut").join("\n");
+    const dedupLines = productionWorkflowPromptLines("video-dedup").join("\n");
 
     expect(viralLines).toContain("Claude Code style video breakdown");
     expect(viralLines).toContain("Image2 unified storyboard");
     expect(productLines).toContain("GPT Image 2 product-presenter image workflow");
     expect(productLines).toContain("静态图不合格时不能进入 HeyGen");
     expect(mixedCutLines).toContain("混剪模式不能只产出数字人口播占位");
+    expect(dedupLines).toContain("Originality score report");
+    expect(dedupLines).toContain("不能承诺平台官方判定");
   });
 
   it("provides storyboard-specific stages for viral remix planning", () => {

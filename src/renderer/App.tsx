@@ -34,6 +34,7 @@ import {
   type CoverStyle,
   type FrameTitleStyle,
   type MediaAsset,
+  type OriginalityScoreReport,
   type OutputPresetId,
   type PersonalIpProfile,
   type StoryScriptPackage,
@@ -45,6 +46,7 @@ import {
   type VideoTaskSummary
 } from "../shared/domain";
 import type { DigitalHumanStudioAPI, HeyGenAvatarLook, UpdateTaskInput } from "../shared/ipc";
+import { calculateMixedCutBatchPlan, type MixedCutBatchPlan } from "../shared/mixedCutPlanning";
 import {
   getProductionModeWorkflow,
   type ProductionModeWorkflow
@@ -63,6 +65,7 @@ import { countCompleteSteps } from "../shared/workbench";
 const now = new Date().toISOString();
 
 type PreviewMode = "finished" | "cover";
+type ActiveWorkspaceTab = "analysis-center" | VideoGenerationMode;
 type ActiveOperation = "download-original" | "extract-copy" | "visual-analysis";
 type OperationNotice = {
   tone: "running" | "success" | "error";
@@ -103,6 +106,18 @@ const fallbackTask: VideoTask = {
   avatarDescriptionPrompt: "",
   motionPrompt: "",
   generatedPresenterImageSelections: {},
+  mixedCutTargetCount: 1,
+  mixedCutMaterialDirectory: "",
+  mixedCutBackgroundMusicDirectory: "",
+  mixedCutDubbingDirectory: "",
+  mixedCutChapterMode: "fill-with-bgm",
+  mixedCutReuseRate: 35,
+  mixedCutRemoveOriginalAudio: false,
+  mixedCutEnableTransitions: false,
+  mixedCutBgmVolume: 70,
+  dedupTargetScore: 80,
+  dedupStrategy: "content-rewrite",
+  dedupAttemptCount: 0,
   customFontFamily: "",
   selectedOutputPresets: ["portrait-9-16"],
   frameTitleStyle: DEFAULT_FRAME_TITLE_STYLE,
@@ -166,6 +181,19 @@ type EditableTaskPatch = Partial<
     | "customFontFamily"
     | "personalIpProfile"
     | "generatedPresenterImageSelections"
+    | "mixedCutTargetCount"
+    | "mixedCutMaterialDirectory"
+    | "mixedCutBackgroundMusicDirectory"
+    | "mixedCutDubbingDirectory"
+    | "mixedCutChapterMode"
+    | "mixedCutReuseRate"
+    | "mixedCutRemoveOriginalAudio"
+    | "mixedCutEnableTransitions"
+    | "mixedCutBgmVolume"
+    | "dedupSourceVideoAssetId"
+    | "dedupTargetScore"
+    | "dedupStrategy"
+    | "dedupAttemptCount"
   >
 >;
 
@@ -203,8 +231,26 @@ const GENERATION_MODE_TABS: Array<{
   {
     id: "mixed-cut",
     label: "混剪视频",
-    description: "素材 / 字幕 / 配音 / 可选数字人"
+    description: "批量素材混剪"
+  },
+  {
+    id: "video-dedup",
+    label: "视频去重处理",
+    description: "成片二次处理 + 80分质检"
   }
+];
+
+const WORKSPACE_TABS: Array<{
+  id: ActiveWorkspaceTab;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "analysis-center",
+    label: "视频分析中心",
+    description: "先分析资料并推荐模式"
+  },
+  ...GENERATION_MODE_TABS
 ];
 
 export function App() {
@@ -213,6 +259,8 @@ export function App() {
   const [taskSummaries, setTaskSummaries] = useState<VideoTaskSummary[]>(fallbackTasks);
   const [selectedTaskId, setSelectedTaskId] = useState(fallbackTask.id);
   const [selectedTask, setSelectedTask] = useState<VideoTask>(fallbackTask);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] =
+    useState<ActiveWorkspaceTab>("analysis-center");
   const [taskError, setTaskError] = useState("");
   const [serviceConfigurations, setServiceConfigurations] = useState<ServiceConfiguration[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, SettingsDraft>>({});
@@ -251,66 +299,124 @@ export function App() {
   const [storyScriptError, setStoryScriptError] = useState("");
   const [visualStoryboard, setVisualStoryboard] = useState<VisualStoryboardPackage | null>(null);
   const [visualStoryboardError, setVisualStoryboardError] = useState("");
+  const [originalityReport, setOriginalityReport] = useState<OriginalityScoreReport | null>(null);
 
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
   const frameTitleStyle = selectedTask.frameTitleStyle ?? DEFAULT_FRAME_TITLE_STYLE;
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
-  const activeProductionWorkflow = getProductionModeWorkflow(selectedTask.generationMode);
   const exportDirectoryLabel = selectedTask.exportDirectory?.trim() || "未选择保存目录";
   const sourceScriptLabel =
     selectedTask.generationMode === "viral-remix" ? "爆款参考文案" : "参考文案";
+  const currentTaskMediaAssets = useMemo(
+    () => getTaskScopedMediaAssets(selectedTask),
+    [selectedTask]
+  );
   const primaryVariant =
     selectedTask.outputVariants.find((variant) =>
       selectedTask.selectedOutputPresets.includes(variant.presetId)
     ) ?? selectedTask.outputVariants[0];
-  const productImageAsset = selectedTask.mediaAssets.find(
+  const productImageAsset = currentTaskMediaAssets.find(
     (asset) => asset.id === selectedTask.productImageAssetId
   );
   const customFontAsset =
-    selectedTask.mediaAssets.find((asset) => asset.id === selectedTask.customFontAssetId) ??
-    selectedTask.mediaAssets.find((asset) => asset.kind === "custom-font");
+    currentTaskMediaAssets.find((asset) => asset.id === selectedTask.customFontAssetId) ??
+    currentTaskMediaAssets.find((asset) => asset.kind === "custom-font");
   const referenceImageAsset =
-    selectedTask.mediaAssets.find((asset) => asset.id === selectedTask.referenceImageAssetId) ??
-    selectedTask.mediaAssets.find((asset) => asset.kind === "reference-image");
+    currentTaskMediaAssets.find((asset) => asset.id === selectedTask.referenceImageAssetId) ??
+    currentTaskMediaAssets.find((asset) => asset.kind === "reference-image");
   const generatedPresenterAssets = useMemo(
-    () => selectedTask.mediaAssets.filter((asset) => asset.kind === "generated-presenter-image"),
-    [selectedTask.mediaAssets]
+    () => currentTaskMediaAssets.filter((asset) => asset.kind === "generated-presenter-image"),
+    [currentTaskMediaAssets]
   );
   const selectedGeneratedPresenterAssetId = primaryVariant
     ? selectedTask.generatedPresenterImageSelections?.[primaryVariant.presetId]
     : undefined;
   const generatedPresenterAsset =
     generatedPresenterAssets.find((asset) => asset.id === selectedGeneratedPresenterAssetId) ??
-    selectedTask.mediaAssets.find(
+    currentTaskMediaAssets.find(
       (asset) =>
         asset.kind === "generated-presenter-image" &&
         primaryVariant &&
         asset.relativePath.includes(primaryVariant.presetId)
     ) ??
-    selectedTask.mediaAssets.find(
+    currentTaskMediaAssets.find(
       (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
     );
-  const sourceMaterialAssets = selectedTask.mediaAssets.filter((asset) =>
+  const sourceMaterialAssets = currentTaskMediaAssets.filter((asset) =>
     ["source-video", "source-audio", "source-transcript", "source-visual-analysis"].includes(
       asset.kind
     )
   );
-  const mixedCutMaterialAssets = selectedTask.mediaAssets.filter(
+  const mixedCutMaterialAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-material"
   );
-  const knowledgeAssets = selectedTask.mediaAssets.filter((asset) =>
+  const mixedCutVisualMaterialCount = mixedCutMaterialAssets.filter((asset) =>
+    isVisualMixedCutAsset(asset.relativePath)
+  ).length;
+  const mixedCutAudioMaterialCount = mixedCutMaterialAssets.length - mixedCutVisualMaterialCount;
+  const mixedCutBatchPlan = useMemo(
+    () =>
+      calculateMixedCutBatchPlan({
+        materialCount: mixedCutVisualMaterialCount,
+        reuseRate: selectedTask.mixedCutReuseRate
+      }),
+    [mixedCutVisualMaterialCount, selectedTask.mixedCutReuseRate]
+  );
+  const mixedCutOutputAssets = currentTaskMediaAssets.filter((asset) =>
+    ["mixed-cut-video", "edit-decision-record"].includes(asset.kind)
+  );
+  const mixedCutVideoAssets = currentTaskMediaAssets.filter(
+    (asset) => asset.kind === "mixed-cut-video"
+  );
+  const latestMixedCutVideoAsset = [...mixedCutVideoAssets].reverse()[0];
+  const dedupAssets = currentTaskMediaAssets.filter((asset) =>
+    ["dedup-source-video", "dedup-processed-video", "dedup-report"].includes(asset.kind)
+  );
+  const dedupSourceAsset =
+    (selectedTask.dedupSourceVideoAssetId
+      ? currentTaskMediaAssets.find((asset) => asset.id === selectedTask.dedupSourceVideoAssetId)
+      : undefined) ??
+    [...dedupAssets].reverse().find((asset) => asset.kind === "dedup-source-video");
+  const dedupProcessedAsset = [...dedupAssets]
+    .reverse()
+    .find((asset) => asset.kind === "dedup-processed-video");
+  const latestDedupReportAsset = [...currentTaskMediaAssets]
+    .reverse()
+    .find((asset) => asset.kind === "dedup-report" && asset.relativePath.endsWith(".json"));
+  const knowledgeAssets = currentTaskMediaAssets.filter((asset) =>
     ["knowledge-document", "viral-copy-reference"].includes(asset.kind)
   );
   const knowledgeContextCounts = useMemo(
     () => countKnowledgeContextSources(selectedTask),
     [selectedTask]
   );
-  const visualStoryboardAssets = selectedTask.mediaAssets.filter(
+  const modeRecommendationReport = useMemo(
+    () =>
+      buildModeRecommendationReport({
+        generatedPresenterImageCount: generatedPresenterAssets.length,
+        knowledgeContextCounts,
+        mixedCutVisualMaterialCount,
+        sourceMaterialCount: sourceMaterialAssets.length,
+        task: selectedTask
+      }),
+    [
+      generatedPresenterAssets.length,
+      knowledgeContextCounts,
+      mixedCutVisualMaterialCount,
+      sourceMaterialAssets.length,
+      selectedTask
+    ]
+  );
+  const analysisRecommendationReady = hasAnalysisCenterResult(selectedTask);
+  const recommendedProductionWorkflow = getProductionModeWorkflow(
+    modeRecommendationReport.primaryMode
+  );
+  const visualStoryboardAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "visual-storyboard"
   );
-  const storyScriptAssets = selectedTask.mediaAssets.filter(
+  const storyScriptAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "story-script-options"
   );
   const latestStoryScriptJsonAsset = [...storyScriptAssets]
@@ -335,6 +441,9 @@ export function App() {
             latestStoryScriptJsonAsset?.relativePath,
             latestStoryboardImageAsset?.relativePath,
             latestStoryboardJsonAsset?.relativePath,
+            latestDedupReportAsset?.relativePath,
+            ...mixedCutOutputAssets.map((asset) => asset.relativePath),
+            ...dedupAssets.map((asset) => asset.relativePath),
             ...selectedTask.outputVariants.flatMap((variant) => [
               variant.finishedVideoPath,
               variant.coverImagePath
@@ -349,6 +458,9 @@ export function App() {
       latestStoryboardImageAsset?.relativePath,
       latestStoryboardJsonAsset?.relativePath,
       latestStoryScriptJsonAsset?.relativePath,
+      latestDedupReportAsset?.relativePath,
+      mixedCutOutputAssets,
+      dedupAssets,
       productImageAsset?.relativePath,
       referenceImageAsset?.relativePath,
       selectedTask
@@ -358,9 +470,20 @@ export function App() {
   const finishedVideoUrl = primaryVariant?.finishedVideoPath
     ? assetUrls[primaryVariant.finishedVideoPath]
     : "";
+  const latestMixedCutVideoUrl = latestMixedCutVideoAsset?.relativePath
+    ? assetUrls[latestMixedCutVideoAsset.relativePath]
+    : "";
+  const dedupSourceVideoUrl = dedupSourceAsset?.relativePath
+    ? assetUrls[dedupSourceAsset.relativePath]
+    : "";
+  const dedupProcessedVideoUrl = dedupProcessedAsset?.relativePath
+    ? assetUrls[dedupProcessedAsset.relativePath]
+    : "";
   const coverAssetUrl = primaryVariant?.coverImagePath
     ? assetUrls[primaryVariant.coverImagePath]
     : "";
+  const usesResultPreview =
+    selectedTask.generationMode === "mixed-cut" || selectedTask.generationMode === "video-dedup";
   const productImageUrl = productImageAsset?.relativePath
     ? assetUrls[productImageAsset.relativePath]
     : "";
@@ -381,6 +504,9 @@ export function App() {
     : "";
   const visualStoryboardJsonUrl = latestStoryboardJsonAsset?.relativePath
     ? assetUrls[latestStoryboardJsonAsset.relativePath]
+    : "";
+  const dedupReportJsonUrl = latestDedupReportAsset?.relativePath
+    ? assetUrls[latestDedupReportAsset.relativePath]
     : "";
   const displayedStoryScriptPackage = storyScriptJsonUrl ? storyScriptPackage : null;
   const displayedStoryScriptError = storyScriptJsonUrl ? storyScriptError : "";
@@ -579,6 +705,37 @@ export function App() {
       ignore = true;
     };
   }, [visualStoryboardJsonUrl]);
+
+  useEffect(() => {
+    if (!dedupReportJsonUrl) {
+      return;
+    }
+
+    let ignore = false;
+
+    async function loadOriginalityReport() {
+      try {
+        const response = await fetch(dedupReportJsonUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const parsed = (await response.json()) as OriginalityScoreReport;
+        if (!ignore) {
+          setOriginalityReport(parsed);
+        }
+      } catch {
+        if (!ignore) {
+          setOriginalityReport(null);
+        }
+      }
+    }
+
+    void loadOriginalityReport();
+
+    return () => {
+      ignore = true;
+    };
+  }, [dedupReportJsonUrl]);
 
   useEffect(() => {
     if (
@@ -819,6 +976,19 @@ export function App() {
         avatarDescriptionPrompt: taskForRun.avatarDescriptionPrompt,
         motionPrompt: taskForRun.motionPrompt,
         generatedPresenterImageSelections: taskForRun.generatedPresenterImageSelections,
+        mixedCutTargetCount: getMixedCutBatchPlanForTask(taskForRun).targetCount || 1,
+        mixedCutMaterialDirectory: taskForRun.mixedCutMaterialDirectory,
+        mixedCutBackgroundMusicDirectory: taskForRun.mixedCutBackgroundMusicDirectory,
+        mixedCutDubbingDirectory: taskForRun.mixedCutDubbingDirectory,
+        mixedCutChapterMode: taskForRun.mixedCutChapterMode,
+        mixedCutReuseRate: taskForRun.mixedCutReuseRate,
+        mixedCutRemoveOriginalAudio: taskForRun.mixedCutRemoveOriginalAudio,
+        mixedCutEnableTransitions: taskForRun.mixedCutEnableTransitions,
+        mixedCutBgmVolume: taskForRun.mixedCutBgmVolume,
+        dedupSourceVideoAssetId: taskForRun.dedupSourceVideoAssetId ?? null,
+        dedupTargetScore: taskForRun.dedupTargetScore,
+        dedupStrategy: taskForRun.dedupStrategy,
+        dedupAttemptCount: taskForRun.dedupAttemptCount,
         selectedOutputPresets: taskForRun.selectedOutputPresets,
         frameTitleStyle,
         subtitleStyle,
@@ -1015,6 +1185,76 @@ export function App() {
       await refreshTaskState(task.id, task);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "混剪素材导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  void uploadMixedCutMaterial;
+
+  async function chooseMixedCutMaterialDirectory() {
+    const api = requireDesktopRuntime("选择混剪素材文件夹");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择并同步混剪素材文件夹...");
+
+    try {
+      const task = await api.chooseMixedCutMaterialDirectory(selectedTask.id);
+      const materialCount = task.mediaAssets.filter(
+        (asset) => asset.kind === "mixed-cut-material"
+      ).length;
+      setActionMessage(
+        materialCount > 0
+          ? `已同步 ${materialCount} 个混剪素材`
+          : "所选文件夹里没有找到支持的视频、图片或音频素材"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "混剪素材文件夹同步失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function importDedupSourceVideo() {
+    const api = requireDesktopRuntime("导入待去重视频");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择待去重视频...");
+
+    try {
+      const task = await api.importDedupSourceVideo(selectedTask.id);
+      const imported = task.mediaAssets.some((asset) => asset.kind === "dedup-source-video");
+      setActionMessage(imported ? "待去重视频已导入，可一键输出处理版" : "未选择待去重视频");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "待去重视频导入失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function runOriginalityScore() {
+    const api = requireDesktopRuntime("原创度评分");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在生成原创度评分报告...");
+
+    try {
+      const task = await api.runOriginalityScore(selectedTask.id);
+      setActionMessage("原创度评分报告已生成");
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "原创度评分失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -1367,6 +1607,13 @@ export function App() {
     });
   }
 
+  async function openWorkspaceTab(tab: ActiveWorkspaceTab) {
+    setActiveWorkspaceTab(tab);
+    if (tab !== "analysis-center" && tab !== selectedTask.generationMode) {
+      await changeGenerationMode(tab);
+    }
+  }
+
   async function changeProductAvatarMode(avatarMode: VideoTask["avatarMode"]) {
     setSelectedTask((current) => ({
       ...current,
@@ -1596,6 +1843,7 @@ export function App() {
         baseUrl: draft.baseUrl,
         modelName: draft.modelName,
         authMode: draft.authMode,
+        generationRoute: draft.generationRoute,
         asrMode: draft.asrMode,
         avatarId: draft.avatarId,
         voiceId: draft.voiceId,
@@ -1703,6 +1951,7 @@ export function App() {
           baseUrl: draft.baseUrl,
           modelName: draft.modelName,
           authMode: draft.authMode,
+          generationRoute: draft.generationRoute,
           avatarId: draft.avatarId,
           voiceId: draft.voiceId,
           resolution: draft.resolution,
@@ -1849,16 +2098,15 @@ export function App() {
           </section>
         </main>
       ) : (
-        <main className="workspace">
+        <main className="workspace" data-mode={selectedTask.generationMode}>
           <section className="editor-pane">
             <nav className="mode-tabs" aria-label="视频生成类别">
-              {GENERATION_MODE_TABS.map((mode) => (
+              {WORKSPACE_TABS.map((mode) => (
                 <button
-                  className={selectedTask.generationMode === mode.id ? "active" : ""}
-                  disabled={Boolean(mode.disabled)}
+                  className={activeWorkspaceTab === mode.id ? "active" : ""}
                   key={mode.id}
                   type="button"
-                  onClick={() => void changeGenerationMode(mode.id)}
+                  onClick={() => void openWorkspaceTab(mode.id)}
                   title={mode.description}
                 >
                   <strong>{mode.label}</strong>
@@ -1867,478 +2115,68 @@ export function App() {
               ))}
             </nav>
 
-            <section className="source-ingest-card">
-              <div className="source-ingest-heading">
-                <span>
-                  <Link2 size={16} />
-                  原视频链接
-                </span>
-              </div>
-              <div className="source-link-row">
-                <input
-                  type="url"
-                  value={selectedTask.originalVideoUrl ?? ""}
-                  placeholder="先粘贴 TikTok / 抖音 / Reels / Shorts 原视频链接"
-                  aria-label="原视频链接"
-                  onBlur={() =>
-                    void updateCurrentTask({
-                      originalVideoUrl: selectedTask.originalVideoUrl ?? ""
-                    })
-                  }
-                  onChange={(event) =>
-                    setSelectedTask((current) => ({
-                      ...current,
-                      originalVideoUrl: event.target.value
-                    }))
-                  }
-                />
-              </div>
-              <div className="source-action-row">
-                <button
-                  type="button"
-                  disabled={isWorkflowRunning}
-                  onClick={() => void downloadOriginalVideo()}
-                >
-                  <Download size={16} />
-                  {activeOperation === "download-original" ? "下载中..." : "下载原视频"}
-                </button>
-                <button
-                  type="button"
-                  disabled={isWorkflowRunning}
-                  onClick={() => void uploadSourceVideo()}
-                >
-                  <Upload size={16} />
-                  上传原视频
-                </button>
-                <button
-                  type="button"
-                  disabled={isWorkflowRunning}
-                  onClick={() => void extractSourceCopy()}
-                >
-                  <FileSearch size={16} />
-                  {activeOperation === "extract-copy" ? "提取中..." : "提取文案"}
-                </button>
-                <button
-                  type="button"
-                  disabled={isWorkflowRunning}
-                  onClick={() => void analyzeSourceVisuals()}
-                >
-                  <WandSparkles size={16} />
-                  {activeOperation === "visual-analysis" ? "分析中..." : "画面分析"}
-                </button>
-              </div>
-              <AssetList
-                assets={sourceMaterialAssets}
-                emptyLabel="还没有原视频、转写或画面分析素材"
-                title="源素材"
-              />
-              <div className="source-knowledge-row">
-                <div>
-                  <strong>知识库 / 爆款文案</strong>
-                  <span>上传后，一键 AI 生成文案和故事板会自动参考。</span>
-                </div>
-                <div className="source-action-row compact">
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void uploadKnowledgeDocuments()}
-                  >
-                    <Upload size={16} />
-                    上传知识库
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void uploadViralCopyReferences()}
-                  >
-                    <Upload size={16} />
-                    上传爆款文案
-                  </button>
-                </div>
-              </div>
-              <AssetList
-                assets={knowledgeAssets}
-                itemBadge="已纳入AI上下文"
-                emptyLabel="还没有上传知识库或爆款案例"
-                title="知识资料"
-              />
-            </section>
-
-            <ProductionWorkflowPanel workflow={activeProductionWorkflow} />
-
-            <div className="script-grid">
-              <section className="field-block">
-                <div className="section-title">
-                  <FileSearch size={16} />
-                  <h2>{sourceScriptLabel}</h2>
-                </div>
-                <p className="field-hint">提取后会填到这里；也可以直接粘贴或修改原视频文案。</p>
-                <textarea
-                  value={selectedTask.sourceScript}
-                  aria-label={sourceScriptLabel}
-                  onBlur={() => void updateCurrentTask({ sourceScript: selectedTask.sourceScript })}
-                  onChange={(event) =>
-                    setSelectedTask((current) => ({
-                      ...current,
-                      sourceScript: event.target.value
-                    }))
-                  }
-                />
-              </section>
-
-              <section className="field-block">
-                <div className="section-title">
-                  <WandSparkles size={16} />
-                  <h2>AI生成文案</h2>
-                  <button
-                    type="button"
-                    className="small-action-button"
-                    disabled={isWorkflowRunning}
-                    onClick={() => void generateScriptOnly()}
-                  >
-                    <WandSparkles size={15} />
-                    一键AI生成文案
-                  </button>
-                </div>
-                <p className="field-hint">
-                  生成后可直接改价格、禁用词和表达，视频会按这里的最终文案生成。
-                </p>
-                <p className="knowledge-context-summary">
-                  将调用：内置知识 {knowledgeContextCounts.builtIn} / 上传知识{" "}
-                  {knowledgeContextCounts.uploadedKnowledge} / 爆款案例{" "}
-                  {knowledgeContextCounts.viralReferences} / 当前素材{" "}
-                  {knowledgeContextCounts.taskAssets}
-                </p>
-                <textarea
-                  value={selectedTask.finalScript}
-                  placeholder="点击一键AI生成文案，或直接手动输入最终口播文案"
-                  aria-label="AI生成文案"
-                  onBlur={() => void updateCurrentTask({ finalScript: selectedTask.finalScript })}
-                  onChange={(event) =>
-                    setSelectedTask((current) => ({
-                      ...current,
-                      finalScript: event.target.value
-                    }))
-                  }
-                />
-                <div className="risk-row">
-                  <CheckCircle2 size={16} />
-                  <span>相似风险：{similarityRiskLabel(selectedTask.similarityRisk)}</span>
-                </div>
-                {selectedTask.scriptGenerationNotes ? (
-                  <p className="script-note">{selectedTask.scriptGenerationNotes}</p>
-                ) : null}
-              </section>
-            </div>
-
-            <section className="compact-block generation-settings-block">
-              <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
-              <FlowApiGuide
-                configurations={serviceConfigurations}
-                task={selectedTask}
-                hasGeneratedPresenterImages={hasGeneratedPresenterImages(selectedTask)}
-                selectedAvatarName={selectedAvatarLook?.name}
-              />
-              <div className="control-grid mode-settings-grid">
-                <label>
-                  生成语言 / 语音
-                  <select
-                    value={selectedTask.contentLanguage}
-                    onChange={(event) =>
-                      void updateCurrentTask({
-                        contentLanguage: event.target.value as VideoTask["contentLanguage"]
-                      })
-                    }
-                  >
-                    {CONTENT_LANGUAGES.map((language) => (
-                      <option key={language.id} value={language.id}>
-                        {language.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <fieldset className="preset-fieldset">
-                  <legend>输出比例</legend>
-                  <label className="checkbox-row compact-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
-                      onChange={(event) =>
-                        void toggleOutputPreset("portrait-9-16", event.target.checked)
-                      }
-                    />
-                    <Smartphone size={16} />
-                    竖屏 9:16
-                  </label>
-                  <label className="checkbox-row compact-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
-                      onChange={(event) =>
-                        void toggleOutputPreset("landscape-16-9", event.target.checked)
-                      }
-                    />
-                    <Monitor size={16} />
-                    横屏 16:9
-                  </label>
-                </fieldset>
-              </div>
-
-              {selectedTask.generationMode === "product-avatar" ? (
-                <div className="avatar-source-toggle">
-                  <span>数字人来源</span>
-                  <button
-                    type="button"
-                    className={selectedTask.avatarMode === "image-presenter" ? "active" : ""}
-                    onClick={() => void changeProductAvatarMode("image-presenter")}
-                  >
-                    OpenAI 人物商品图
-                  </button>
-                  <button
-                    type="button"
-                    className={selectedTask.avatarMode === "preset-avatar" ? "active" : ""}
-                    onClick={() => void changeProductAvatarMode("preset-avatar")}
-                  >
-                    HeyGen Avatar 口播
-                  </button>
-                </div>
-              ) : null}
-
-              <div className="prompt-grid">
-                {selectedTask.generationMode === "preset-avatar" ||
-                (selectedTask.generationMode === "product-avatar" &&
-                  selectedTask.avatarMode === "preset-avatar") ? (
-                  <div className="avatar-picker-block">
-                    <div className="avatar-picker-header">
-                      <span>预设数字人选择</span>
-                      <span className="avatar-picker-actions">
-                        <button
-                          type="button"
-                          disabled={isAvatarLookLoading || isAvatarCreating}
-                          onClick={() =>
-                            setAvatarCreateDialog({
-                              name: selectedTask.title || "新数字人",
-                              prompt:
-                                selectedTask.avatarDescriptionPrompt ||
-                                "真实自然的短视频口播数字人，干净背景，亲和可信，适合自媒体视频。"
-                            })
-                          }
-                        >
-                          <Plus size={15} />
-                          创建
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isAvatarLookLoading || isAvatarCreating}
-                          onClick={() => void refreshHeyGenAvatarLooks()}
-                        >
-                          <RefreshCw size={15} />
-                          {isAvatarLookLoading ? "读取中" : "刷新"}
-                        </button>
-                      </span>
-                    </div>
-                    {selectedAvatarLook ? (
-                      <p className="selected-avatar-summary">
-                        当前：{selectedAvatarLook.name} · {selectedAvatarLook.id}
-                        {selectedAvatarLook.groupId ? ` · Group ${selectedAvatarLook.groupId}` : ""}
-                      </p>
-                    ) : null}
-                    {avatarLooks.length > 0 ? (
-                      <div className="avatar-look-grid" aria-label="HeyGen 预设数字人">
-                        {avatarLooks.map((look) => (
-                          <button
-                            className={
-                              selectedTask.presetAvatarId === look.id ||
-                              Boolean(
-                                look.groupId && look.groupId === selectedTask.presetAvatarGroupId
-                              )
-                                ? "avatar-look-card selected"
-                                : "avatar-look-card"
-                            }
-                            key={look.id}
-                            title={`${look.name} · ${look.id}`}
-                            type="button"
-                            onClick={() => void selectHeyGenAvatarLook(look)}
-                          >
-                            <span className="avatar-look-thumb">
-                              {look.previewImageUrl ? (
-                                <img
-                                  alt={look.name}
-                                  loading="lazy"
-                                  referrerPolicy="no-referrer"
-                                  src={look.previewImageUrl}
-                                />
-                              ) : (
-                                <UserRound size={24} />
-                              )}
-                            </span>
-                            <strong>{look.name}</strong>
-                            <small>{avatarLookMeta(look)}</small>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="field-hint">
-                        点击刷新读取当前 HeyGen 账号可用数字人；读取失败时仍可手动输入 Avatar ID。
-                      </p>
-                    )}
-                    {avatarLookMessage ? (
-                      <p className="avatar-look-message">{avatarLookMessage}</p>
-                    ) : null}
-                    <label className="avatar-id-field">
-                      Avatar ID
-                      <input
-                        type="text"
-                        list="avatar-id-options"
-                        value={selectedTask.presetAvatarId ?? ""}
-                        placeholder="留空使用设置里的默认 Avatar ID"
-                        onBlur={() =>
-                          void updateCurrentTask({
-                            presetAvatarId: selectedTask.presetAvatarId ?? "",
-                            presetAvatarGroupId: selectedTask.presetAvatarGroupId ?? ""
-                          })
-                        }
-                        onChange={(event) =>
-                          setSelectedTask((current) => ({
-                            ...current,
-                            presetAvatarId: event.target.value,
-                            presetAvatarGroupId:
-                              avatarLooks.find((look) => look.id === event.target.value)?.groupId ??
-                              ""
-                          }))
-                        }
-                      />
-                      <datalist id="avatar-id-options">
-                        {avatarOptions.map((avatarId) => (
-                          <option key={avatarId} value={avatarId} />
-                        ))}
-                      </datalist>
-                    </label>
+            {activeWorkspaceTab === "analysis-center" ? (
+              <section className="video-analysis-center" aria-label="视频分析中心">
+                <div className="analysis-center-heading">
+                  <div>
+                    <span>01</span>
+                    <h2>视频分析中心</h2>
                   </div>
-                ) : null}
-                {selectedTask.generationMode === "product-avatar" &&
-                selectedTask.avatarMode === "image-presenter" ? (
-                  <label>
-                    人物/画面描述提示词
-                    <textarea
-                      className="compact-textarea"
-                      value={selectedTask.avatarDescriptionPrompt}
-                      aria-label="人物/画面描述提示词"
+                  <p>
+                    可先整理原视频、源素材、统一知识库、爆款案例和参考文案，生成建议后再选择模式；也可以直接切到任意视频模式制作。
+                  </p>
+                </div>
+
+                <section className="source-ingest-card">
+                  <div className="source-ingest-heading">
+                    <span>
+                      <Link2 size={16} />
+                      原视频链接
+                    </span>
+                  </div>
+                  <div className="source-link-row">
+                    <input
+                      type="url"
+                      value={selectedTask.originalVideoUrl ?? ""}
+                      placeholder="先粘贴 TikTok / 抖音 / Reels / Shorts 原视频链接"
+                      aria-label="原视频链接"
                       onBlur={() =>
                         void updateCurrentTask({
-                          avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt
+                          originalVideoUrl: selectedTask.originalVideoUrl ?? ""
                         })
                       }
                       onChange={(event) =>
                         setSelectedTask((current) => ({
                           ...current,
-                          avatarDescriptionPrompt: event.target.value
+                          originalVideoUrl: event.target.value
                         }))
                       }
                     />
-                  </label>
-                ) : null}
-                {selectedTask.generationMode === "personal-ip" ? (
-                  <>
-                    <label>
-                      IP 名称
-                      <input
-                        type="text"
-                        value={selectedTask.personalIpProfile.name}
-                        onChange={(event) =>
-                          void updatePersonalIpProfile({ name: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      固定语气
-                      <input
-                        type="text"
-                        value={selectedTask.personalIpProfile.tone}
-                        onChange={(event) =>
-                          void updatePersonalIpProfile({ tone: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      人设描述
-                      <textarea
-                        className="compact-textarea"
-                        value={selectedTask.personalIpProfile.persona}
-                        onChange={(event) =>
-                          void updatePersonalIpProfile({ persona: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      口头禅
-                      <textarea
-                        className="compact-textarea"
-                        value={selectedTask.personalIpProfile.catchphrases}
-                        onChange={(event) =>
-                          void updatePersonalIpProfile({ catchphrases: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      禁用词
-                      <textarea
-                        className="compact-textarea"
-                        value={selectedTask.personalIpProfile.bannedWords}
-                        onChange={(event) =>
-                          void updatePersonalIpProfile({ bannedWords: event.target.value })
-                        }
-                      />
-                    </label>
-                  </>
-                ) : null}
-                {selectedTask.generationMode === "viral-remix" ? (
-                  <div className="mode-note">
-                    <strong>爆款视频复刻</strong>
-                    <span>保留爆款结构、钩子功能、情绪曲线和 CTA，生成时改写为新的表达。</span>
                   </div>
-                ) : null}
-                {selectedTask.generationMode === "mixed-cut" ? (
-                  <div className="mode-note">
-                    <strong>混剪视频</strong>
-                    <span>
-                      当前先生成文案、素材编排和可选数字人片段；完整素材混剪/生视频 API 后续接入。
-                    </span>
-                  </div>
-                ) : null}
-                <label>
-                  动作提示词
-                  <textarea
-                    className="compact-textarea"
-                    value={selectedTask.motionPrompt}
-                    aria-label="动作提示词"
-                    onBlur={() =>
-                      void updateCurrentTask({ motionPrompt: selectedTask.motionPrompt })
-                    }
-                    onChange={(event) =>
-                      setSelectedTask((current) => ({
-                        ...current,
-                        motionPrompt: event.target.value
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-
-              {selectedTask.generationMode === "viral-remix" ? (
-                <div className="mode-material-card">
-                  <div>
-                    <strong>爆款参考素材</strong>
-                    <span>上传参考视频后，可先提取文案和生成画面分析，再做结构复刻。</span>
-                  </div>
-                  <div className="source-action-row compact">
+                  <div className="source-action-row">
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void downloadOriginalVideo()}
+                    >
+                      <Download size={16} />
+                      {activeOperation === "download-original" ? "下载中..." : "下载原视频"}
+                    </button>
                     <button
                       type="button"
                       disabled={isWorkflowRunning}
                       onClick={() => void uploadSourceVideo()}
                     >
                       <Upload size={16} />
-                      上传参考视频
+                      上传原视频
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isWorkflowRunning}
+                      onClick={() => void extractSourceCopy()}
+                    >
+                      <FileSearch size={16} />
+                      {activeOperation === "extract-copy" ? "提取中..." : "提取文案"}
                     </button>
                     <button
                       type="button"
@@ -2351,216 +2189,1023 @@ export function App() {
                   </div>
                   <AssetList
                     assets={sourceMaterialAssets}
-                    emptyLabel="还没有参考视频或分析产物"
-                    title="参考素材"
+                    emptyLabel="还没有原视频、转写或画面分析素材"
+                    title="源素材"
                   />
-                </div>
-              ) : null}
-
-              {selectedTask.generationMode === "viral-remix" ? (
-                <VisualStoryboardPanelV2
-                  disabled={isWorkflowRunning}
-                  errorMessage={displayedVisualStoryboardError}
-                  finalScript={selectedTask.finalScript}
-                  imageUrl={visualStoryboardImageUrl}
-                  onGenerateScriptOptions={() => void generateStoryScriptOptions()}
-                  onGenerateStoryboard={() => void generateVisualStoryboard()}
-                  onPanelCountChange={setStoryboardPanelCount}
-                  onUseScriptOption={(script) => void applyStoryScriptOption(script)}
-                  panelCount={storyboardPanelCount}
-                  scriptErrorMessage={displayedStoryScriptError}
-                  scriptPackage={displayedStoryScriptPackage}
-                  storyboard={displayedVisualStoryboard}
-                />
-              ) : null}
-
-              {selectedTask.generationMode === "mixed-cut" ? (
-                <div className="mode-material-card">
-                  <div>
-                    <strong>混剪素材</strong>
-                    <span>可上传视频、音频、图片素材；完整自动混剪 Provider 后续接入。</span>
-                  </div>
-                  <div className="source-action-row compact">
-                    <button
-                      type="button"
-                      disabled={isWorkflowRunning}
-                      onClick={() => void uploadMixedCutMaterial()}
-                    >
-                      <Upload size={16} />
-                      上传混剪素材
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isWorkflowRunning}
-                      onClick={() => void analyzeSourceVisuals()}
-                    >
-                      <WandSparkles size={16} />
-                      {activeOperation === "visual-analysis" ? "分析中..." : "画面分析"}
-                    </button>
+                  <div className="source-knowledge-row">
+                    <div>
+                      <strong>统一知识库 / 爆款案例</strong>
+                      <span>内置知识库统一参与生成；当前任务上传的案例会作为本任务补充资料。</span>
+                    </div>
+                    <div className="source-action-row compact">
+                      <button
+                        type="button"
+                        disabled={isWorkflowRunning}
+                        onClick={() => void uploadKnowledgeDocuments()}
+                      >
+                        <Upload size={16} />
+                        上传知识资料
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isWorkflowRunning}
+                        onClick={() => void uploadViralCopyReferences()}
+                      >
+                        <Upload size={16} />
+                        上传爆款文案
+                      </button>
+                    </div>
                   </div>
                   <AssetList
-                    assets={mixedCutMaterialAssets}
-                    emptyLabel="还没有混剪素材"
-                    title="素材列表"
+                    assets={knowledgeAssets}
+                    itemBadge="已纳入AI上下文"
+                    emptyLabel="还没有上传当前任务补充资料或爆款案例"
+                    title="当前任务补充资料"
                   />
-                </div>
-              ) : null}
+                </section>
 
-              {selectedTask.generationMode === "product-avatar" &&
-              selectedTask.avatarMode === "image-presenter" ? (
-                <div className="image-action-row">
-                  <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
-                  <AssetPreview
-                    title="人物商品图"
-                    url={generatedPresenterUrl}
-                    emptyLabel="未生成"
-                  />
-                  <GeneratedPresenterHistory
-                    assets={generatedPresenterAssets}
-                    assetUrls={assetUrls}
-                    presetId={previewPresetId ?? "portrait-9-16"}
-                    selectedAssetId={selectedGeneratedPresenterAssetId}
-                    onSelect={(presetId, assetId) =>
-                      void selectGeneratedPresenterImage(presetId, assetId)
-                    }
-                  />
-                  <div className="stacked-actions">
-                    <button
-                      type="button"
-                      disabled={isWorkflowRunning}
-                      onClick={() => void uploadProductImage()}
-                    >
-                      <Upload size={16} />
-                      上传商品图
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isWorkflowRunning}
-                      onClick={() => void generatePresenterImages()}
-                    >
-                      <WandSparkles size={16} />
-                      生成人物商品图
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isWorkflowRunning}
-                      onClick={() =>
-                        void generatePresenterImages([previewPresetId ?? "portrait-9-16"])
+                <div className="script-grid">
+                  <section className="field-block">
+                    <div className="section-title">
+                      <FileSearch size={16} />
+                      <h2>{sourceScriptLabel}</h2>
+                    </div>
+                    <p className="field-hint">提取后会填到这里；也可以直接粘贴或修改原视频文案。</p>
+                    <textarea
+                      value={selectedTask.sourceScript}
+                      aria-label={sourceScriptLabel}
+                      onBlur={() =>
+                        void updateCurrentTask({ sourceScript: selectedTask.sourceScript })
                       }
-                    >
-                      <RefreshCw size={16} />
-                      重生成当前比例
-                    </button>
-                  </div>
+                      onChange={(event) =>
+                        setSelectedTask((current) => ({
+                          ...current,
+                          sourceScript: event.target.value
+                        }))
+                      }
+                    />
+                  </section>
+
+                  <section className="field-block">
+                    <div className="section-title">
+                      <WandSparkles size={16} />
+                      <h2>AI生成文案</h2>
+                      <button
+                        type="button"
+                        className="small-action-button"
+                        disabled={isWorkflowRunning}
+                        onClick={() => void generateScriptOnly()}
+                      >
+                        <WandSparkles size={15} />
+                        一键AI生成文案
+                      </button>
+                    </div>
+                    <p className="field-hint">
+                      生成后可直接改价格、禁用词和表达，视频会按这里的最终文案生成。
+                    </p>
+                    <p className="knowledge-context-summary">
+                      将调用：内置知识 {knowledgeContextCounts.builtIn} / 上传知识{" "}
+                      {knowledgeContextCounts.uploadedKnowledge} / 爆款案例{" "}
+                      {knowledgeContextCounts.viralReferences} / 当前素材{" "}
+                      {knowledgeContextCounts.taskAssets}
+                    </p>
+                    <textarea
+                      value={selectedTask.finalScript}
+                      placeholder="点击一键AI生成文案，或直接手动输入最终口播文案"
+                      aria-label="AI生成文案"
+                      onBlur={() =>
+                        void updateCurrentTask({ finalScript: selectedTask.finalScript })
+                      }
+                      onChange={(event) =>
+                        setSelectedTask((current) => ({
+                          ...current,
+                          finalScript: event.target.value
+                        }))
+                      }
+                    />
+                    <div className="risk-row">
+                      <CheckCircle2 size={16} />
+                      <span>相似风险：{similarityRiskLabel(selectedTask.similarityRisk)}</span>
+                    </div>
+                    {selectedTask.scriptGenerationNotes ? (
+                      <p className="script-note">{selectedTask.scriptGenerationNotes}</p>
+                    ) : null}
+                  </section>
                 </div>
-              ) : null}
-              {selectedTask.generationMode === "image-lipsync" ? (
-                <div className="image-action-row single">
-                  <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
-                  <div className="mode-note">
-                    <strong>图片口型同步</strong>
-                    <span>上传一张人物图，HeyGen 会用这张图对脚本做口型同步。</span>
+
+                <TaskResourceLibrary
+                  generatedPresenterCount={generatedPresenterAssets.length}
+                  knowledgeCount={knowledgeAssets.length}
+                  mixedCutOutputCount={mixedCutOutputAssets.length}
+                  mixedCutVisualMaterialCount={mixedCutVisualMaterialCount}
+                  sourceMaterialCount={sourceMaterialAssets.length}
+                  task={selectedTask}
+                  visualStoryboardCount={visualStoryboardAssets.length}
+                />
+
+                <ModeRecommendationPanel
+                  currentMode={selectedTask.generationMode}
+                  isReady={analysisRecommendationReady}
+                  onSelectMode={(mode) => void openWorkspaceTab(mode)}
+                  report={modeRecommendationReport}
+                />
+
+                {analysisRecommendationReady ? (
+                  <ProductionWorkflowPanel workflow={recommendedProductionWorkflow} />
+                ) : null}
+              </section>
+            ) : (
+              <>
+                <section
+                  className="compact-block generation-settings-block"
+                  data-avatar-mode={selectedTask.avatarMode}
+                  data-mode={selectedTask.generationMode}
+                >
+                  <div className="mode-production-heading">
+                    <div>
+                      <span>02</span>
+                      <h2>模式制作</h2>
+                    </div>
+                    <p>先填本模式必需资料，再设置输出比例和 API，最后一键生成。</p>
                   </div>
-                  <div className="stacked-actions">
+                  <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
+
+                  {modeNeedsEditableScript(selectedTask.generationMode) ? (
+                    <section className="mode-source-script-card">
+                      <div className="section-title">
+                        <FileSearch size={16} />
+                        <h2>原文案 / 参考文案</h2>
+                      </div>
+                      <textarea
+                        className="compact-textarea"
+                        value={selectedTask.sourceScript}
+                        placeholder="不走视频分析时，先把原文案、参考文案或素材说明粘贴到这里，AI 生成文案会优先参考。"
+                        aria-label="原文案 / 参考文案"
+                        onBlur={() =>
+                          void updateCurrentTask({ sourceScript: selectedTask.sourceScript })
+                        }
+                        onChange={(event) =>
+                          setSelectedTask((current) => ({
+                            ...current,
+                            sourceScript: event.target.value
+                          }))
+                        }
+                      />
+                      <p className="field-hint">
+                        用来给 AI 学习结构、卖点和节奏；不会直接作为最终出片文案。
+                      </p>
+                    </section>
+                  ) : null}
+
+                  {modeNeedsEditableScript(selectedTask.generationMode) ? (
+                    <section className="mode-script-card">
+                      <div className="section-title">
+                        <WandSparkles size={16} />
+                        <h2>本次生成文案</h2>
+                        <button
+                          type="button"
+                          className="small-action-button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void generateScriptOnly()}
+                        >
+                          一键AI生成
+                        </button>
+                      </div>
+                      <textarea
+                        className="compact-textarea"
+                        value={selectedTask.finalScript}
+                        placeholder="可直接输入本次视频脚本；需要先拉片分析时，切到“视频分析中心”。"
+                        aria-label="本次生成文案"
+                        onBlur={() =>
+                          void updateCurrentTask({ finalScript: selectedTask.finalScript })
+                        }
+                        onChange={(event) =>
+                          setSelectedTask((current) => ({
+                            ...current,
+                            finalScript: event.target.value
+                          }))
+                        }
+                      />
+                      <p className="field-hint">
+                        会调用统一知识库和当前任务资料；价格、禁用词和最终表达以这里为准。
+                      </p>
+                    </section>
+                  ) : null}
+
+                  {selectedTask.generationMode === "product-avatar" ? (
+                    <div className="avatar-source-toggle">
+                      <span>数字人来源</span>
+                      <button
+                        type="button"
+                        className={selectedTask.avatarMode === "image-presenter" ? "active" : ""}
+                        onClick={() => void changeProductAvatarMode("image-presenter")}
+                      >
+                        OpenAI 人物商品图
+                      </button>
+                      <button
+                        type="button"
+                        className={selectedTask.avatarMode === "preset-avatar" ? "active" : ""}
+                        onClick={() => void changeProductAvatarMode("preset-avatar")}
+                      >
+                        HeyGen Avatar 口播
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="prompt-grid">
+                    {selectedTask.generationMode === "preset-avatar" ||
+                    (selectedTask.generationMode === "product-avatar" &&
+                      selectedTask.avatarMode === "preset-avatar") ? (
+                      <div className="avatar-picker-block">
+                        <div className="avatar-picker-header">
+                          <span>预设数字人选择</span>
+                          <span className="avatar-picker-actions">
+                            <button
+                              type="button"
+                              disabled={isAvatarLookLoading || isAvatarCreating}
+                              onClick={() =>
+                                setAvatarCreateDialog({
+                                  name: selectedTask.title || "新数字人",
+                                  prompt:
+                                    selectedTask.avatarDescriptionPrompt ||
+                                    "真实自然的短视频口播数字人，干净背景，亲和可信，适合自媒体视频。"
+                                })
+                              }
+                            >
+                              <Plus size={15} />
+                              创建
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isAvatarLookLoading || isAvatarCreating}
+                              onClick={() => void refreshHeyGenAvatarLooks()}
+                            >
+                              <RefreshCw size={15} />
+                              {isAvatarLookLoading ? "读取中" : "刷新"}
+                            </button>
+                          </span>
+                        </div>
+                        {selectedAvatarLook ? (
+                          <p className="selected-avatar-summary">
+                            当前：{selectedAvatarLook.name} · {selectedAvatarLook.id}
+                            {selectedAvatarLook.groupId
+                              ? ` · Group ${selectedAvatarLook.groupId}`
+                              : ""}
+                          </p>
+                        ) : null}
+                        {avatarLooks.length > 0 ? (
+                          <div className="avatar-look-grid" aria-label="HeyGen 预设数字人">
+                            {avatarLooks.map((look) => (
+                              <button
+                                className={
+                                  selectedTask.presetAvatarId === look.id ||
+                                  Boolean(
+                                    look.groupId &&
+                                    look.groupId === selectedTask.presetAvatarGroupId
+                                  )
+                                    ? "avatar-look-card selected"
+                                    : "avatar-look-card"
+                                }
+                                key={look.id}
+                                title={`${look.name} · ${look.id}`}
+                                type="button"
+                                onClick={() => void selectHeyGenAvatarLook(look)}
+                              >
+                                <span className="avatar-look-thumb">
+                                  {look.previewImageUrl ? (
+                                    <img
+                                      alt={look.name}
+                                      loading="lazy"
+                                      referrerPolicy="no-referrer"
+                                      src={look.previewImageUrl}
+                                    />
+                                  ) : (
+                                    <UserRound size={24} />
+                                  )}
+                                </span>
+                                <strong>{look.name}</strong>
+                                <small>{avatarLookMeta(look)}</small>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="field-hint">
+                            点击刷新读取当前 HeyGen 账号可用数字人；读取失败时仍可手动输入 Avatar
+                            ID。
+                          </p>
+                        )}
+                        {avatarLookMessage ? (
+                          <p className="avatar-look-message">{avatarLookMessage}</p>
+                        ) : null}
+                        <label className="avatar-id-field">
+                          Avatar ID
+                          <input
+                            type="text"
+                            list="avatar-id-options"
+                            value={selectedTask.presetAvatarId ?? ""}
+                            placeholder="留空使用设置里的默认 Avatar ID"
+                            onBlur={() =>
+                              void updateCurrentTask({
+                                presetAvatarId: selectedTask.presetAvatarId ?? "",
+                                presetAvatarGroupId: selectedTask.presetAvatarGroupId ?? ""
+                              })
+                            }
+                            onChange={(event) =>
+                              setSelectedTask((current) => ({
+                                ...current,
+                                presetAvatarId: event.target.value,
+                                presetAvatarGroupId:
+                                  avatarLooks.find((look) => look.id === event.target.value)
+                                    ?.groupId ?? ""
+                              }))
+                            }
+                          />
+                          <datalist id="avatar-id-options">
+                            {avatarOptions.map((avatarId) => (
+                              <option key={avatarId} value={avatarId} />
+                            ))}
+                          </datalist>
+                        </label>
+                      </div>
+                    ) : null}
+                    {selectedTask.generationMode === "product-avatar" &&
+                    selectedTask.avatarMode === "image-presenter" ? (
+                      <label>
+                        人物/画面描述提示词
+                        <textarea
+                          className="compact-textarea"
+                          value={selectedTask.avatarDescriptionPrompt}
+                          aria-label="人物/画面描述提示词"
+                          onBlur={() =>
+                            void updateCurrentTask({
+                              avatarDescriptionPrompt: selectedTask.avatarDescriptionPrompt
+                            })
+                          }
+                          onChange={(event) =>
+                            setSelectedTask((current) => ({
+                              ...current,
+                              avatarDescriptionPrompt: event.target.value
+                            }))
+                          }
+                        />
+                      </label>
+                    ) : null}
+                    {selectedTask.generationMode === "personal-ip" ? (
+                      <>
+                        <label>
+                          IP 名称
+                          <input
+                            type="text"
+                            value={selectedTask.personalIpProfile.name}
+                            onChange={(event) =>
+                              void updatePersonalIpProfile({ name: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          固定语气
+                          <input
+                            type="text"
+                            value={selectedTask.personalIpProfile.tone}
+                            onChange={(event) =>
+                              void updatePersonalIpProfile({ tone: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          人设描述
+                          <textarea
+                            className="compact-textarea"
+                            value={selectedTask.personalIpProfile.persona}
+                            onChange={(event) =>
+                              void updatePersonalIpProfile({ persona: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          口头禅
+                          <textarea
+                            className="compact-textarea"
+                            value={selectedTask.personalIpProfile.catchphrases}
+                            onChange={(event) =>
+                              void updatePersonalIpProfile({ catchphrases: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          禁用词
+                          <textarea
+                            className="compact-textarea"
+                            value={selectedTask.personalIpProfile.bannedWords}
+                            onChange={(event) =>
+                              void updatePersonalIpProfile({ bannedWords: event.target.value })
+                            }
+                          />
+                        </label>
+                      </>
+                    ) : null}
+                    {selectedTask.generationMode === "viral-remix" ? (
+                      <div className="mode-note">
+                        <strong>爆款视频复刻</strong>
+                        <span>保留爆款结构、钩子功能、情绪曲线和 CTA，生成时改写为新的表达。</span>
+                      </div>
+                    ) : null}
+                    {selectedTask.generationMode === "mixed-cut" ? (
+                      <div className="mode-note">
+                        <strong>混剪视频</strong>
+                        <span>
+                          只负责批量素材混剪；需要进一步去重时，把成片导入“视频去重处理”模式。
+                        </span>
+                      </div>
+                    ) : null}
+                    {selectedTask.generationMode === "video-dedup" ? (
+                      <div className="mode-note">
+                        <strong>视频去重处理</strong>
+                        <span>
+                          对本地视频或混剪成片做内容级重构，并输出内部原创度评分报告，默认目标 80+。
+                        </span>
+                      </div>
+                    ) : null}
+                    {modeNeedsMotionPrompt(selectedTask.generationMode) ? (
+                      <label>
+                        动作提示词
+                        <textarea
+                          className="compact-textarea"
+                          value={selectedTask.motionPrompt}
+                          aria-label="动作提示词"
+                          onBlur={() =>
+                            void updateCurrentTask({ motionPrompt: selectedTask.motionPrompt })
+                          }
+                          onChange={(event) =>
+                            setSelectedTask((current) => ({
+                              ...current,
+                              motionPrompt: event.target.value
+                            }))
+                          }
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+
+                  {selectedTask.generationMode === "viral-remix" ? (
+                    <div className="mode-material-card viral-reference-card">
+                      <div>
+                        <strong>爆款参考素材</strong>
+                        <span>上传参考视频后，可先提取文案和生成画面分析，再做结构复刻。</span>
+                      </div>
+                      <div className="source-action-row compact">
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void uploadSourceVideo()}
+                        >
+                          <Upload size={16} />
+                          上传参考视频
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void analyzeSourceVisuals()}
+                        >
+                          <WandSparkles size={16} />
+                          {activeOperation === "visual-analysis" ? "分析中..." : "画面分析"}
+                        </button>
+                      </div>
+                      <AssetList
+                        assets={sourceMaterialAssets}
+                        emptyLabel="还没有参考视频或分析产物"
+                        title="参考素材"
+                      />
+                    </div>
+                  ) : null}
+
+                  {selectedTask.generationMode === "viral-remix" ? (
+                    <VisualStoryboardPanelV2
+                      disabled={isWorkflowRunning}
+                      errorMessage={displayedVisualStoryboardError}
+                      finalScript={selectedTask.finalScript}
+                      imageUrl={visualStoryboardImageUrl}
+                      onGenerateScriptOptions={() => void generateStoryScriptOptions()}
+                      onGenerateStoryboard={() => void generateVisualStoryboard()}
+                      onPanelCountChange={setStoryboardPanelCount}
+                      onUseScriptOption={(script) => void applyStoryScriptOption(script)}
+                      panelCount={storyboardPanelCount}
+                      scriptErrorMessage={displayedStoryScriptError}
+                      scriptPackage={displayedStoryScriptPackage}
+                      storyboard={displayedVisualStoryboard}
+                    />
+                  ) : null}
+
+                  {selectedTask.generationMode === "mixed-cut" ? (
+                    <div className="mixed-cut-workspace-card">
+                      <div className="mixed-cut-library-panel">
+                        <div className="mixed-cut-library-card">
+                          <div className="mixed-cut-card-heading">
+                            <strong>视频素材库</strong>
+                            <button
+                              type="button"
+                              disabled={isWorkflowRunning}
+                              onClick={() => void chooseMixedCutMaterialDirectory()}
+                            >
+                              <FolderOpen size={16} />
+                              选择素材文件夹
+                            </button>
+                          </div>
+                          <div
+                            className={`mixed-cut-sync-state ${
+                              mixedCutMaterialAssets.length > 0 ? "ok" : "pending"
+                            }`}
+                          >
+                            {mixedCutMaterialAssets.length > 0
+                              ? `已同步 ${mixedCutMaterialAssets.length} 个素材`
+                              : "未发现素材，请选择工作文件夹"}
+                          </div>
+                          <p title={selectedTask.mixedCutMaterialDirectory}>
+                            {selectedTask.mixedCutMaterialDirectory || "尚未选择素材文件夹"}
+                          </p>
+                          <div className="mixed-cut-stat-row">
+                            <span>画面素材 {mixedCutVisualMaterialCount}</span>
+                            <span>音频素材 {mixedCutAudioMaterialCount}</span>
+                          </div>
+                        </div>
+
+                        <div className="mixed-cut-library-card">
+                          <div className="mixed-cut-card-heading">
+                            <strong>音频/BGM</strong>
+                            <span>跟随素材库</span>
+                          </div>
+                          <label className="range-field">
+                            BGM 音量
+                            <div>
+                              <input
+                                min={0}
+                                max={100}
+                                type="range"
+                                value={selectedTask.mixedCutBgmVolume}
+                                onChange={(event) =>
+                                  void updateCurrentTask({
+                                    mixedCutBgmVolume: clampUiNumber(event.target.value, 0, 100, 70)
+                                  })
+                                }
+                              />
+                              <output>{selectedTask.mixedCutBgmVolume}</output>
+                            </div>
+                          </label>
+                          <p className="field-hint">
+                            去除原音、转场和重复率在右侧组合参数中统一设置。
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mixed-cut-chapter-panel">
+                        <div className="mixed-cut-panel-topline">
+                          <strong>章节与组合</strong>
+                          <span>
+                            {mixedCutRecommendation(mixedCutVisualMaterialCount, mixedCutBatchPlan)}
+                          </span>
+                        </div>
+
+                        <div className="mixed-cut-control-grid">
+                          <div className="mixed-cut-plan-card">
+                            <span>智能估算数量</span>
+                            <strong>
+                              {mixedCutBatchPlan.targetCount
+                                ? `${mixedCutBatchPlan.targetCount} 条`
+                                : "待计算"}
+                            </strong>
+                            <small>{mixedCutPlanDetail(mixedCutBatchPlan)}</small>
+                          </div>
+                          <label>
+                            章节模式
+                            <select
+                              value={selectedTask.mixedCutChapterMode}
+                              onChange={(event) =>
+                                void updateCurrentTask({
+                                  mixedCutChapterMode:
+                                    event.target.value === "fixed-material-count" ||
+                                    event.target.value === "minimum-duration"
+                                      ? event.target.value
+                                      : "fill-with-bgm"
+                                })
+                              }
+                            >
+                              <option value="fill-with-bgm">为配音填充画面</option>
+                              <option value="fixed-material-count">固定素材数</option>
+                              <option value="minimum-duration">至少 X 秒</option>
+                            </select>
+                          </label>
+                          <label className="range-field">
+                            视频重复率
+                            <div>
+                              <input
+                                min={0}
+                                max={100}
+                                type="range"
+                                value={selectedTask.mixedCutReuseRate}
+                                onChange={(event) =>
+                                  void updateCurrentTask({
+                                    mixedCutReuseRate: clampUiNumber(event.target.value, 0, 100, 35)
+                                  })
+                                }
+                              />
+                              <output>{selectedTask.mixedCutReuseRate}</output>
+                            </div>
+                          </label>
+                          <label className="compact-checkbox mixed-cut-switch">
+                            <input
+                              checked={selectedTask.mixedCutRemoveOriginalAudio}
+                              type="checkbox"
+                              onChange={(event) =>
+                                void updateCurrentTask({
+                                  mixedCutRemoveOriginalAudio: event.target.checked
+                                })
+                              }
+                            />
+                            去除视频素材原音
+                          </label>
+                          <label className="compact-checkbox mixed-cut-switch">
+                            <input
+                              checked={selectedTask.mixedCutEnableTransitions}
+                              type="checkbox"
+                              onChange={(event) =>
+                                void updateCurrentTask({
+                                  mixedCutEnableTransitions: event.target.checked
+                                })
+                              }
+                            />
+                            转场
+                          </label>
+                        </div>
+
+                        <div className="mixed-cut-table-wrap">
+                          <table className="mixed-cut-chapter-table">
+                            <thead>
+                              <tr>
+                                <th>章节</th>
+                                <th>素材数 & 组合</th>
+                                <th>模式</th>
+                                <th>重复率</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {mixedCutChapterRows(
+                                mixedCutVisualMaterialCount,
+                                mixedCutBatchPlan.targetCount,
+                                selectedTask.mixedCutChapterMode,
+                                selectedTask.mixedCutReuseRate
+                              ).map((row) => (
+                                <tr key={row.index}>
+                                  <td>{row.index}</td>
+                                  <td>{row.materialLabel}</td>
+                                  <td>{row.modeLabel}</td>
+                                  <td>{row.reuseRate}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="source-action-row compact">
+                          <button
+                            type="button"
+                            disabled={isWorkflowRunning}
+                            onClick={() => void chooseMixedCutMaterialDirectory()}
+                          >
+                            <FolderOpen size={16} />
+                            重新同步素材文件夹
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isWorkflowRunning}
+                            onClick={() => void analyzeSourceVisuals()}
+                          >
+                            <WandSparkles size={16} />
+                            {activeOperation === "visual-analysis" ? "分析中..." : "画面分析"}
+                          </button>
+                        </div>
+
+                        <AssetList
+                          assets={mixedCutOutputAssets}
+                          emptyLabel="还没有批量混剪产物"
+                          title="混剪产物"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedTask.generationMode === "video-dedup" ? (
+                    <div className="mode-material-card dedup-source-card">
+                      <div>
+                        <strong>待处理视频</strong>
+                        <span>导入混剪成片或本地 MP4，处理后以内部原创度评分 80+ 为通过阈值。</span>
+                      </div>
+                      <div className="mode-settings-grid">
+                        <label>
+                          目标原创度评分
+                          <input
+                            min={60}
+                            max={95}
+                            type="number"
+                            value={selectedTask.dedupTargetScore}
+                            onBlur={() =>
+                              void updateCurrentTask({
+                                dedupTargetScore: selectedTask.dedupTargetScore
+                              })
+                            }
+                            onChange={(event) =>
+                              setSelectedTask((current) => ({
+                                ...current,
+                                dedupTargetScore: clampUiNumber(event.target.value, 60, 95, 80)
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          处理策略
+                          <select
+                            value={selectedTask.dedupStrategy}
+                            onChange={(event) =>
+                              void updateCurrentTask({
+                                dedupStrategy:
+                                  event.target.value === "light-polish"
+                                    ? "light-polish"
+                                    : "content-rewrite"
+                              })
+                            }
+                          >
+                            <option value="content-rewrite">内容级重构</option>
+                            <option value="light-polish">轻量后处理</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="source-action-row compact">
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void importDedupSourceVideo()}
+                        >
+                          <Upload size={16} />
+                          导入待去重视频
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void runOriginalityScore()}
+                        >
+                          <FileSearch size={16} />
+                          只生成评分报告
+                        </button>
+                      </div>
+                      <OriginalityReportCard
+                        report={dedupReportJsonUrl ? originalityReport : null}
+                      />
+                      <AssetList
+                        assets={dedupAssets}
+                        emptyLabel="还没有去重素材或报告"
+                        title="去重产物"
+                      />
+                    </div>
+                  ) : null}
+
+                  {selectedTask.generationMode === "product-avatar" &&
+                  selectedTask.avatarMode === "image-presenter" ? (
+                    <div className="image-action-row product-image-assets">
+                      <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
+                      <AssetPreview
+                        title="人物商品图"
+                        url={generatedPresenterUrl}
+                        emptyLabel="未生成"
+                      />
+                      <GeneratedPresenterHistory
+                        assets={generatedPresenterAssets}
+                        assetUrls={assetUrls}
+                        presetId={previewPresetId ?? "portrait-9-16"}
+                        selectedAssetId={selectedGeneratedPresenterAssetId}
+                        onSelect={(presetId, assetId) =>
+                          void selectGeneratedPresenterImage(presetId, assetId)
+                        }
+                      />
+                      <div className="stacked-actions">
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void uploadProductImage()}
+                        >
+                          <Upload size={16} />
+                          上传商品图
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void generatePresenterImages()}
+                        >
+                          <WandSparkles size={16} />
+                          生成人物商品图
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() =>
+                            void generatePresenterImages([previewPresetId ?? "portrait-9-16"])
+                          }
+                        >
+                          <RefreshCw size={16} />
+                          重生成当前比例
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {selectedTask.generationMode === "image-lipsync" ? (
+                    <div className="image-action-row single lipsync-source-card">
+                      <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
+                      <div className="mode-note">
+                        <strong>图片口型同步</strong>
+                        <span>上传一张人物图，HeyGen 会用这张图对脚本做口型同步。</span>
+                      </div>
+                      <div className="stacked-actions">
+                        <button
+                          type="button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void uploadReferenceImage()}
+                        >
+                          <Upload size={16} />
+                          上传人物图
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <section className="mode-output-card">
+                    <div className="section-title">
+                      <Save size={16} />
+                      <h2>输出设置</h2>
+                    </div>
+                    <div className="control-grid mode-settings-grid">
+                      <label>
+                        生成语言 / 语音
+                        <select
+                          value={selectedTask.contentLanguage}
+                          onChange={(event) =>
+                            void updateCurrentTask({
+                              contentLanguage: event.target.value as VideoTask["contentLanguage"]
+                            })
+                          }
+                        >
+                          {CONTENT_LANGUAGES.map((language) => (
+                            <option key={language.id} value={language.id}>
+                              {language.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <fieldset className="preset-fieldset">
+                        <legend>输出比例</legend>
+                        <label className="checkbox-row compact-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={selectedTask.selectedOutputPresets.includes("portrait-9-16")}
+                            onChange={(event) =>
+                              void toggleOutputPreset("portrait-9-16", event.target.checked)
+                            }
+                          />
+                          <Smartphone size={16} />
+                          竖屏 9:16
+                        </label>
+                        <label className="checkbox-row compact-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={selectedTask.selectedOutputPresets.includes("landscape-16-9")}
+                            onChange={(event) =>
+                              void toggleOutputPreset("landscape-16-9", event.target.checked)
+                            }
+                          />
+                          <Monitor size={16} />
+                          横屏 16:9
+                        </label>
+                      </fieldset>
+                    </div>
+                  </section>
+
+                  <details className="mode-api-details">
+                    <summary>本模式需要的 API / 模型</summary>
+                    <FlowApiGuide
+                      configurations={serviceConfigurations}
+                      task={selectedTask}
+                      hasGeneratedPresenterImages={hasGeneratedPresenterImages(selectedTask)}
+                      selectedAvatarName={selectedAvatarLook?.name}
+                    />
+                  </details>
+                </section>
+
+                <div className="primary-actions">
+                  {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
+                  <div className="export-directory-control">
                     <button
                       type="button"
                       disabled={isWorkflowRunning}
-                      onClick={() => void uploadReferenceImage()}
+                      onClick={() => void chooseExportDirectory()}
                     >
-                      <Upload size={16} />
-                      上传人物图
+                      <FolderOpen size={16} />
+                      选择保存目录
                     </button>
+                    <span title={exportDirectoryLabel}>{exportDirectoryLabel}</span>
                   </div>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={isWorkflowRunning}
+                    onClick={() => void runRealWorkflow()}
+                  >
+                    <Play size={18} />
+                    一键输出视频和封面
+                  </button>
                 </div>
-              ) : null}
-            </section>
-
-            <div className="primary-actions">
-              {actionMessage ? <span className="action-message">{actionMessage}</span> : null}
-              <div className="export-directory-control">
-                <button
-                  type="button"
-                  disabled={isWorkflowRunning}
-                  onClick={() => void chooseExportDirectory()}
-                >
-                  <FolderOpen size={16} />
-                  选择保存目录
-                </button>
-                <span title={exportDirectoryLabel}>{exportDirectoryLabel}</span>
-              </div>
-              <button
-                type="button"
-                className="primary"
-                disabled={isWorkflowRunning}
-                onClick={() => void runRealWorkflow()}
-              >
-                <Play size={18} />
-                一键输出视频和封面
-              </button>
-            </div>
+              </>
+            )}
           </section>
 
           <aside className="preview-pane">
             <section className="preview-card">
               <div className="pane-heading">
-                <span>预览</span>
+                <span>{usesResultPreview ? "结果" : "预览"}</span>
                 <button type="button" onClick={() => void openTaskExports()}>
                   <FolderOpen size={16} />
                   打开导出
                 </button>
               </div>
-              <nav className="preview-mode-tabs" aria-label="预览类型">
-                <button
-                  className={activePreviewMode === "finished" ? "active" : ""}
-                  data-testid="release-preview-finished-tab"
-                  type="button"
-                  onClick={() => setActivePreviewMode("finished")}
-                >
-                  <strong>成品预览</strong>
-                  <span>{presetLabel(previewPresetId ?? "portrait-9-16")}</span>
-                </button>
-                <button
-                  className={activePreviewMode === "cover" ? "active" : ""}
-                  data-testid="release-preview-cover-tab"
-                  type="button"
-                  onClick={() => setActivePreviewMode("cover")}
-                >
-                  <strong>封面预览</strong>
-                  <span>{coverAssetUrl ? "已生成" : "编辑中"}</span>
-                </button>
-              </nav>
-              {activePreviewMode === "finished" ? (
-                <PrimaryPreview
-                  frameTitleStyle={frameTitleStyle}
-                  frameTitleText={createFrameTitleText(selectedTask, coverStyle)}
-                  presetId={previewPresetId}
-                  videoUrl={finishedVideoUrl}
-                  imageUrl={generatedPresenterUrl || referenceImageUrl || productImageUrl}
-                  subtitleStyle={subtitleStyle}
-                  subtitleText={createSubtitleSample(selectedTask)}
-                  variantStatus={primaryVariant?.status}
+              {selectedTask.generationMode === "mixed-cut" ? (
+                <MixedCutResultPreview
+                  editDecisionCount={
+                    mixedCutOutputAssets.filter((asset) => asset.kind === "edit-decision-record")
+                      .length
+                  }
+                  materialCount={mixedCutMaterialAssets.length}
+                  targetCount={mixedCutBatchPlan.targetCount}
+                  videoCount={mixedCutVideoAssets.length}
+                  videoUrl={latestMixedCutVideoUrl}
+                />
+              ) : selectedTask.generationMode === "video-dedup" ? (
+                <DedupResultPreview
+                  processedVideoUrl={dedupProcessedVideoUrl}
+                  report={dedupReportJsonUrl ? originalityReport : null}
+                  sourceVideoUrl={dedupSourceVideoUrl}
                 />
               ) : (
-                <CoverPreview
-                  imageUrl={coverAssetUrl}
-                  style={coverStyle}
-                  title={coverStyle.title || createCoverTitle(selectedTask)}
-                  presetId={previewPresetId}
-                />
+                <>
+                  <nav className="preview-mode-tabs" aria-label="预览类型">
+                    <button
+                      className={activePreviewMode === "finished" ? "active" : ""}
+                      data-testid="release-preview-finished-tab"
+                      type="button"
+                      onClick={() => setActivePreviewMode("finished")}
+                    >
+                      <strong>成品预览</strong>
+                      <span>{presetLabel(previewPresetId ?? "portrait-9-16")}</span>
+                    </button>
+                    <button
+                      className={activePreviewMode === "cover" ? "active" : ""}
+                      data-testid="release-preview-cover-tab"
+                      type="button"
+                      onClick={() => setActivePreviewMode("cover")}
+                    >
+                      <strong>封面预览</strong>
+                      <span>{coverAssetUrl ? "已生成" : "编辑中"}</span>
+                    </button>
+                  </nav>
+                  {activePreviewMode === "finished" ? (
+                    <PrimaryPreview
+                      frameTitleStyle={frameTitleStyle}
+                      frameTitleText={createFrameTitleText(selectedTask, coverStyle)}
+                      presetId={previewPresetId}
+                      videoUrl={finishedVideoUrl}
+                      imageUrl={generatedPresenterUrl || referenceImageUrl || productImageUrl}
+                      subtitleStyle={subtitleStyle}
+                      subtitleText={createSubtitleSample(selectedTask)}
+                      variantStatus={primaryVariant?.status}
+                    />
+                  ) : (
+                    <CoverPreview
+                      imageUrl={coverAssetUrl}
+                      style={coverStyle}
+                      title={coverStyle.title || createCoverTitle(selectedTask)}
+                      presetId={previewPresetId}
+                    />
+                  )}
+                  <PreviewStyleControls
+                    activePreviewMode={activePreviewMode}
+                    coverStyle={coverStyle}
+                    customFontEnabled={Boolean(customFontUrl)}
+                    disabled={isWorkflowRunning}
+                    onCoverStyleChange={(patch) => void updateCoverStyle(patch)}
+                    onFrameTitleStyleChange={(patch) => void updateFrameTitleStyle(patch)}
+                    onSubtitleStyleChange={(patch) => void updateSubtitleStyle(patch)}
+                    onUploadCustomFont={() => void uploadCustomFont()}
+                    onSaveSettings={() => void savePreviewStyleSettings()}
+                    frameTitleStyle={frameTitleStyle}
+                    subtitleStyle={subtitleStyle}
+                  />
+                </>
               )}
-              <PreviewStyleControls
-                activePreviewMode={activePreviewMode}
-                coverStyle={coverStyle}
-                customFontEnabled={Boolean(customFontUrl)}
-                disabled={isWorkflowRunning}
-                onCoverStyleChange={(patch) => void updateCoverStyle(patch)}
-                onFrameTitleStyleChange={(patch) => void updateFrameTitleStyle(patch)}
-                onSubtitleStyleChange={(patch) => void updateSubtitleStyle(patch)}
-                onUploadCustomFont={() => void uploadCustomFont()}
-                onSaveSettings={() => void savePreviewStyleSettings()}
-                frameTitleStyle={frameTitleStyle}
-                subtitleStyle={subtitleStyle}
-              />
             </section>
 
             <section className="status-strip" aria-label="步骤状态">
@@ -2578,11 +3223,13 @@ export function App() {
               ))}
             </section>
 
-            <div className="preview-asset-grid">
-              <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
-              <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
-              <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
-            </div>
+            {!usesResultPreview ? (
+              <div className="preview-asset-grid">
+                <AssetPreview title="商品图" url={productImageUrl} emptyLabel="未上传" />
+                <AssetPreview title="人物图" url={referenceImageUrl} emptyLabel="未上传" />
+                <AssetPreview title="人物商品图" url={generatedPresenterUrl} emptyLabel="未生成" />
+              </div>
+            ) : null}
           </aside>
         </main>
       )}
@@ -2963,6 +3610,24 @@ export function App() {
                           </select>
                         </label>
                         <label>
+                          生成路由
+                          <select
+                            value={activeSettingsDraft.generationRoute ?? "auto"}
+                            onChange={(event) =>
+                              setSettingsDraft((current) =>
+                                updateDraft(current, activeSettingsConfiguration.providerId, {
+                                  generationRoute: event.target
+                                    .value as SettingsDraft["generationRoute"]
+                                })
+                              )
+                            }
+                          >
+                            <option value="auto">自动（会员优先 Video Agent）</option>
+                            <option value="direct-video">Direct Video（脚本精确）</option>
+                            <option value="video-agent">Video Agent（会员路由）</option>
+                          </select>
+                        </label>
+                        <label>
                           默认 Avatar ID（可选）
                           <input
                             type="text"
@@ -3312,6 +3977,119 @@ function AssetList({
       ) : (
         <p>{emptyLabel}</p>
       )}
+    </div>
+  );
+}
+
+function OriginalityReportCard({ report }: { report: OriginalityScoreReport | null }) {
+  return (
+    <div className="originality-report-card">
+      <div className="asset-list-heading">
+        <strong>原创度评分</strong>
+        <span>{report ? `${report.score}/${report.targetScore}` : "未生成"}</span>
+      </div>
+      {report ? (
+        <>
+          <div className={`score-meter ${report.passed ? "passed" : "warning"}`}>
+            <strong>{report.score}</strong>
+            <span>{report.passed ? "已达到阈值" : "需要继续处理"}</span>
+          </div>
+          <p>{report.summary}</p>
+          <p className="field-hint">该分数为软件内部原创度/重复风险评分，不代表平台官方判定。</p>
+        </>
+      ) : (
+        <p>导入视频并运行后会显示评分报告。</p>
+      )}
+    </div>
+  );
+}
+
+function MixedCutResultPreview({
+  editDecisionCount,
+  materialCount,
+  targetCount,
+  videoCount,
+  videoUrl
+}: {
+  editDecisionCount: number;
+  materialCount: number;
+  targetCount: number;
+  videoCount: number;
+  videoUrl: string;
+}) {
+  return (
+    <div className="result-preview-panel">
+      <div className="result-preview-stats">
+        <span>
+          <strong>{materialCount}</strong>
+          <small>素材</small>
+        </span>
+        <span>
+          <strong>{targetCount}</strong>
+          <small>预计条数</small>
+        </span>
+        <span>
+          <strong>{videoCount}</strong>
+          <small>已生成视频</small>
+        </span>
+        <span>
+          <strong>{editDecisionCount}</strong>
+          <small>剪辑记录</small>
+        </span>
+      </div>
+      <div className="result-video-box">
+        {videoUrl ? (
+          <video controls src={videoUrl} />
+        ) : (
+          <div>
+            <strong>等待生成混剪成片</strong>
+            <span>先选择素材文件夹，再一键输出视频和封面。</span>
+          </div>
+        )}
+      </div>
+      <p className="field-hint">
+        混剪模块以素材组合、剪辑记录和批量成片为主，不显示字幕/封面实时样式面板。
+      </p>
+    </div>
+  );
+}
+
+function DedupResultPreview({
+  processedVideoUrl,
+  report,
+  sourceVideoUrl
+}: {
+  processedVideoUrl: string;
+  report: OriginalityScoreReport | null;
+  sourceVideoUrl: string;
+}) {
+  return (
+    <div className="result-preview-panel">
+      <div className="dedup-video-compare">
+        <div className="result-video-box">
+          <small>处理前</small>
+          {sourceVideoUrl ? (
+            <video controls src={sourceVideoUrl} />
+          ) : (
+            <div>
+              <strong>未导入待处理视频</strong>
+              <span>先导入混剪成片或本地 MP4。</span>
+            </div>
+          )}
+        </div>
+        <div className="result-video-box">
+          <small>处理后</small>
+          {processedVideoUrl ? (
+            <video controls src={processedVideoUrl} />
+          ) : (
+            <div>
+              <strong>等待去重处理</strong>
+              <span>处理完成后这里显示新视频。</span>
+            </div>
+          )}
+        </div>
+      </div>
+      <OriginalityReportCard report={report} />
     </div>
   );
 }
@@ -3724,6 +4502,364 @@ interface FlowApiGuideItem {
   modelLabel: string;
   detail: string;
   active: boolean;
+}
+
+interface ModeRecommendation {
+  mode: VideoGenerationMode;
+  score: number;
+  reason: string;
+  missing: string[];
+  resourcePackLabel: string;
+}
+
+interface ModeRecommendationReport {
+  primaryMode: VideoGenerationMode;
+  summary: string;
+  recommendations: ModeRecommendation[];
+}
+
+function buildModeRecommendationReport({
+  generatedPresenterImageCount,
+  knowledgeContextCounts,
+  mixedCutVisualMaterialCount,
+  sourceMaterialCount,
+  task
+}: {
+  generatedPresenterImageCount: number;
+  knowledgeContextCounts: ReturnType<typeof countKnowledgeContextSources>;
+  mixedCutVisualMaterialCount: number;
+  sourceMaterialCount: number;
+  task: VideoTask;
+}): ModeRecommendationReport {
+  const assets = getTaskScopedMediaAssets(task);
+  const hasAsset = (...kinds: MediaAsset["kind"][]) =>
+    assets.some((asset) => kinds.includes(asset.kind));
+  const countAssets = (...kinds: MediaAsset["kind"][]) =>
+    assets.filter((asset) => kinds.includes(asset.kind)).length;
+  const allText = [
+    task.sourceScript,
+    task.finalScript,
+    task.avatarDescriptionPrompt,
+    task.motionPrompt,
+    task.creativeWorkflow.referenceAnalysis,
+    task.creativeWorkflow.sellingPoints,
+    task.creativeWorkflow.storyboard,
+    task.creativeWorkflow.dailyPipeline,
+    task.creativeWorkflow.aiVideoPrompt,
+    task.creativeWorkflow.mixedCutPlan,
+    task.personalIpProfile.name,
+    task.personalIpProfile.persona,
+    task.personalIpProfile.tone,
+    task.personalIpProfile.catchphrases,
+    task.personalIpProfile.bannedWords
+  ].join("\n");
+  const hasEditableScript = Boolean(task.finalScript.trim());
+  const hasReferenceCopy = Boolean(task.sourceScript.trim() || hasAsset("source-transcript"));
+  const hasSourceAnalysis = Boolean(
+    task.originalVideoUrl?.trim() || sourceMaterialCount > 0 || hasAsset("source-visual-analysis")
+  );
+  const hasKnowledge =
+    knowledgeContextCounts.uploadedKnowledge + knowledgeContextCounts.viralReferences > 0;
+  const hasAvatar = Boolean(task.presetAvatarId || task.presetAvatarGroupId);
+  const hasProductSignal =
+    hasAsset("product-image") ||
+    /商品|带货|卖点|价格|折扣|优惠|sku|product|price|shop|order|buy/i.test(allText);
+  const hasIpSignal =
+    Boolean(
+      task.personalIpProfile.name.trim() ||
+      task.personalIpProfile.persona.trim() ||
+      task.personalIpProfile.tone.trim()
+    ) || /探店|知识|观点|经验|教程|分享|人设|IP|review|tutorial|opinion/i.test(allText);
+  const hasPresenterImage = generatedPresenterImageCount > 0 || hasAsset("reference-image");
+  const hasStoryboard =
+    hasAsset("visual-storyboard", "story-script-options") ||
+    Boolean(task.creativeWorkflow.storyboard.trim());
+  const hasMixedCutSource =
+    mixedCutVisualMaterialCount > 0 || Boolean(task.mixedCutMaterialDirectory.trim());
+  const hasDedupSource =
+    Boolean(task.dedupSourceVideoAssetId) ||
+    task.outputVariants.some((variant) => Boolean(variant.finishedVideoPath)) ||
+    hasAsset("dedup-source-video", "mixed-cut-video", "finished-video", "avatar-video");
+  const finishedOutputCount =
+    countAssets("mixed-cut-video", "dedup-processed-video", "finished-video", "avatar-video") +
+    task.outputVariants.filter((variant) => Boolean(variant.finishedVideoPath)).length;
+  const mixedCutPlan = calculateMixedCutBatchPlan({
+    materialCount: mixedCutVisualMaterialCount,
+    reuseRate: task.mixedCutReuseRate
+  });
+
+  const makeRecommendation = (
+    mode: VideoGenerationMode,
+    score: number,
+    reason: string,
+    missing: string[],
+    resourcePackLabel: string
+  ): ModeRecommendation => ({
+    mode,
+    score: clampScore(score),
+    reason,
+    missing,
+    resourcePackLabel
+  });
+
+  const recommendations: ModeRecommendation[] = [
+    makeRecommendation(
+      "preset-avatar",
+      26 +
+        (hasEditableScript ? 26 : 0) +
+        (hasAvatar ? 20 : 0) +
+        (hasReferenceCopy ? 10 : 0) +
+        (task.selectedOutputPresets.length > 0 ? 8 : 0) +
+        (hasKnowledge ? 6 : 0),
+      "适合用已确认脚本驱动 HeyGen 预设数字人口播。",
+      [
+        hasEditableScript ? "" : "AI生成文案/最终脚本",
+        hasAvatar ? "" : "预设数字人",
+        task.selectedOutputPresets.length > 0 ? "" : "输出比例"
+      ].filter(Boolean),
+      `${hasEditableScript ? 1 : 0} 条脚本 / ${hasAvatar ? 1 : 0} 个数字人`
+    ),
+    makeRecommendation(
+      "product-avatar",
+      24 +
+        (hasProductSignal ? 26 : 0) +
+        (hasEditableScript ? 16 : 0) +
+        (hasAsset("product-image") ? 14 : 0) +
+        (generatedPresenterImageCount > 0 ? 10 : 0) +
+        (hasSourceAnalysis ? 6 : 0),
+      "适合把商品卖点、人物商品图和数字人口播组合成带货视频。",
+      [
+        hasProductSignal ? "" : "商品卖点/价格/产品资料",
+        hasEditableScript ? "" : "带货文案",
+        hasAsset("product-image") ? "" : "商品图片"
+      ].filter(Boolean),
+      `${countAssets("product-image")} 张商品图 / ${generatedPresenterImageCount} 张人物商品图`
+    ),
+    makeRecommendation(
+      "image-lipsync",
+      22 +
+        (hasPresenterImage ? 34 : 0) +
+        (hasEditableScript ? 22 : 0) +
+        (task.motionPrompt.trim() ? 10 : 0) +
+        (task.selectedOutputPresets.length > 0 ? 6 : 0),
+      "适合用人物图或人物商品图做图片口型同步视频。",
+      [
+        hasPresenterImage ? "" : "人物图/人物商品图",
+        hasEditableScript ? "" : "口播脚本",
+        task.motionPrompt.trim() ? "" : "动作提示词"
+      ].filter(Boolean),
+      `${generatedPresenterImageCount + countAssets("reference-image")} 张可用人物图`
+    ),
+    makeRecommendation(
+      "personal-ip",
+      24 +
+        (hasIpSignal ? 25 : 0) +
+        (hasEditableScript ? 18 : 0) +
+        (hasSourceAnalysis ? 10 : 0) +
+        (hasKnowledge ? 8 : 0) +
+        (task.contentLanguage ? 5 : 0),
+      "适合探店、观点、知识输出或账号人设型内容。",
+      [
+        hasIpSignal ? "" : "人设/语气/内容方向",
+        hasEditableScript ? "" : "可编辑文案",
+        hasSourceAnalysis || hasKnowledge ? "" : "参考资料或分析结果"
+      ].filter(Boolean),
+      `${hasIpSignal ? 1 : 0} 组人设 / ${knowledgeContextCounts.taskAssets} 个当前任务来源`
+    ),
+    makeRecommendation(
+      "viral-remix",
+      24 +
+        (hasSourceAnalysis ? 22 : 0) +
+        (hasReferenceCopy ? 16 : 0) +
+        (hasStoryboard ? 16 : 0) +
+        (hasEditableScript ? 10 : 0) +
+        (knowledgeContextCounts.viralReferences > 0 ? 8 : 0),
+      "适合先拉片分析，再保留结构与节奏，生成原创表达和故事板。",
+      [
+        hasSourceAnalysis ? "" : "原视频链接/素材/画面分析",
+        hasReferenceCopy ? "" : "提取文案",
+        hasStoryboard ? "" : "故事板或分镜提示词"
+      ].filter(Boolean),
+      `${sourceMaterialCount} 个源素材 / ${countAssets("visual-storyboard")} 个故事板产物`
+    ),
+    makeRecommendation(
+      "mixed-cut",
+      20 +
+        (hasMixedCutSource ? 28 : 0) +
+        Math.min(24, mixedCutVisualMaterialCount * 3) +
+        (mixedCutPlan.targetCount > 1 ? 8 : 0) +
+        (task.finalScript.trim() ? 8 : 0),
+      "适合只做批量素材混剪，不承担二次去重。",
+      [
+        hasMixedCutSource ? "" : "混剪素材文件夹",
+        mixedCutVisualMaterialCount >= 3 ? "" : "更多画面素材"
+      ].filter(Boolean),
+      `${mixedCutVisualMaterialCount} 个画面素材 / 预计 ${mixedCutPlan.targetCount} 条`
+    ),
+    makeRecommendation(
+      "video-dedup",
+      18 +
+        (hasDedupSource ? 42 : 0) +
+        (finishedOutputCount > 0 ? 14 : 0) +
+        (hasAsset("dedup-report") ? 14 : 0) +
+        (task.dedupTargetScore >= 80 ? 8 : 0),
+      "适合对已有成片做二次处理和内部原创度评分。",
+      [
+        hasDedupSource ? "" : "待处理视频",
+        task.dedupTargetScore >= 80 ? "" : "80+ 目标阈值",
+        hasAsset("dedup-report") ? "" : "评分报告"
+      ].filter(Boolean),
+      `${finishedOutputCount} 个可处理成片 / 目标 ${task.dedupTargetScore} 分`
+    )
+  ].sort((left, right) => right.score - left.score);
+
+  const primaryMode = recommendations[0]?.mode ?? task.generationMode;
+  const primaryLabel = generationModeLabel(primaryMode);
+  const primaryScore = recommendations[0]?.score ?? 0;
+  const summary =
+    primaryScore >= 70
+      ? `当前任务资料更适合先走「${primaryLabel}」，生成时会优先调用本任务的分析结果、AI文案、图片和素材。`
+      : `当前任务资料还不完整，建议先在分析中心补齐原视频/素材、文案、画面分析或知识资料，再进入「${primaryLabel}」。`;
+
+  return {
+    primaryMode,
+    summary,
+    recommendations
+  };
+}
+
+function ModeRecommendationPanel({
+  currentMode,
+  isReady,
+  onSelectMode,
+  report
+}: {
+  currentMode: VideoGenerationMode;
+  isReady: boolean;
+  onSelectMode: (mode: VideoGenerationMode) => void;
+  report: ModeRecommendationReport;
+}) {
+  const primary = report.recommendations[0];
+
+  return (
+    <section className="mode-recommendation-panel">
+      {!isReady ? (
+        <div className="mode-recommendation-empty">
+          <small>模式推荐</small>
+          <strong>等待提取文案或画面分析</strong>
+          <p>
+            先下载/上传原视频，再点击“提取文案”或“画面分析”。完成后这里会根据当前任务资料推荐适合的制作模式。
+          </p>
+        </div>
+      ) : null}
+      {isReady ? (
+        <>
+          <div className="mode-recommendation-summary">
+            <div>
+              <small>推荐模式</small>
+              <strong>{generationModeLabel(report.primaryMode)}</strong>
+            </div>
+            <p>{report.summary}</p>
+            {primary ? <span>{primary.score} 分</span> : null}
+          </div>
+          <div className="mode-recommendation-grid">
+            {report.recommendations.map((item) => (
+              <button
+                className={item.mode === currentMode ? "active" : ""}
+                key={item.mode}
+                type="button"
+                onClick={() => onSelectMode(item.mode)}
+              >
+                <span>
+                  <strong>{generationModeLabel(item.mode)}</strong>
+                  <em>{item.resourcePackLabel}</em>
+                </span>
+                <b>{item.score}</b>
+                <small>{item.reason}</small>
+                {item.missing.length > 0 ? (
+                  <i>缺：{item.missing.join(" / ")}</i>
+                ) : (
+                  <i>资料较完整</i>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function TaskResourceLibrary({
+  generatedPresenterCount,
+  knowledgeCount,
+  mixedCutOutputCount,
+  mixedCutVisualMaterialCount,
+  sourceMaterialCount,
+  task,
+  visualStoryboardCount
+}: {
+  generatedPresenterCount: number;
+  knowledgeCount: number;
+  mixedCutOutputCount: number;
+  mixedCutVisualMaterialCount: number;
+  sourceMaterialCount: number;
+  task: VideoTask;
+  visualStoryboardCount: number;
+}) {
+  const assets = getTaskScopedMediaAssets(task);
+  const resources = [
+    {
+      label: "原视频/源素材",
+      count: sourceMaterialCount + mixedCutVisualMaterialCount,
+      detail: task.originalVideoUrl?.trim() ? "已填写原视频链接" : "可下载、上传或同步素材文件夹"
+    },
+    {
+      label: "分析结果",
+      count: assets.filter((asset) => asset.kind === "source-visual-analysis").length,
+      detail: "拉片/画面分析结果会进入 AI 文案上下文"
+    },
+    {
+      label: "任务补充资料",
+      count: knowledgeCount,
+      detail: "统一知识库全局调用；这里是当前任务额外上传的案例/资料"
+    },
+    {
+      label: "AI 文案",
+      count: task.finalScript.trim() ? 1 : 0,
+      detail: task.finalScript.trim() ? "已生成或已手动编辑" : "可一键生成后再修改"
+    },
+    {
+      label: "AI 图片/故事板",
+      count: generatedPresenterCount + visualStoryboardCount,
+      detail: "人物商品图、参考图、故事板都可在本任务内复用"
+    },
+    {
+      label: "成片/后期产物",
+      count:
+        mixedCutOutputCount +
+        task.outputVariants.filter((variant) => variant.finishedVideoPath).length,
+      detail: "混剪、数字人、去重结果都归属当前任务"
+    }
+  ];
+
+  return (
+    <section className="task-resource-library">
+      <div className="task-resource-heading">
+        <strong>当前任务资料库</strong>
+        <span>任务素材、分析结果、AI 文案和图片只归属当前任务；统一知识库全局复用</span>
+      </div>
+      <div className="task-resource-grid">
+        {resources.map((resource) => (
+          <div className={resource.count > 0 ? "ready" : ""} key={resource.label}>
+            <small>{resource.label}</small>
+            <strong>{resource.count}</strong>
+            <span>{resource.detail}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function ProductionWorkflowPanel({ workflow }: { workflow: ProductionModeWorkflow }) {
@@ -4376,10 +5512,25 @@ function generationModeLabel(mode: VideoGenerationMode): string {
     "image-lipsync": "图片口型同步",
     "personal-ip": "个人IP视频",
     "viral-remix": "爆款视频复刻",
-    "mixed-cut": "混剪视频"
+    "mixed-cut": "混剪视频",
+    "video-dedup": "视频去重处理"
   };
 
   return labels[mode];
+}
+
+function modeNeedsEditableScript(mode: VideoGenerationMode): boolean {
+  return mode !== "video-dedup";
+}
+
+function modeNeedsMotionPrompt(mode: VideoGenerationMode): boolean {
+  return [
+    "preset-avatar",
+    "product-avatar",
+    "image-lipsync",
+    "personal-ip",
+    "viral-remix"
+  ].includes(mode);
 }
 
 function parseAvatarOptions(value: string | undefined): string[] {
@@ -4440,6 +5591,10 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
     "reference-image": "人物图",
     "mixed-cut-material": "混剪素材",
     "mixed-cut-video": "混剪基础视频",
+    "dedup-source-video": "待去重视频",
+    "dedup-processed-video": "去重处理视频",
+    "dedup-report": "去重评分报告",
+    "edit-decision-record": "剪辑记录",
     "custom-font": "字体",
     "generated-presenter-image": "人物商品图",
     "avatar-video": "数字人视频",
@@ -4453,12 +5608,40 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
   return labels[kind] ?? kind;
 }
 
+function getTaskScopedMediaAssets(task: VideoTask): MediaAsset[] {
+  return task.mediaAssets.filter((asset) => asset.taskId === task.id);
+}
+
+function hasAnalysisCenterResult(task: VideoTask): boolean {
+  const assets = getTaskScopedMediaAssets(task);
+  return (
+    assets.some((asset) =>
+      [
+        "source-transcript",
+        "source-visual-analysis",
+        "story-script-options",
+        "visual-storyboard"
+      ].includes(asset.kind)
+    ) ||
+    Boolean(
+      task.creativeWorkflow.referenceAnalysis.trim() ||
+      task.creativeWorkflow.storyboard.trim() ||
+      task.creativeWorkflow.mixedCutPlan.trim()
+    )
+  );
+}
+
+function clampScore(score: number): number {
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
 function countKnowledgeContextSources(task: VideoTask): {
   builtIn: number;
   uploadedKnowledge: number;
   viralReferences: number;
   taskAssets: number;
 } {
+  const assets = getTaskScopedMediaAssets(task);
   const currentTaskAssetKinds = new Set<MediaAsset["kind"]>([
     "source-video",
     "source-audio",
@@ -4470,6 +5653,10 @@ function countKnowledgeContextSources(task: VideoTask): {
     "reference-image",
     "mixed-cut-material",
     "mixed-cut-video",
+    "dedup-source-video",
+    "dedup-processed-video",
+    "dedup-report",
+    "edit-decision-record",
     "generated-presenter-image",
     "avatar-video",
     "subtitle-file"
@@ -4495,13 +5682,10 @@ function countKnowledgeContextSources(task: VideoTask): {
 
   return {
     builtIn: builtInKnowledgeCount(task.generationMode),
-    uploadedKnowledge: task.mediaAssets.filter((asset) => asset.kind === "knowledge-document")
-      .length,
-    viralReferences: task.mediaAssets.filter((asset) => asset.kind === "viral-copy-reference")
-      .length,
+    uploadedKnowledge: assets.filter((asset) => asset.kind === "knowledge-document").length,
+    viralReferences: assets.filter((asset) => asset.kind === "viral-copy-reference").length,
     taskAssets:
-      task.mediaAssets.filter((asset) => currentTaskAssetKinds.has(asset.kind)).length +
-      textSourceCount
+      assets.filter((asset) => currentTaskAssetKinds.has(asset.kind)).length + textSourceCount
   };
 }
 
@@ -4512,10 +5696,93 @@ function builtInKnowledgeCount(mode: VideoGenerationMode): number {
     "image-lipsync": 5,
     "personal-ip": 3,
     "viral-remix": 4,
-    "mixed-cut": 5
+    "mixed-cut": 5,
+    "video-dedup": 4
   };
 
   return counts[mode];
+}
+
+function clampUiNumber(value: string, min: number, max: number, fallback: number): number {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.round(numericValue)));
+}
+
+function getMixedCutBatchPlanForTask(task: VideoTask): MixedCutBatchPlan {
+  return calculateMixedCutBatchPlan({
+    materialCount: getTaskScopedMediaAssets(task).filter(
+      (asset) => asset.kind === "mixed-cut-material" && isVisualMixedCutAsset(asset.relativePath)
+    ).length,
+    reuseRate: task.mixedCutReuseRate
+  });
+}
+
+function mixedCutRecommendation(materialCount: number, plan: MixedCutBatchPlan): string {
+  if (materialCount <= 0) {
+    return "请先上传混剪素材";
+  }
+
+  if (materialCount < 3) {
+    return "素材较少，建议先增加视频/图片";
+  }
+
+  return `按素材组合和 ${plan.reuseRate}% 重复率，预计可生成 ${plan.targetCount} 条`;
+}
+
+function mixedCutPlanDetail(plan: MixedCutBatchPlan): string {
+  if (plan.materialCount <= 0) {
+    return "选择素材文件夹后自动计算";
+  }
+
+  const combinationLabel =
+    plan.combinationCount >= 10_000 ? "10000+" : String(plan.combinationCount);
+  return `每条约 ${plan.materialsPerVideo} 个素材 · 组合 ${combinationLabel} · 重复率限制 ${plan.reuseLimitedCount} 条`;
+}
+
+function isVisualMixedCutAsset(relativePath: string): boolean {
+  return /\.(mp4|mov|m4v|webm|mkv|avi|png|jpe?g|webp)$/i.test(relativePath);
+}
+
+function mixedCutChapterRows(
+  visualMaterialCount: number,
+  targetCount: number,
+  chapterMode: VideoTask["mixedCutChapterMode"],
+  reuseRate: number
+): Array<{
+  index: number;
+  materialLabel: string;
+  modeLabel: string;
+  reuseRate: number;
+}> {
+  const rowCount = Math.min(8, Math.max(1, targetCount));
+  const modeLabel = mixedCutChapterModeLabel(chapterMode);
+
+  return Array.from({ length: rowCount }, (_value, index) => {
+    const materialCount =
+      visualMaterialCount > 0 ? Math.max(1, visualMaterialCount - (index % 3)) : 0;
+    return {
+      index: index + 1,
+      materialLabel: materialCount > 0 ? `${materialCount} 个素材 · 导出时计算` : "未同步素材",
+      modeLabel,
+      reuseRate
+    };
+  });
+}
+
+function mixedCutChapterModeLabel(mode: VideoTask["mixedCutChapterMode"]): string {
+  switch (mode) {
+    case "fixed-material-count":
+      return "固定素材数";
+    case "minimum-duration":
+      return "至少 X 秒";
+    case "fill-with-bgm":
+    default:
+      return "为配音填充画面";
+  }
 }
 
 function assetFileName(relativePath: string): string {
@@ -4593,8 +5860,12 @@ function buildFlowApiGuideItems(input: {
       providerId: "video",
       providerLabel: "生视频模型",
       modelLabel: modelName(configurations, "video"),
-      detail: "爆款素材复刻、故事板生视频和图片生视频使用 Seedance、即梦、可灵等视频生成模型。",
-      active: task.generationMode === "viral-remix" || task.generationMode === "mixed-cut"
+      detail:
+        "爆款素材复刻、故事板生视频、图片生视频和去重的部分片段重构使用 Seedance、即梦、可灵等视频生成模型。",
+      active:
+        task.generationMode === "viral-remix" ||
+        task.generationMode === "mixed-cut" ||
+        task.generationMode === "video-dedup"
     },
     {
       title: "5. 生成口型视频",
@@ -4626,6 +5897,14 @@ function buildFlowApiGuideItems(input: {
       modelLabel: "不需要模型",
       detail: "使用已生成视频、字幕样式和封面样式，导出到你选择的保存目录。",
       active: true
+    },
+    {
+      title: "9. 去重评分",
+      providerLabel: "本地视频处理 + 内部风险评分",
+      modelLabel: "默认不需要模型",
+      detail:
+        "视频去重处理会输出处理后 MP4 和内部原创度/重复风险报告，阈值默认 80+，不代表平台官方判定。",
+      active: task.generationMode === "video-dedup"
     }
   ];
 }
@@ -4673,7 +5952,22 @@ function heyGenBaseSettingsLabel(configurations: ServiceConfiguration[]): string
   const resolution =
     configuration?.settings.resolution || defaultServiceSettings("heygen").resolution;
   const authMode = configuration?.settings.authMode === "oauth-bearer" ? "会员 Bearer" : "API Key";
-  return `${authMode}；分辨率 ${resolution ?? "720p"}`;
+  const route = heyGenGenerationRouteLabel(configuration?.settings.generationRoute);
+  return `${authMode}；${route}；分辨率 ${resolution ?? "720p"}`;
+}
+
+function heyGenGenerationRouteLabel(
+  route: ServiceConfiguration["settings"]["generationRoute"]
+): string {
+  switch (route) {
+    case "direct-video":
+      return "Direct Video";
+    case "video-agent":
+      return "Video Agent";
+    case "auto":
+    default:
+      return "自动路由";
+  }
 }
 
 function credentialStatus(configurations: ServiceConfiguration[], providerId: ProviderId): string {
@@ -4711,7 +6005,7 @@ function providerLabel(configurations: ServiceConfiguration[], providerId: Provi
 function providerSettingsHint(providerId: ProviderId): string {
   switch (providerId) {
     case "heygen":
-      return "Base URL 填 https://api.heygen.com 即可；普通 API 账号选 API Key，会员/OAuth 通道选 Bearer Token。保存或检查成功后会自动读取当前账号的预设数字人。";
+      return "Base URL 填 https://api.heygen.com 即可；普通 API 账号选 API Key，会员/OAuth 通道选 Bearer Token。自动路由会在会员/Bearer 下优先走 Video Agent；保存或检查成功后会自动读取当前账号的预设数字人。";
     case "source-parser":
       return "用于下载原视频：Base URL 默认填 https://jiexi.hyjiexi.eu.org，API Key 放在本机安全存储。点击下载原视频时会创建解析任务、轮询完成并保存到当前任务素材。";
     case "asr":
@@ -4755,11 +6049,13 @@ async function checkOutputServiceConfiguration(
   api: DigitalHumanStudioAPI,
   task: VideoTask
 ): Promise<string> {
-  const providerIds: ProviderId[] = ["heygen"];
+  const providerIds: ProviderId[] =
+    task.generationMode === "mixed-cut" || task.generationMode === "video-dedup" ? [] : ["heygen"];
   const configurations = await api.listServiceConfigurations();
   const heygenConfiguration = providerConfiguration(configurations, "heygen");
 
   if (
+    providerIds.includes("heygen") &&
     task.avatarMode === "preset-avatar" &&
     !task.presetAvatarGroupId?.trim() &&
     !task.presetAvatarId?.trim() &&
@@ -4837,6 +6133,7 @@ function createSettingsDraft(
         baseUrl: configuration.settings.baseUrl ?? "",
         modelName: configuration.settings.modelName ?? "",
         authMode: configuration.settings.authMode ?? "api-key",
+        generationRoute: configuration.settings.generationRoute ?? "auto",
         asrMode: configuration.settings.asrMode ?? "audio-transcriptions",
         avatarId: configuration.settings.avatarId ?? "",
         voiceId: configuration.settings.voiceId ?? "",
@@ -4867,6 +6164,7 @@ function createEmptySettingsDraft(): SettingsDraft {
     baseUrl: "",
     modelName: "",
     authMode: "api-key",
+    generationRoute: "auto",
     asrMode: "audio-transcriptions",
     avatarId: "",
     voiceId: "",

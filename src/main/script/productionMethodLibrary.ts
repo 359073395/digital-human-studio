@@ -65,7 +65,16 @@ function modeSpecificMethodLines(mode: VideoGenerationMode | undefined): string[
       return [
         ...viralReferenceBreakdownLines(),
         "- Mixed-cut method: analyze uploaded materials by usable visual proof, scene category, pacing role, caption role, and edit order.",
-        "- The script should be a voiceover/subtitle spine that can support B-roll, screen recording, product shots, AI-generated visuals, or short digital-human inserts."
+        "- The script should be a voiceover/subtitle spine that can support B-roll, screen recording, product shots, AI-generated visuals, or short digital-human inserts.",
+        "- Mixed-cut only creates batch remixes. Use video-dedup mode afterward for content-level dedup processing and originality scoring."
+      ];
+
+    case "video-dedup":
+      return [
+        "- Video dedup method: treat dedup as a separate post-processing workflow, not as mixed-cut generation.",
+        "- Target score is an internal originality score, default 80+. Do not promise platform detection results.",
+        "- Prefer content-level rewrite: segment restructure, visual variation, subtitle/title/cover changes, audio rhythm changes, and optional V2V reconstruction.",
+        "- Warn when the requested processing is only MD5, mirror, crop, speed, color, BGM, or subtitle replacement."
       ];
 
     case "personal-ip":
@@ -102,6 +111,12 @@ function modeSpecificStoryboardLines(mode: VideoGenerationMode | undefined): str
       return [
         "- Mixed-cut storyboard should map each material to a job: hook visual, proof visual, context visual, objection visual, result visual, CTA visual.",
         "- Do not require a human presenter unless source material or task intent needs one."
+      ];
+
+    case "video-dedup":
+      return [
+        "- Video dedup storyboard should identify which parts need restructuring or replacement before scoring.",
+        "- Keep useful meaning, but change concrete expression, shot order, subtitle hierarchy, cover direction, and visual treatment."
       ];
 
     case "personal-ip":

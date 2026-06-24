@@ -93,6 +93,31 @@ function heyGenEnvAuthMode() {
   throw new Error("HEYGEN_AUTH_MODE only supports api-key or oauth-bearer.");
 }
 
+function heyGenEnvGenerationRoute() {
+  const value = env("HEYGEN_GENERATION_ROUTE")?.toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  if (
+    [
+      "auto",
+      "direct-video",
+      "direct_video",
+      "direct",
+      "video-agent",
+      "video_agent",
+      "agent"
+    ].includes(value)
+  ) {
+    return value.startsWith("direct")
+      ? "direct-video"
+      : value.includes("agent")
+        ? "video-agent"
+        : "auto";
+  }
+  throw new Error("HEYGEN_GENERATION_ROUTE only supports auto, direct-video, or video-agent.");
+}
+
 function heyGenEnvCredential() {
   return env("HEYGEN_BEARER_TOKEN") || env("HEYGEN_TOKEN") || env("HEYGEN_API_KEY");
 }
@@ -104,6 +129,7 @@ function hasHeyGenEnvConfiguration() {
     env("HEYGEN_VOICE_ID") ||
     env("HEYGEN_RESOLUTION") ||
     heyGenEnvAuthMode() ||
+    heyGenEnvGenerationRoute() ||
     heyGenEnvCredential()
   );
 }
@@ -175,6 +201,7 @@ function providerEnvSettings(providerId) {
     return {
       baseUrl: env("HEYGEN_BASE_URL"),
       authMode: heyGenEnvAuthMode(),
+      generationRoute: heyGenEnvGenerationRoute(),
       avatarId: env("HEYGEN_AVATAR_ID"),
       voiceId: env("HEYGEN_VOICE_ID"),
       resolution: env("HEYGEN_RESOLUTION"),
@@ -923,6 +950,8 @@ async function main() {
     await ensureReleaseAsrConfiguration(runtime, cases);
     report.heyGenAuthMode =
       runtime.serviceRepository.getConfiguration("heygen").settings.authMode || "api-key";
+    report.heyGenGenerationRoute =
+      runtime.serviceRepository.getConfiguration("heygen").settings.generationRoute || "auto";
     const services = createServices(runtime);
     report.serviceChecks = await runServiceChecks(runtime);
     const avatarCatalog = await selectAvatar(runtime, services);

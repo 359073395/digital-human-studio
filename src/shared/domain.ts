@@ -10,7 +10,8 @@ export type VideoGenerationMode =
   | "image-lipsync"
   | "personal-ip"
   | "viral-remix"
-  | "mixed-cut";
+  | "mixed-cut"
+  | "video-dedup";
 
 export type StepStatus = "waiting" | "running" | "complete" | "failed" | "retry-ready";
 
@@ -30,6 +31,8 @@ export type SubtitlePosition = "top" | "middle" | "bottom";
 
 export type TextWeight = "regular" | "bold";
 
+export type MixedCutChapterMode = "fill-with-bgm" | "fixed-material-count" | "minimum-duration";
+
 export type MediaAssetKind =
   | "source-audio"
   | "source-video"
@@ -43,6 +46,10 @@ export type MediaAssetKind =
   | "reference-image"
   | "mixed-cut-material"
   | "mixed-cut-video"
+  | "dedup-source-video"
+  | "dedup-processed-video"
+  | "dedup-report"
+  | "edit-decision-record"
   | "custom-font"
   | "generated-presenter-image"
   | "avatar-video"
@@ -124,6 +131,28 @@ export interface CreativeWorkflow {
   dailyPipeline: string;
   aiVideoPrompt: string;
   mixedCutPlan: string;
+}
+
+export type DedupStrategy = "content-rewrite" | "light-polish";
+
+export interface OriginalityScoreReport {
+  score: number;
+  targetScore: number;
+  passed: boolean;
+  strategy: DedupStrategy;
+  attempt: number;
+  summary: string;
+  metrics: {
+    segmentRestructure: number;
+    sourceReuse: number;
+    visualVariation: number;
+    subtitleTitleCoverVariation: number;
+    audioVariation: number;
+    scriptSimilarityRisk: number;
+    watermarkRisk: number;
+  };
+  suggestions: string[];
+  generatedAt: string;
 }
 
 export interface OutputVariant {
@@ -241,6 +270,19 @@ export interface VideoTask {
   referenceImageAssetId?: string;
   generatedPresenterImageAssetId?: string;
   generatedPresenterImageSelections?: GeneratedPresenterImageSelections;
+  mixedCutTargetCount: number;
+  mixedCutMaterialDirectory: string;
+  mixedCutBackgroundMusicDirectory: string;
+  mixedCutDubbingDirectory: string;
+  mixedCutChapterMode: MixedCutChapterMode;
+  mixedCutReuseRate: number;
+  mixedCutRemoveOriginalAudio: boolean;
+  mixedCutEnableTransitions: boolean;
+  mixedCutBgmVolume: number;
+  dedupSourceVideoAssetId?: string;
+  dedupTargetScore: number;
+  dedupStrategy: DedupStrategy;
+  dedupAttemptCount: number;
   customFontAssetId?: string;
   customFontFamily?: string;
   selectedOutputPresets: OutputPresetId[];
@@ -392,6 +434,7 @@ export function isVideoGenerationMode(value: string): value is VideoGenerationMo
     value === "image-lipsync" ||
     value === "personal-ip" ||
     value === "viral-remix" ||
-    value === "mixed-cut"
+    value === "mixed-cut" ||
+    value === "video-dedup"
   );
 }

@@ -37,32 +37,122 @@ describe("MixedCutWorkflowService", () => {
       taskId: task.id,
       generationMode: "mixed-cut",
       finalScript: "First proof point. Second proof point. Final call to action.",
+      mixedCutTargetCount: 2,
       selectedOutputPresets: ["portrait-9-16", "landscape-16-9"]
     });
 
-    const materialPath = path.join(getTaskDirectory(appPaths, task.id), "source", "sample.png");
-    fs.mkdirSync(path.dirname(materialPath), { recursive: true });
-    fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
-    repository.addMediaAsset(task.id, "mixed-cut-material", "source/sample.png");
+    const sourceDirectory = path.join(getTaskDirectory(appPaths, task.id), "source");
+    fs.mkdirSync(sourceDirectory, { recursive: true });
+    for (let index = 1; index <= 5; index += 1) {
+      const materialPath = path.join(sourceDirectory, `sample-${index}.png`);
+      fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+      repository.addMediaAsset(task.id, "mixed-cut-material", `source/sample-${index}.png`);
+    }
 
     const completed = new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
     const taskDirectory = getTaskDirectory(appPaths, task.id);
 
     expect(completed.steps.find((step) => step.id === "subtitles")?.status).toBe("complete");
-    expect(completed.steps.find((step) => step.id === "post-production")?.status).toBe("waiting");
+    expect(completed.steps.find((step) => step.id === "post-production")?.status).toBe("complete");
+    expect(completed.steps.find((step) => step.id === "export")?.status).toBe("complete");
     for (const presetId of ["portrait-9-16", "landscape-16-9"]) {
-      const baseVideoPath = path.join(taskDirectory, "post", `mixed-cut-base-${presetId}.mp4`);
+      const baseVideoPath = path.join(taskDirectory, "post", `mixed-cut-batch-1-${presetId}.mp4`);
       const subtitlePath = path.join(
         taskDirectory,
         "subtitles",
-        `mixed-cut-subtitles-${presetId}.srt`
+        `mixed-cut-batch-1-${presetId}.srt`
+      );
+      const editDecisionPath = path.join(
+        taskDirectory,
+        "post",
+        `edit-decisions-mixed-cut-1-${presetId}.json`
+      );
+      const secondBatchVideoPath = path.join(
+        taskDirectory,
+        "post",
+        `mixed-cut-batch-2-${presetId}.mp4`
       );
       expect(fs.existsSync(baseVideoPath)).toBe(true);
       expect(fs.statSync(baseVideoPath).size).toBeGreaterThan(1000);
+      expect(fs.existsSync(secondBatchVideoPath)).toBe(true);
       expect(fs.existsSync(subtitlePath)).toBe(true);
       expect(fs.readFileSync(subtitlePath, "utf8")).toContain("-->");
+      expect(fs.existsSync(editDecisionPath)).toBe(true);
+      expect(fs.readFileSync(editDecisionPath, "utf8")).toContain('"segments"');
     }
-  });
+  }, 20_000);
+
+  it("extends subtitle timing for long AI scripts instead of truncating at 12 seconds", () => {
+    const task = repository.createTask({
+      title: "Long mixed cut",
+      sourceScript: "Source script."
+    });
+    const longScript = Array.from(
+      { length: 8 },
+      (_value, index) => `第${index + 1}个卖点需要完整讲清楚`
+    ).join("。");
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: longScript,
+      mixedCutTargetCount: 1,
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const materialPath = path.join(getTaskDirectory(appPaths, task.id), "source", "long.png");
+    fs.mkdirSync(path.dirname(materialPath), { recursive: true });
+    fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+    repository.addMediaAsset(task.id, "mixed-cut-material", "source/long.png");
+
+    new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const subtitlePath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "subtitles",
+      "mixed-cut-batch-1-portrait-9-16.srt"
+    );
+    const subtitle = fs.readFileSync(subtitlePath, "utf8");
+
+    expect(subtitle).toContain("-->");
+    expect(subtitle).not.toContain("00:00:12,000");
+  }, 25_000);
+
+  it("calculates batch count from material count and reuse rate instead of manual input", () => {
+    const task = repository.createTask({
+      title: "Auto planned mixed cut",
+      sourceScript: "Source script."
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "Short script for auto batch planning.",
+      mixedCutTargetCount: 30,
+      mixedCutReuseRate: 0,
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const sourceDirectory = path.join(getTaskDirectory(appPaths, task.id), "source");
+    fs.mkdirSync(sourceDirectory, { recursive: true });
+    for (let index = 1; index <= 3; index += 1) {
+      const materialPath = path.join(sourceDirectory, `limited-${index}.png`);
+      fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+      repository.addMediaAsset(task.id, "mixed-cut-material", `source/limited-${index}.png`);
+    }
+
+    new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+
+    expect(
+      fs.existsSync(path.join(taskDirectory, "post", "mixed-cut-batch-1-portrait-9-16.mp4"))
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(taskDirectory, "post", "mixed-cut-batch-2-portrait-9-16.mp4"))
+    ).toBe(false);
+    const manifest = fs.readFileSync(
+      path.join(taskDirectory, "exports", "mixed-cut-batch", "manifest.json"),
+      "utf8"
+    );
+    expect(manifest).toContain('"mixedCutTargetCount": 1');
+  }, 20_000);
 });
 
 const SINGLE_PIXEL_PNG_BASE64 =

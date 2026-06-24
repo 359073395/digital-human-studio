@@ -349,6 +349,39 @@ describe("SourceAssetService", () => {
     }
   });
 
+  it("syncs mixed-cut materials from a folder and replaces previous folder assets", () => {
+    const service = new SourceAssetService(repository, appPaths);
+    const task = repository.createTask({ title: "Mixed folder" });
+    const firstFolder = path.join(tempDir, "first-folder");
+    const secondFolder = path.join(tempDir, "second-folder");
+    fs.mkdirSync(path.join(firstFolder, "nested"), { recursive: true });
+    fs.mkdirSync(secondFolder, { recursive: true });
+    fs.writeFileSync(path.join(firstFolder, "clip-a.mp4"), Buffer.from("video-a"));
+    fs.writeFileSync(path.join(firstFolder, "nested", "clip-b.jpg"), Buffer.from("image-b"));
+    fs.writeFileSync(path.join(firstFolder, "ignore.txt"), "ignore", "utf8");
+    fs.writeFileSync(path.join(secondFolder, "clip-c.webp"), Buffer.from("image-c"));
+
+    const firstSync = service.importMixedCutMaterialDirectory(task.id, firstFolder);
+    const secondSync = service.importMixedCutMaterialDirectory(task.id, secondFolder);
+    const firstAssets = firstSync.mediaAssets.filter(
+      (asset) => asset.kind === "mixed-cut-material"
+    );
+    const secondAssets = secondSync.mediaAssets.filter(
+      (asset) => asset.kind === "mixed-cut-material"
+    );
+
+    expect(firstSync.mixedCutMaterialDirectory).toBe(path.resolve(firstFolder));
+    expect(firstAssets).toHaveLength(2);
+    expect(secondSync.mixedCutMaterialDirectory).toBe(path.resolve(secondFolder));
+    expect(secondAssets).toHaveLength(1);
+    expect(secondAssets[0]?.relativePath).toContain("clip-c");
+    expect(
+      fs.existsSync(
+        path.join(getTaskDirectory(appPaths, task.id), ...secondAssets[0]!.relativePath.split("/"))
+      )
+    ).toBe(true);
+  });
+
   it("imports knowledge documents and viral copy references as task assets", () => {
     const service = new SourceAssetService(repository, appPaths);
     const task = repository.createTask({ title: "Knowledge task" });

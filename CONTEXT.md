@@ -64,6 +64,10 @@ _Avoid_: API key, private password, unrelated file attachment
 A user-uploaded example of high-performing copy or a viral content case. The app may learn structure, hook function, proof path, emotion curve, and CTA logic from it, but must not copy distinctive wording or creator identity.
 _Avoid_: Copy source, clone script, protected expression
 
+**Reusable Knowledge Sync**:
+The product rule that uploaded documents, viral examples, source analyses, production notes, and user-approved workflow lessons should become reusable app knowledge. Sanitized summaries, prompts, SOP rules, and analysis reports may be committed to GitHub so the software carries the same learned methods across computers. API keys, access tokens, local databases, account details, and bulky raw media stay out of Git unless the user explicitly asks to version a specific non-sensitive asset.
+_Avoid_: Secret sync, raw media dump, hidden cloud upload
+
 **Reference Breakdown**:
 The structured analysis of a reference video's abstract mechanics, such as hook job, pacing, proof type, emotional curve, visual rhythm, and CTA placement. It must not preserve the reference's distinctive wording, creator persona, jokes, or shot signature.
 _Avoid_: Shot-for-shot copy, 1:1 rewrite, creator imitation
@@ -195,6 +199,10 @@ _Avoid_: Silent export, hidden finalization, mock check
 **Service Configuration**:
 The local settings that connect the application to external generation services, including avatar, language model, and optional voice providers. The MVP does not include a cloud account system.
 _Avoid_: User account, workspace account, SaaS settings
+
+**HeyGen Generation Route**:
+The HeyGen video submission path selected in service configuration. `Direct Video` means deterministic `POST /v3/videos` rendering that may require API credits. `Video Agent` means `POST /v3/video-agents` and is the route that best matches HeyGen member/OAuth workflows. `Auto` chooses the safer route from auth mode and falls back from Direct Video to Video Agent when HeyGen reports API credits are required.
+_Avoid_: Auth mode, account plan, avatar mode
 
 **Flow API Guide**:
 A compact task-level hint panel that shows which generation stages use which local service configuration, model name, Avatar ID, Voice ID, and API Key status. It may show whether a credential is configured, but it must never reveal the API Key value.

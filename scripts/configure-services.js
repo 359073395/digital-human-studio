@@ -77,6 +77,7 @@ async function main() {
       "HEYGEN_VOICE_ID",
       "HEYGEN_RESOLUTION",
       "HEYGEN_AUTH_MODE",
+      "HEYGEN_GENERATION_ROUTE",
       "HEYGEN_API_KEY"
     ])
   ) {
@@ -90,6 +91,7 @@ async function main() {
           voiceId: env("HEYGEN_VOICE_ID"),
           resolution: env("HEYGEN_RESOLUTION"),
           authMode: env("HEYGEN_AUTH_MODE"),
+          generationRoute: env("HEYGEN_GENERATION_ROUTE"),
           enabled: true
         },
         env("HEYGEN_API_KEY")

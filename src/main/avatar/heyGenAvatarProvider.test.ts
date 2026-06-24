@@ -32,6 +32,18 @@ function createTask(): VideoTask {
     avatarMode: "preset-avatar",
     avatarDescriptionPrompt: "",
     motionPrompt: "",
+    mixedCutTargetCount: 1,
+    mixedCutMaterialDirectory: "",
+    mixedCutBackgroundMusicDirectory: "",
+    mixedCutDubbingDirectory: "",
+    mixedCutChapterMode: "fill-with-bgm",
+    mixedCutReuseRate: 35,
+    mixedCutRemoveOriginalAudio: false,
+    mixedCutEnableTransitions: false,
+    mixedCutBgmVolume: 70,
+    dedupTargetScore: 80,
+    dedupStrategy: "content-rewrite",
+    dedupAttemptCount: 0,
     selectedOutputPresets: ["portrait-9-16"],
     frameTitleStyle: DEFAULT_FRAME_TITLE_STYLE,
     subtitleStyle: DEFAULT_SUBTITLE_STYLE,
@@ -212,10 +224,14 @@ describe("HeyGenAvatarProvider", () => {
     expect(createBody.avatar_id).toBe("look-landscape");
   });
 
-  it("uses Bearer auth for HeyGen member/OAuth mode", async () => {
+  it("uses Bearer auth and Video Agent route for HeyGen member/OAuth mode", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
       expect((init?.headers as Record<string, string>).authorization).toBe("Bearer oauth-token");
-      if (String(url).endsWith("/v3/videos") && init?.method === "POST") {
+      if (String(url).endsWith("/v3/video-agents") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { session_id: "session-123" } }));
+      }
+
+      if (String(url).endsWith("/v3/video-agents/session-123") && init?.method === "GET") {
         return new Response(JSON.stringify({ data: { video_id: "video-123" } }));
       }
 
@@ -237,6 +253,8 @@ describe("HeyGenAvatarProvider", () => {
       task: createTask(),
       preset: OUTPUT_PRESETS[0]
     });
+    const [createUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(createUrl).toBe("https://api.heygen.test/v3/video-agents");
   });
 
   it("uploads a generated presenter image and creates an image-based HeyGen render", async () => {
@@ -373,7 +391,50 @@ describe("HeyGenAvatarProvider", () => {
         task: createTask(),
         preset: OUTPUT_PRESETS[0]
       })
-    ).rejects.toThrow("OAuth/Bearer Token");
+    ).rejects.toThrow("已自动尝试 HeyGen Video Agent 会员路由");
+  });
+
+  it("falls back to Video Agent when Direct Video requires API credits", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith("/v3/videos") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            message: "Insufficient credit. This operation requires 'api' credits."
+          }),
+          { status: 402, statusText: "Payment Required" }
+        );
+      }
+
+      if (String(url).endsWith("/v3/video-agents") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { session_id: "session-123" } }));
+      }
+
+      if (String(url).endsWith("/v3/video-agents/session-123") && init?.method === "GET") {
+        return new Response(JSON.stringify({ data: { video_id: "video-123" } }));
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            status: "completed",
+            video_url: "https://cdn.heygen.test/video.mp4"
+          }
+        })
+      );
+    });
+
+    const result = await createProvider({ fetchImpl: fetchMock }).renderAvatar({
+      task: createTask(),
+      preset: OUTPUT_PRESETS[0]
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.heygen.test/v3/videos",
+      "https://api.heygen.test/v3/video-agents",
+      "https://api.heygen.test/v3/video-agents/session-123",
+      "https://api.heygen.test/v3/videos/video-123"
+    ]);
+    expect(result.videoUrl).toBe("https://cdn.heygen.test/video.mp4");
   });
 
   it("redacts HeyGen error bodies", async () => {

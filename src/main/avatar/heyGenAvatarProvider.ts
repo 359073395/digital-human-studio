@@ -32,9 +32,27 @@ interface HeyGenCreateVideoData {
   videoId?: string;
 }
 
+interface HeyGenCreateVideoAgentData {
+  session_id?: string;
+  sessionId?: string;
+  video_id?: string;
+  videoId?: string;
+}
+
 interface HeyGenAssetUploadData {
   asset_id?: string;
   assetId?: string;
+}
+
+interface HeyGenVideoAgentSessionData {
+  status?: string;
+  progress?: number;
+  video_id?: string;
+  videoId?: string;
+  failure_message?: string;
+  failureMessage?: string;
+  failure_reason?: string;
+  failureReason?: string;
 }
 
 interface HeyGenVideoStatusData {
@@ -63,7 +81,12 @@ interface HeyGenEnvelope<T> {
 }
 
 const FINAL_FAILURE_STATUSES = new Set(["failed", "failure", "error"]);
-const API_CREDIT_ERROR_MARKERS = ["insufficient credit", "requires 'api' credits"];
+const API_CREDIT_ERROR_MARKERS = [
+  "insufficient credit",
+  "insufficient api credits",
+  "requires 'api' credits",
+  "api credits"
+];
 const DEFAULT_HEYGEN_VOICE_IDS: Record<VideoTask["contentLanguage"], string> = {
   "zh-CN": "dMkR1XwIkarpNqWUJLnX",
   "en-US": "d2f4f24783d04e22ab49ee8fdc3715e0",
@@ -81,7 +104,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     options: HeyGenAvatarProviderOptions = {}
   ) {
     this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
-    this.maxPollAttempts = options.maxPollAttempts ?? 90;
+    this.maxPollAttempts = options.maxPollAttempts ?? 540;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -109,7 +132,27 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       preset: input.preset
     });
 
+    const route = resolveGenerationRoute(configuration, input.task);
+
     try {
+      if (route === "video-agent") {
+        const created = await this.createVideoAgent({
+          apiKey,
+          baseUrl,
+          configuration,
+          input,
+          avatarId: avatarId || undefined
+        });
+
+        return await this.pollVideo({
+          apiKey,
+          baseUrl,
+          configuration,
+          providerVideoId: created.providerVideoId,
+          preset: input.preset
+        });
+      }
+
       const created = await this.createVideo({
         apiKey,
         baseUrl,
@@ -126,6 +169,40 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         preset: input.preset
       });
     } catch (error) {
+      if (
+        route === "direct-video" &&
+        isApiCreditError(error) &&
+        canFallbackToVideoAgent(input.task)
+      ) {
+        try {
+          const fallbackCreated = await this.createVideoAgent({
+            apiKey,
+            baseUrl,
+            configuration,
+            input,
+            avatarId: avatarId || undefined
+          });
+
+          return await this.pollVideo({
+            apiKey,
+            baseUrl,
+            configuration,
+            providerVideoId: fallbackCreated.providerVideoId,
+            preset: input.preset
+          });
+        } catch (fallbackError) {
+          throw decorateHeyGenRenderError(
+            new Error(
+              `${readErrorMessage(error)}。已自动尝试 HeyGen Video Agent 会员路由，但仍失败：${readErrorMessage(
+                fallbackError
+              )}`,
+              { cause: fallbackError }
+            ),
+            configuration
+          );
+        }
+      }
+
       throw decorateHeyGenRenderError(error, configuration);
     }
   }
@@ -175,6 +252,57 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
 
     return providerVideoId;
+  }
+
+  private async createVideoAgent(input: {
+    apiKey: string;
+    baseUrl: string;
+    configuration: ServiceConfiguration;
+    input: AvatarRenderInput;
+    avatarId?: string;
+  }): Promise<{ providerVideoId: string; sessionId: string }> {
+    if (!input.avatarId) {
+      throw new AvatarProviderUnavailableError("HeyGen Video Agent 需要先选择可用 Avatar。");
+    }
+
+    const script = selectScript(input.input.task);
+    const response = await requestJson<HeyGenEnvelope<HeyGenCreateVideoAgentData>>(
+      this.fetchImpl,
+      `${normalizeHeyGenBaseUrl(input.baseUrl)}/v3/video-agents`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": `${input.input.task.id}-${input.input.preset.id}-video-agent`,
+          ...buildHeyGenAuthHeaders(input.configuration, input.apiKey)
+        },
+        body: JSON.stringify(
+          buildCreateVideoAgentBody({
+            input: input.input,
+            configuration: input.configuration,
+            avatarId: input.avatarId,
+            script
+          })
+        )
+      }
+    );
+
+    const sessionId = response.data?.session_id ?? response.data?.sessionId;
+    const immediateVideoId = response.data?.video_id ?? response.data?.videoId;
+    if (immediateVideoId && sessionId) {
+      return { providerVideoId: immediateVideoId, sessionId };
+    }
+    if (!sessionId) {
+      throw new Error("HeyGen Video Agent 创建响应缺少 session_id。");
+    }
+
+    const providerVideoId = await this.pollVideoAgentSession({
+      apiKey: input.apiKey,
+      baseUrl: input.baseUrl,
+      configuration: input.configuration,
+      sessionId
+    });
+    return { providerVideoId, sessionId };
   }
 
   private async uploadImageAsset(
@@ -253,6 +381,47 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
 
     throw new Error("HeyGen 视频生成超时，请稍后重试。");
+  }
+
+  private async pollVideoAgentSession(input: {
+    apiKey: string;
+    baseUrl: string;
+    configuration: ServiceConfiguration;
+    sessionId: string;
+  }): Promise<string> {
+    for (let attempt = 0; attempt < this.maxPollAttempts; attempt += 1) {
+      const response = await requestJson<HeyGenEnvelope<HeyGenVideoAgentSessionData>>(
+        this.fetchImpl,
+        `${normalizeHeyGenBaseUrl(input.baseUrl)}/v3/video-agents/${encodeURIComponent(
+          input.sessionId
+        )}`,
+        {
+          method: "GET",
+          headers: buildHeyGenAuthHeaders(input.configuration, input.apiKey)
+        }
+      );
+
+      const data = response.data;
+      const providerVideoId = data?.video_id ?? data?.videoId;
+      if (providerVideoId) {
+        return providerVideoId;
+      }
+
+      const status = data?.status?.toLowerCase();
+      if (status && FINAL_FAILURE_STATUSES.has(status)) {
+        throw new Error(
+          data?.failure_message ??
+            data?.failureMessage ??
+            data?.failure_reason ??
+            data?.failureReason ??
+            `HeyGen Video Agent 生成失败：${status}`
+        );
+      }
+
+      await delay(this.pollIntervalMs);
+    }
+
+    throw new Error("HeyGen Video Agent 生成超时，请稍后重试。");
   }
 
   private async resolveAvatarId(input: {
@@ -364,12 +533,72 @@ function buildCreateVideoBody(options: {
   };
 }
 
+function buildCreateVideoAgentBody(options: {
+  input: AvatarRenderInput;
+  configuration: ServiceConfiguration;
+  avatarId: string;
+  script: string;
+}) {
+  return {
+    prompt: buildVideoAgentPrompt(options.input, options.script),
+    avatar_id: options.avatarId,
+    voice_id: resolveVoiceId(options.configuration, options.input.task),
+    orientation: options.input.preset.aspectRatio === "16:9" ? "landscape" : "portrait",
+    mode: "generate",
+    incognito_mode: true
+  };
+}
+
+function buildVideoAgentPrompt(input: AvatarRenderInput, script: string): string {
+  const orientation = input.preset.aspectRatio === "16:9" ? "landscape 16:9" : "portrait 9:16";
+  const motionPrompt = input.task.motionPrompt.trim();
+  const language = input.task.contentLanguage;
+  return [
+    `Create a lip-synced presenter video with the selected presenter.`,
+    `Output orientation: ${orientation}.`,
+    `Narration language: ${language}.`,
+    "Keep this as a presenter-led talking-head video; do not replace it with stock-only montage.",
+    "Use the script below as the spoken narration and preserve its meaning closely.",
+    motionPrompt ? `Presenter motion: ${motionPrompt}` : "",
+    "",
+    "SCRIPT:",
+    script
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
 function resolveVoiceId(configuration: ServiceConfiguration, task: VideoTask): string {
   return (
     configuration.settings.voiceId?.trim() ||
     DEFAULT_HEYGEN_VOICE_IDS[task.contentLanguage] ||
     DEFAULT_HEYGEN_VOICE_IDS["en-US"]
   );
+}
+
+function resolveGenerationRoute(
+  configuration: ServiceConfiguration,
+  task: VideoTask
+): "direct-video" | "video-agent" {
+  const configuredRoute = configuration.settings.generationRoute ?? "auto";
+  if (configuredRoute === "video-agent") {
+    return canFallbackToVideoAgent(task) ? "video-agent" : "direct-video";
+  }
+  if (configuredRoute === "direct-video") {
+    return "direct-video";
+  }
+  if (
+    canFallbackToVideoAgent(task) &&
+    (configuration.settings.authMode ?? defaultServiceSettings("heygen").authMode) ===
+      "oauth-bearer"
+  ) {
+    return "video-agent";
+  }
+  return "direct-video";
+}
+
+function canFallbackToVideoAgent(task: VideoTask): boolean {
+  return task.avatarMode === "preset-avatar";
 }
 
 function selectScript(task: VideoTask): string {
@@ -477,19 +706,27 @@ function decorateHeyGenRenderError(error: unknown, configuration: ServiceConfigu
     return new Error(String(error));
   }
 
-  const lowerMessage = error.message.toLowerCase();
-  const isApiCreditError = API_CREDIT_ERROR_MARKERS.some((marker) => lowerMessage.includes(marker));
-  if (!isApiCreditError) {
+  if (!isApiCreditError(error)) {
     return error;
   }
 
   const authMode = configuration.settings.authMode ?? "api-key";
+  const route = configuration.settings.generationRoute ?? "auto";
   const hint =
     authMode === "oauth-bearer"
-      ? "当前已使用 HeyGen 会员 Bearer 通道，请确认该 Token 对应账号是否开通 API 视频生成权限或仍有可用额度。"
-      : "当前 HeyGen 使用 API Key 通道，普通会员额度可能不能抵扣 API credits；如果你有会员/OAuth 通道，请在设置里把认证方式切到 OAuth/Bearer Token 后重新保存。";
+      ? `当前已选择 HeyGen 会员/Bearer 认证，生成路由为 ${route}。如果这里填的是 sk_ 开头的 API Key，它仍可能走 API credits；要消耗会员计划额度，需要使用 HeyGen OAuth/MCP 登录态或官方允许的 Bearer Token。`
+      : "当前 HeyGen 使用 API Key 通道，普通会员额度通常不能抵扣 API credits；如果要用会员计划额度，请在设置里选择会员/OAuth Token 或 Video Agent 路由，并填入真正的会员 Bearer/OAuth Token。";
 
   return new Error(`${error.message}。${hint}`, { cause: error });
+}
+
+function isApiCreditError(error: unknown): boolean {
+  const lowerMessage = readErrorMessage(error).toLowerCase();
+  return API_CREDIT_ERROR_MARKERS.some((marker) => lowerMessage.includes(marker));
+}
+
+function readErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createImageBlob(imagePath: string): Blob {

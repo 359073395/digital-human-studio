@@ -287,6 +287,45 @@ export class SourceAssetService {
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
+  importMixedCutMaterialDirectory(taskId: string, directoryPath: string): VideoTask {
+    const task = this.requireTask(taskId);
+    const resolvedDirectory = path.resolve(directoryPath);
+    if (!fs.existsSync(resolvedDirectory) || !fs.statSync(resolvedDirectory).isDirectory()) {
+      throw new Error("请选择有效的混剪素材文件夹。");
+    }
+
+    const filePaths = listSupportedFiles(resolvedDirectory, MIXED_MATERIAL_EXTENSIONS);
+    if (filePaths.length === 0) {
+      return this.taskRepository.updateTask({
+        taskId: task.id,
+        mixedCutMaterialDirectory: resolvedDirectory
+      });
+    }
+
+    const materialDirectory = path.join(
+      getTaskDirectory(this.paths, taskId),
+      "source",
+      "mixed-materials"
+    );
+    fs.rmSync(materialDirectory, { recursive: true, force: true });
+    this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-material");
+
+    for (const [index, filePath] of filePaths.entries()) {
+      const extension = validateExtension(filePath, MIXED_MATERIAL_EXTENSIONS);
+      const relativePath = `source/mixed-materials/material-${index + 1}-${sanitizeBaseName(
+        path.basename(filePath, extension)
+      )}${extension}`;
+      copyTaskFile(this.paths, taskId, filePath, relativePath);
+      this.taskRepository.addMediaAsset(taskId, "mixed-cut-material", relativePath);
+    }
+
+    this.taskRepository.updateTask({
+      taskId: task.id,
+      mixedCutMaterialDirectory: resolvedDirectory
+    });
+    return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+  }
+
   importKnowledgeDocuments(taskId: string, filePaths: string[]): VideoTask {
     return this.importKnowledgeFiles(taskId, filePaths, "knowledge-document", "knowledge");
   }
@@ -495,6 +534,32 @@ function validateExtension(filePath: string, allowed: Set<string>): string {
     throw new Error(`不支持的素材格式：${extension || "无扩展名"}`);
   }
   return extension;
+}
+
+function listSupportedFiles(directoryPath: string, allowed: Set<string>): string[] {
+  const results: string[] = [];
+  const stack = [directoryPath];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+
+      if (entry.isFile() && allowed.has(path.extname(entry.name).toLowerCase())) {
+        results.push(fullPath);
+      }
+    }
+  }
+
+  return results.sort((left, right) => left.localeCompare(right));
 }
 
 function extractFirstHttpUrl(value: string): string {

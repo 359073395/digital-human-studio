@@ -234,14 +234,14 @@ export const PRODUCTION_MODE_WORKFLOWS: Record<VideoGenerationMode, ProductionMo
   "mixed-cut": {
     mode: "mixed-cut",
     label: "混剪视频",
-    summary: "不要求真人或数字人，先分析上传素材，再编排画面、字幕、配音和可选数字人片段。",
+    summary: "不要求真人或数字人，专注上传素材的批量混剪；去重处理作为独立模式执行。",
     builtInMethods: [
       "Mixed-cut material analysis",
       "Viral reference breakdown",
       "Voiceover/subtitle spine",
       "Local render and polish"
     ],
-    defaultInputs: ["混剪素材", "原视频链接/参考文案", "脚本目标", "BGM 可选"],
+    defaultInputs: ["混剪素材", "生成数量", "原视频链接/参考文案", "脚本目标", "BGM 可选"],
     stages: [
       {
         ...SHARED_ANALYSIS_STAGE,
@@ -255,14 +255,62 @@ export const PRODUCTION_MODE_WORKFLOWS: Record<VideoGenerationMode, ProductionMo
       },
       {
         id: "material-edit-plan",
-        label: "素材编排/基础混剪",
-        goal: "把素材按钩子、证明、对比、转场、CTA 的顺序组合成可导出的基础混剪。",
+        label: "批量素材编排/基础混剪",
+        goal: "根据目标数量，把素材按钩子、证明、对比、转场、CTA 的顺序组合成多条可导出的基础混剪。",
         method:
-          "Do not assume a real person is required. Use existing assets, generated visuals, subtitles, and local rendering first.",
-        requiredInputs: ["混剪素材", "最终文案", "素材编排计划"],
-        outputs: ["混剪基础 MP4", "时间轴字幕", "素材使用说明"],
+          "Do not assume a real person is required. Use uploaded assets, subtitles, local rendering, and per-video edit decision records. Deduplication happens later in video-dedup mode.",
+        requiredInputs: ["混剪素材", "最终文案", "素材编排计划", "生成数量"],
+        outputs: ["批量混剪 MP4", "时间轴字幕", "封面", "剪辑记录", "素材使用说明"],
         providerNeeds: ["local", "video"],
         qualityGate: "混剪模式不能只产出数字人口播占位，必须至少使用上传素材生成成品。"
+      },
+      LOCAL_POLISH_STAGE
+    ]
+  },
+  "video-dedup": {
+    mode: "video-dedup",
+    label: "视频去重处理",
+    summary: "导入任意成片或混剪结果后做内容级重构，输出处理后视频和原创度评分报告。",
+    builtInMethods: [
+      "Originality score report",
+      "Content-level video rewrite",
+      "Low-value dedup warning",
+      "Local render with optional video-model rewrite"
+    ],
+    defaultInputs: ["待处理 MP4", "目标原创度评分", "去重策略", "字幕/封面样式"],
+    stages: [
+      {
+        id: "dedup-source-ingest",
+        label: "导入待处理视频",
+        goal: "选择混剪成片、本地视频或下载原视频作为去重处理源。",
+        method:
+          "Record source asset, duration, selected preset, and current title/subtitle/cover style before rewriting.",
+        requiredInputs: ["本地 MP4 或任务产物"],
+        outputs: ["待处理视频资产"],
+        providerNeeds: ["local"],
+        qualityGate: "没有待处理视频时必须阻止运行。"
+      },
+      {
+        id: "content-rewrite",
+        label: "内容级重构",
+        goal: "通过片段重组、节奏变化、画面处理、字幕标题封面变化降低重复风险。",
+        method:
+          "Default strategy is content-rewrite: prefer segment restructuring and style changes over shallow MD5/mirror/BGM-only edits. Optional V2V can be added through the OpenAI-compatible video provider.",
+        requiredInputs: ["待处理视频", "目标原创度评分"],
+        outputs: ["处理后 MP4", "封面", "字幕"],
+        providerNeeds: ["local", "video"],
+        qualityGate: "只做轻微后处理时必须提示仍有同质化风险。"
+      },
+      {
+        id: "originality-score",
+        label: "原创度评分",
+        goal: "输出 0-100 的内部原创度评分，达到 80+ 才标记为通过。",
+        method:
+          "Score segment restructure, source reuse, visual variation, subtitle/title/cover variation, audio variation, script risk, and watermark risk.",
+        requiredInputs: ["处理前视频", "处理后视频", "剪辑/处理记录"],
+        outputs: ["原创度评分报告", "建议修改项"],
+        providerNeeds: ["local", "llm"],
+        qualityGate: "评分低于目标值时必须给出原因和下一步建议，不能承诺平台官方判定。"
       },
       LOCAL_POLISH_STAGE
     ]

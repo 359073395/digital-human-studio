@@ -36,6 +36,10 @@ const TASK_CONTEXT_ASSET_KINDS = new Set<MediaAsset["kind"]>([
   "reference-image",
   "mixed-cut-material",
   "mixed-cut-video",
+  "dedup-source-video",
+  "dedup-processed-video",
+  "dedup-report",
+  "edit-decision-record",
   "generated-presenter-image",
   "avatar-video",
   "subtitle-file"
@@ -47,15 +51,10 @@ export function buildKnowledgeContext(
   purpose: KnowledgeContextPurpose
 ): KnowledgeContext {
   const builtInEntries = selectBuiltInKnowledge(task.generationMode);
-  const uploadedKnowledgeAssets = task.mediaAssets.filter(
-    (asset) => asset.kind === "knowledge-document"
-  );
-  const viralReferenceAssets = task.mediaAssets.filter(
-    (asset) => asset.kind === "viral-copy-reference"
-  );
-  const taskContextAssets = task.mediaAssets.filter((asset) =>
-    TASK_CONTEXT_ASSET_KINDS.has(asset.kind)
-  );
+  const assets = getTaskScopedMediaAssets(task);
+  const uploadedKnowledgeAssets = assets.filter((asset) => asset.kind === "knowledge-document");
+  const viralReferenceAssets = assets.filter((asset) => asset.kind === "viral-copy-reference");
+  const taskContextAssets = assets.filter((asset) => TASK_CONTEXT_ASSET_KINDS.has(asset.kind));
   const taskFacts = collectTaskFacts(paths, task);
   const uploadedKnowledge = renderUploadedAssets(paths, task, uploadedKnowledgeAssets, 4200);
   const viralReferences = renderUploadedAssets(paths, task, viralReferenceAssets, 4200);
@@ -239,12 +238,18 @@ function readLatestAssetText(
   kind: MediaAsset["kind"],
   maxLength: number
 ): string {
-  const asset = [...task.mediaAssets].reverse().find((candidate) => candidate.kind === kind);
+  const asset = [...getTaskScopedMediaAssets(task)]
+    .reverse()
+    .find((candidate) => candidate.kind === kind);
   if (!asset) {
     return "";
   }
 
   return readTextAsset(paths, task, asset, maxLength);
+}
+
+function getTaskScopedMediaAssets(task: VideoTask): MediaAsset[] {
+  return task.mediaAssets.filter((asset) => asset.taskId === task.id);
 }
 
 function readTextAsset(

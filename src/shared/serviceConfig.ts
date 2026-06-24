@@ -1,6 +1,7 @@
 export type ProviderId = "heygen" | "source-parser" | "llm" | "image" | "video" | "asr" | "tts";
 
 export type HeyGenAuthMode = "api-key" | "oauth-bearer";
+export type HeyGenGenerationRoute = "auto" | "direct-video" | "video-agent";
 export type AsrMode = "audio-transcriptions" | "chat-audio";
 
 export type ProviderKind =
@@ -24,6 +25,7 @@ export interface ServiceConfigurationSettings {
   baseUrl?: string;
   modelName?: string;
   authMode?: HeyGenAuthMode;
+  generationRoute?: HeyGenGenerationRoute;
   asrMode?: AsrMode;
   avatarId?: string;
   voiceId?: string;
@@ -131,6 +133,7 @@ export function defaultServiceSettings(providerId: ProviderId): ServiceConfigura
       return {
         baseUrl: "https://api.heygen.com",
         authMode: "api-key",
+        generationRoute: "auto",
         resolution: "720p",
         enabled: true
       };

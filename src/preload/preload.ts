@@ -21,6 +21,7 @@ import type {
   ResolveTaskAssetUrlInput,
   RetryWorkflowStepInput,
   SelectGeneratedPresenterImageInput,
+  SetMixedCutTargetCountInput,
   UpdateTaskInput
 } from "../shared/ipc";
 import type { SourceTranscriptionResult } from "../shared/scriptGeneration";
@@ -39,6 +40,12 @@ const IPC_CHANNELS = {
   downloadOriginalVideo: "source:download-original-video",
   uploadSourceVideo: "source:upload-source-video",
   uploadMixedCutMaterial: "source:upload-mixed-cut-material",
+  chooseMixedCutMaterialDirectory: "source:choose-mixed-cut-material-directory",
+  setMixedCutTargetCount: "mixed-cut:set-target-count",
+  renderMixedCutBatch: "mixed-cut:render-batch",
+  importDedupSourceVideo: "dedup:import-source-video",
+  runVideoDedup: "dedup:run",
+  runOriginalityScore: "dedup:score",
   uploadKnowledgeDocuments: "source:upload-knowledge-documents",
   uploadViralCopyReferences: "source:upload-viral-copy-references",
   analyzeSourceVisuals: "source:analyze-visuals",
@@ -90,6 +97,18 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.uploadSourceVideo, taskId) as Promise<VideoTask>,
   uploadMixedCutMaterial: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadMixedCutMaterial, taskId) as Promise<VideoTask>,
+  chooseMixedCutMaterialDirectory: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.chooseMixedCutMaterialDirectory, taskId) as Promise<VideoTask>,
+  setMixedCutTargetCount: (input: SetMixedCutTargetCountInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.setMixedCutTargetCount, input) as Promise<VideoTask>,
+  renderMixedCutBatch: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.renderMixedCutBatch, taskId) as Promise<VideoTask>,
+  importDedupSourceVideo: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.importDedupSourceVideo, taskId) as Promise<VideoTask>,
+  runVideoDedup: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.runVideoDedup, taskId) as Promise<VideoTask>,
+  runOriginalityScore: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.runOriginalityScore, taskId) as Promise<VideoTask>,
   uploadKnowledgeDocuments: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadKnowledgeDocuments, taskId) as Promise<VideoTask>,
   uploadViralCopyReferences: (taskId: string) =>

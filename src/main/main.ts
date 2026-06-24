@@ -51,6 +51,7 @@ import { ExportWorkflowService } from "./workflow/exportWorkflowService";
 import { MixedCutWorkflowService } from "./workflow/mixedCutWorkflowService";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 import { RealWorkflowRunner } from "./workflow/realWorkflowRunner";
+import { VideoDedupWorkflowService } from "./workflow/videoDedupWorkflowService";
 
 const APP_DISPLAY_NAME = "自媒体视频工作台";
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -128,6 +129,8 @@ interface MainRepositories {
   presenterImageWorkflowService: PresenterImageWorkflowService;
   storyboardWorkflowService: StoryboardWorkflowService;
   sourceAssetService: SourceAssetService;
+  mixedCutWorkflowService: MixedCutWorkflowService;
+  videoDedupWorkflowService: VideoDedupWorkflowService;
   realWorkflowRunner: RealWorkflowRunner;
   appPaths: ReturnType<typeof createAppPaths>;
 }
@@ -198,14 +201,24 @@ function createRepositories(): MainRepositories {
     undefined,
     appSettingsRepository
   );
-  const mixedCutWorkflowService = new MixedCutWorkflowService(taskRepository, appPaths);
+  const mixedCutWorkflowService = new MixedCutWorkflowService(
+    taskRepository,
+    appPaths,
+    appSettingsRepository
+  );
+  const videoDedupWorkflowService = new VideoDedupWorkflowService(
+    taskRepository,
+    appPaths,
+    appSettingsRepository
+  );
   const realWorkflowRunner = new RealWorkflowRunner(
     taskRepository,
     scriptWorkflowService,
     presenterImageWorkflowService,
     avatarWorkflowService,
     exportWorkflowService,
-    mixedCutWorkflowService
+    mixedCutWorkflowService,
+    videoDedupWorkflowService
   );
   const mockWorkflowRunner = new MockWorkflowRunner(taskRepository, appPaths);
   return {
@@ -220,6 +233,8 @@ function createRepositories(): MainRepositories {
     presenterImageWorkflowService,
     storyboardWorkflowService,
     sourceAssetService,
+    mixedCutWorkflowService,
+    videoDedupWorkflowService,
     realWorkflowRunner,
     appPaths
   };
@@ -239,7 +254,9 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     serviceConfigurationRepository,
     sourceAssetService,
     storyboardWorkflowService,
-    taskRepository
+    taskRepository,
+    mixedCutWorkflowService,
+    videoDedupWorkflowService
   } = repositories;
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, (): AppInfo => {
@@ -400,6 +417,71 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
     return sourceAssetService.importMixedCutMaterials(taskId, result.filePaths);
   });
+
+  ipcMain.handle(IPC_CHANNELS.chooseMixedCutMaterialDirectory, async (_event, taskId: string) => {
+    const directoryDialogOptions: OpenDialogOptions = {
+      title: "选择混剪素材文件夹",
+      properties: ["openDirectory"]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, directoryDialogOptions)
+      : await dialog.showOpenDialog(directoryDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return sourceAssetService.importMixedCutMaterialDirectory(taskId, result.filePaths[0]);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.setMixedCutTargetCount, (_event, input) =>
+    taskRepository.updateTask({
+      taskId: input.taskId,
+      mixedCutTargetCount: input.count
+    })
+  );
+
+  ipcMain.handle(IPC_CHANNELS.renderMixedCutBatch, (_event, taskId: string) =>
+    mixedCutWorkflowService.prepareMixedCut(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.importDedupSourceVideo, async (_event, taskId: string) => {
+    const dedupDialogOptions: OpenDialogOptions = {
+      title: "选择待去重视频",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "视频",
+          extensions: ["mp4", "mov", "m4v", "webm", "mkv", "avi"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, dedupDialogOptions)
+      : await dialog.showOpenDialog(dedupDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return videoDedupWorkflowService.importSourceVideo(taskId, result.filePaths[0]);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.runVideoDedup, (_event, taskId: string) =>
+    videoDedupWorkflowService.runVideoDedup(taskId)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.runOriginalityScore, (_event, taskId: string) =>
+    videoDedupWorkflowService.runOriginalityScore(taskId)
+  );
 
   ipcMain.handle(IPC_CHANNELS.uploadKnowledgeDocuments, async (_event, taskId: string) => {
     const knowledgeDialogOptions: OpenDialogOptions = {

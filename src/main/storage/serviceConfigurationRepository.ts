@@ -558,7 +558,11 @@ export class ServiceConfigurationRepository {
     return {
       providerId: "heygen",
       ok: true,
-      message: `HeyGen 测试通过，${describeHeyGenAccount(userResult.json)}；预设数字人会在任务里自动读取后选择`
+      message: `HeyGen 测试通过，${describeHeyGenAccount(userResult.json)}；${describeHeyGenGenerationPath(
+        configuration,
+        apiKey,
+        userResult.json
+      )}；预设数字人会在任务里自动读取后选择`
     };
   }
 
@@ -910,7 +914,14 @@ function describeHeyGenAccount(value: unknown): string {
   }
 
   const billingType = readString(data, "billing_type") || readString(data, "billingType");
-  const subscription = readString(data, "subscription") || readString(data, "plan");
+  const subscriptionValue = data.subscription;
+  const subscription =
+    readString(data, "subscription") ||
+    readString(data, "plan") ||
+    (isRecord(subscriptionValue) ? readString(subscriptionValue, "plan") : "");
+  const subscriptionCredits = isRecord(subscriptionValue)
+    ? describeHeyGenSubscriptionCredits(subscriptionValue.credits)
+    : "";
   const remainingCredits =
     readString(data, "remaining_credits") ||
     readString(data, "remainingCredits") ||
@@ -919,10 +930,59 @@ function describeHeyGenAccount(value: unknown): string {
   const parts = [
     billingType ? `计费类型 ${billingType}` : "",
     subscription ? `订阅 ${subscription}` : "",
+    subscriptionCredits,
     remainingCredits ? `剩余额度 ${remainingCredits}` : ""
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join("，") : "账号认证成功";
+}
+
+function describeHeyGenSubscriptionCredits(value: unknown): string {
+  if (!isRecord(value)) {
+    return "";
+  }
+
+  const premium = isRecord(value.premium_credits)
+    ? readNumber(value.premium_credits, "remaining")
+    : undefined;
+  const addOn = isRecord(value.add_on_credits)
+    ? readNumber(value.add_on_credits, "remaining")
+    : undefined;
+
+  return [
+    premium !== undefined ? `会员额度 ${premium}` : "",
+    addOn !== undefined ? `加购额度 ${addOn}` : ""
+  ]
+    .filter(Boolean)
+    .join("，");
+}
+
+function describeHeyGenGenerationPath(
+  configuration: ServiceConfiguration,
+  apiKey: string,
+  userValue: unknown
+): string {
+  const authMode = configuration.settings.authMode ?? defaultServiceSettings("heygen").authMode;
+  const route = configuration.settings.generationRoute ?? "auto";
+  const data = isRecord(userValue) && isRecord(userValue.data) ? userValue.data : userValue;
+  const hasSubscription =
+    isRecord(data) &&
+    (readString(data, "billing_type") === "subscription" || isRecord(data.subscription));
+  const keyLooksLikeApiKey = /^sk[_-]/i.test(apiKey.trim());
+
+  if (authMode === "oauth-bearer" && keyLooksLikeApiKey) {
+    return "当前选择会员/Bearer，但填入内容像 API Key；读取账号可能成功，生成时仍可能要求 API credits。要消耗会员计划额度，请填真正的 OAuth/Bearer Token，或使用 Codex/HeyGen MCP 会员通道";
+  }
+
+  if (authMode === "api-key") {
+    return `当前为 API Key 直连，生成路由 ${route}；如果账号只有会员计划额度但没有 API credits，Direct Video 生成会失败`;
+  }
+
+  if (hasSubscription) {
+    return `当前为会员/Bearer 认证，生成路由 ${route}；自动模式会优先走 Video Agent 会员路由`;
+  }
+
+  return `当前生成路由 ${route}`;
 }
 
 function describeSourceParserQuota(value: unknown): string {
@@ -1006,6 +1066,13 @@ function sanitizeSettings(settings: ServiceConfigurationSettings): ServiceConfig
 
   if (settings.authMode !== undefined) {
     sanitized.authMode = settings.authMode === "oauth-bearer" ? "oauth-bearer" : "api-key";
+  }
+
+  if (settings.generationRoute !== undefined) {
+    sanitized.generationRoute =
+      settings.generationRoute === "direct-video" || settings.generationRoute === "video-agent"
+        ? settings.generationRoute
+        : "auto";
   }
 
   if (settings.asrMode !== undefined) {

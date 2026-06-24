@@ -2,17 +2,55 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import ffmpegStaticPath from "ffmpeg-static";
-import { OUTPUT_PRESETS, type OutputPreset, type VideoTask } from "../../shared/domain";
+import {
+  OUTPUT_PRESETS,
+  type MediaAsset,
+  type OutputPreset,
+  type PublishingPackage,
+  type VideoTask
+} from "../../shared/domain";
+import { calculateMixedCutBatchPlan } from "../../shared/mixedCutPlanning";
+import type { AppPathSettings } from "../../shared/appSettings";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"]);
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const MIN_TARGET_DURATION_SECONDS = 12;
+const MAX_TARGET_DURATION_SECONDS = 180;
+const SEGMENT_DURATION_SECONDS = 2.4;
+
+interface PathSettingsReader {
+  getPathSettings: () => AppPathSettings;
+}
+
+interface MixedCutEditDecisionRecord {
+  taskId: string;
+  batchIndex: number;
+  presetId: string;
+  generatedAt: string;
+  targetCount: number;
+  materialCount: number;
+  outputVideo: string;
+  subtitleFile: string;
+  coverFile: string;
+  warnings: string[];
+  segments: Array<{
+    order: number;
+    sourceAssetId: string;
+    sourcePath: string;
+    role: string;
+    startSeconds: number;
+    durationSeconds: number;
+    transform: string;
+  }>;
+}
 
 export class MixedCutWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
-    private readonly paths: AppPaths
+    private readonly paths: AppPaths,
+    private readonly pathSettingsReader?: PathSettingsReader
   ) {}
 
   prepareMixedCut(taskId: string): VideoTask {
@@ -26,8 +64,8 @@ export class MixedCutWorkflowService {
         throw new Error("当前任务不是混剪视频模式。");
       }
 
-      const sourceAsset = findMixedCutVisualAsset(task);
-      if (!sourceAsset) {
+      const sourceAssets = findMixedCutVisualAssets(task);
+      if (sourceAssets.length === 0) {
         throw new Error("请先上传至少一个视频或图片素材，再生成混剪视频。");
       }
 
@@ -35,38 +73,163 @@ export class MixedCutWorkflowService {
         throw new Error("请先生成或填写混剪视频文案。");
       }
 
-      const sourcePath = absoluteTaskPath(this.paths, taskId, sourceAsset.relativePath);
-      if (!fs.existsSync(sourcePath)) {
-        throw new Error(`混剪素材不存在：${sourceAsset.relativePath}`);
+      const targetCount = calculateMixedCutBatchPlan({
+        materialCount: sourceAssets.length,
+        reuseRate: task.mixedCutReuseRate
+      }).targetCount;
+      const taskDirectory = getTaskDirectory(this.paths, taskId);
+      const generatedRecords: MixedCutEditDecisionRecord[] = [];
+
+      for (let batchIndex = 1; batchIndex <= targetCount; batchIndex += 1) {
+        for (const presetId of task.selectedOutputPresets) {
+          const preset = requireOutputPreset(presetId);
+          const record = this.renderMixedCutVariant({
+            batchIndex,
+            sourceAssets,
+            task,
+            taskDirectory,
+            preset,
+            targetCount
+          });
+          generatedRecords.push(record);
+        }
       }
 
-      for (const presetId of task.selectedOutputPresets) {
-        const preset = requireOutputPreset(presetId);
-        const baseVideoPath = `post/mixed-cut-base-${preset.id}.mp4`;
-        const subtitlePath = `subtitles/mixed-cut-subtitles-${preset.id}.srt`;
+      const manifestPath = "exports/mixed-cut-batch/manifest.json";
+      writeTaskFile(
+        this.paths,
+        taskId,
+        manifestPath,
+        JSON.stringify(createBatchManifest(task, generatedRecords, targetCount), null, 2)
+      );
+      this.taskRepository.addMediaAsset(taskId, "publishing-package", manifestPath);
 
-        renderBaseMixedCutVideo({
-          sourcePath,
-          outputPath: absoluteTaskPath(this.paths, taskId, baseVideoPath),
-          preset
-        });
-        writeTaskFile(this.paths, taskId, subtitlePath, createTimedTextSrt(task.finalScript));
-        this.taskRepository.addMediaAsset(taskId, "mixed-cut-video", baseVideoPath);
-        this.taskRepository.addMediaAsset(taskId, "subtitle-file", subtitlePath);
-      }
+      const externalDirectory = copyBatchToExportDirectory(
+        this.paths,
+        taskId,
+        this.requireTask(taskId),
+        generatedRecords,
+        targetCount,
+        this.pathSettingsReader?.getPathSettings().generatedVideoDirectory
+      );
+      this.taskRepository.updatePublishingPackage(taskId, {
+        ...createPublishingPackage(this.requireTask(taskId), targetCount),
+        exportDirectory: externalDirectory || "exports/mixed-cut-batch"
+      });
 
       this.taskRepository.updateStepStatus(taskId, "subtitles", "complete");
-      return this.taskRepository.updateStepStatus(taskId, "post-production", "waiting");
+      this.taskRepository.updateStepStatus(taskId, "post-production", "complete");
+      return this.taskRepository.updateStepStatus(taskId, "export", "complete");
     } catch (error) {
       const message = error instanceof Error ? error.message : "混剪视频合成准备失败。";
       this.taskRepository.updateStepStatus(taskId, "subtitles", "retry-ready", message);
-      return this.taskRepository.updateStepStatus(
-        taskId,
-        "post-production",
-        "retry-ready",
-        message
-      );
+      this.taskRepository.updateStepStatus(taskId, "post-production", "retry-ready", message);
+      return this.taskRepository.updateStepStatus(taskId, "export", "retry-ready", message);
     }
+  }
+
+  private renderMixedCutVariant(input: {
+    task: VideoTask;
+    sourceAssets: MediaAsset[];
+    taskDirectory: string;
+    preset: OutputPreset;
+    batchIndex: number;
+    targetCount: number;
+  }): MixedCutEditDecisionRecord {
+    const targetDurationSeconds = estimateScriptDurationSeconds(input.task.finalScript);
+    const selectedAssets = selectAssetsForBatch(
+      input.sourceAssets,
+      input.batchIndex,
+      targetDurationSeconds
+    );
+    const warnings = createBatchWarnings(input.sourceAssets.length, input.targetCount);
+    const segmentDirectory = path.join(
+      input.taskDirectory,
+      "post",
+      "mixed-cut-segments",
+      `batch-${input.batchIndex}-${input.preset.id}`
+    );
+    fs.rmSync(segmentDirectory, { recursive: true, force: true });
+    fs.mkdirSync(segmentDirectory, { recursive: true });
+
+    const segmentPaths = selectedAssets.map((asset, index) => {
+      const sourcePath = absoluteTaskPath(this.paths, input.task.id, asset.relativePath);
+      if (!fs.existsSync(sourcePath)) {
+        throw new Error(`混剪素材不存在：${asset.relativePath}`);
+      }
+      const outputPath = path.join(segmentDirectory, `segment-${index + 1}.mp4`);
+      renderSegment({
+        sourcePath,
+        outputPath,
+        preset: input.preset,
+        startSeconds: videoStartOffset(input.batchIndex, index),
+        durationSeconds: SEGMENT_DURATION_SECONDS
+      });
+      return outputPath;
+    });
+
+    const outputVideo = `post/mixed-cut-batch-${input.batchIndex}-${input.preset.id}.mp4`;
+    concatSegments({
+      segmentPaths,
+      outputPath: absoluteTaskPath(this.paths, input.task.id, outputVideo),
+      targetDurationSeconds,
+      workingDirectory: segmentDirectory
+    });
+
+    const subtitleFile = `subtitles/mixed-cut-batch-${input.batchIndex}-${input.preset.id}.srt`;
+    const coverFile = `post/mixed-cut-cover-${input.batchIndex}-${input.preset.id}.svg`;
+    const editDecisionFile = `post/edit-decisions-mixed-cut-${input.batchIndex}-${input.preset.id}.json`;
+
+    writeTaskFile(
+      this.paths,
+      input.task.id,
+      subtitleFile,
+      createTimedTextSrt(input.task.finalScript, targetDurationSeconds)
+    );
+    writeTaskFile(
+      this.paths,
+      input.task.id,
+      coverFile,
+      createBatchCoverSvg(input.task, input.preset, input.batchIndex)
+    );
+
+    const record: MixedCutEditDecisionRecord = {
+      taskId: input.task.id,
+      batchIndex: input.batchIndex,
+      presetId: input.preset.id,
+      generatedAt: new Date().toISOString(),
+      targetCount: input.targetCount,
+      materialCount: input.sourceAssets.length,
+      outputVideo,
+      subtitleFile,
+      coverFile,
+      warnings,
+      segments: selectedAssets.map((asset, index) => ({
+        order: index + 1,
+        sourceAssetId: asset.id,
+        sourcePath: asset.relativePath,
+        role: segmentRole(index),
+        startSeconds: videoStartOffset(input.batchIndex, index),
+        durationSeconds: SEGMENT_DURATION_SECONDS,
+        transform: `${input.preset.aspectRatio} scale/pad, segment-level reorder`
+      }))
+    };
+
+    writeTaskFile(this.paths, input.task.id, editDecisionFile, JSON.stringify(record, null, 2));
+    this.taskRepository.addMediaAsset(input.task.id, "mixed-cut-video", outputVideo);
+    this.taskRepository.addMediaAsset(input.task.id, "subtitle-file", subtitleFile);
+    this.taskRepository.addMediaAsset(input.task.id, "cover-image", coverFile);
+    this.taskRepository.addMediaAsset(input.task.id, "edit-decision-record", editDecisionFile);
+
+    if (input.batchIndex === 1) {
+      this.taskRepository.updateOutputVariant(input.task.id, input.preset.id, {
+        status: "complete",
+        finishedVideoPath: outputVideo,
+        coverImagePath: coverFile
+      });
+    }
+
+    return record;
   }
 
   private requireTask(taskId: string): VideoTask {
@@ -78,8 +241,8 @@ export class MixedCutWorkflowService {
   }
 }
 
-function findMixedCutVisualAsset(task: VideoTask): VideoTask["mediaAssets"][number] | undefined {
-  return task.mediaAssets.find((asset) => {
+function findMixedCutVisualAssets(task: VideoTask): MediaAsset[] {
+  return task.mediaAssets.filter((asset) => {
     if (asset.kind !== "mixed-cut-material") {
       return false;
     }
@@ -89,10 +252,24 @@ function findMixedCutVisualAsset(task: VideoTask): VideoTask["mediaAssets"][numb
   });
 }
 
-function renderBaseMixedCutVideo(input: {
+function selectAssetsForBatch(
+  assets: MediaAsset[],
+  batchIndex: number,
+  targetDurationSeconds: number
+): MediaAsset[] {
+  const segmentCount = Math.max(3, Math.ceil(targetDurationSeconds / SEGMENT_DURATION_SECONDS));
+  return Array.from({ length: segmentCount }, (_value, index) => {
+    const offset = (batchIndex - 1) * 2 + index;
+    return assets[offset % assets.length];
+  });
+}
+
+function renderSegment(input: {
   sourcePath: string;
   outputPath: string;
   preset: OutputPreset;
+  startSeconds: number;
+  durationSeconds: number;
 }): void {
   const ffmpegPath = requireFfmpegPath();
   const extension = path.extname(input.sourcePath).toLowerCase();
@@ -100,29 +277,28 @@ function renderBaseMixedCutVideo(input: {
   const filter = [
     `scale=${input.preset.width}:${input.preset.height}:force_original_aspect_ratio=decrease`,
     `pad=${input.preset.width}:${input.preset.height}:(ow-iw)/2:(oh-ih)/2`,
-    "setsar=1"
+    "setsar=1",
+    "fps=30"
   ].join(",");
 
-  fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
   const args = [
     "-y",
-    ...(isImage ? ["-loop", "1", "-t", "12"] : []),
+    ...(isImage ? ["-loop", "1"] : ["-ss", input.startSeconds.toFixed(2)]),
+    "-t",
+    input.durationSeconds.toFixed(2),
     "-i",
     input.sourcePath,
-    ...(isImage ? [] : ["-t", "12"]),
     "-vf",
     filter,
+    "-an",
     "-c:v",
     "libx264",
     "-preset",
     "veryfast",
     "-crf",
-    "21",
+    "22",
     "-pix_fmt",
     "yuv420p",
-    ...(isImage ? ["-an"] : ["-map", "0:v:0", "-map", "0:a?", "-c:a", "aac", "-b:a", "128k"]),
-    "-movflags",
-    "+faststart",
     input.outputPath
   ];
 
@@ -132,37 +308,108 @@ function renderBaseMixedCutVideo(input: {
     timeout: 10 * 60 * 1000
   });
 
+  assertFfmpegSuccess(result, input.outputPath, "混剪片段生成失败");
+}
+
+function concatSegments(input: {
+  segmentPaths: string[];
+  outputPath: string;
+  targetDurationSeconds: number;
+  workingDirectory: string;
+}): void {
+  const ffmpegPath = requireFfmpegPath();
+  fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
+  const concatListPath = path.join(input.workingDirectory, "concat.txt");
+  fs.writeFileSync(
+    concatListPath,
+    input.segmentPaths.map((segmentPath) => `file '${escapeConcatPath(segmentPath)}'`).join("\n"),
+    "utf8"
+  );
+
+  const result = spawnSync(
+    ffmpegPath,
+    [
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      concatListPath,
+      "-t",
+      input.targetDurationSeconds.toFixed(2),
+      "-c",
+      "copy",
+      "-movflags",
+      "+faststart",
+      input.outputPath
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 10 * 60 * 1000
+    }
+  );
+
+  assertFfmpegSuccess(result, input.outputPath, "混剪基础视频生成失败");
+}
+
+function assertFfmpegSuccess(
+  result: ReturnType<typeof spawnSync>,
+  outputPath: string,
+  label: string
+): void {
   if (result.error) {
-    throw new Error(`混剪基础视频生成失败：${result.error.message}`);
+    throw new Error(`${label}：${result.error.message}`);
   }
 
   if (result.status !== 0) {
-    throw new Error(`混剪基础视频生成失败：${(result.stderr || result.stdout || "").slice(-1200)}`);
+    throw new Error(`${label}：${(result.stderr || result.stdout || "").slice(-1200)}`);
   }
 
-  if (!fs.existsSync(input.outputPath) || fs.statSync(input.outputPath).size === 0) {
-    throw new Error("混剪基础视频生成完成但文件为空。");
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+    throw new Error(`${label}：输出文件为空。`);
   }
 }
 
-function createTimedTextSrt(script: string): string {
+function createTimedTextSrt(script: string, targetDurationSeconds: number): string {
   const text = script
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .join(" ");
-  const chunks = chunkText(text, 36).slice(0, 6);
-  const duration = Math.max(2, Math.floor(12 / Math.max(1, chunks.length)));
+  const chunks = chunkText(text, 34);
+  const duration = Math.max(2, targetDurationSeconds / Math.max(1, chunks.length));
 
   return chunks
     .map((chunk, index) => {
       const start = index * duration;
-      const end = index === chunks.length - 1 ? 12 : (index + 1) * duration;
+      const end =
+        index === chunks.length - 1
+          ? targetDurationSeconds
+          : Math.min(targetDurationSeconds, (index + 1) * duration);
       return [String(index + 1), `${formatSrtTime(start)} --> ${formatSrtTime(end)}`, chunk].join(
         "\n"
       );
     })
     .join("\n\n");
+}
+
+function estimateScriptDurationSeconds(script: string): number {
+  const text = script.replace(/\s+/g, " ").trim();
+  if (!text) {
+    return MIN_TARGET_DURATION_SECONDS;
+  }
+
+  const cjkCharacters = (text.match(/[\u3400-\u9fff]/g) ?? []).length;
+  const latinWords = (text.replace(/[\u3400-\u9fff]/g, " ").match(/[A-Za-z0-9]+/g) ?? []).length;
+  const punctuationPauses = (text.match(/[。！？!?.,，；;]/g) ?? []).length * 0.28;
+  const estimatedSeconds = cjkCharacters / 4 + latinWords / 2.5 + punctuationPauses + 2;
+
+  return Math.min(
+    MAX_TARGET_DURATION_SECONDS,
+    Math.max(MIN_TARGET_DURATION_SECONDS, Math.ceil(estimatedSeconds))
+  );
 }
 
 function chunkText(value: string, maxLength: number): string[] {
@@ -185,6 +432,134 @@ function chunkText(value: string, maxLength: number): string[] {
   }
 
   return chunks;
+}
+
+function createBatchCoverSvg(task: VideoTask, preset: OutputPreset, batchIndex: number): string {
+  const style = task.coverStyle;
+  const title = escapeXml(style.title.trim() || task.title);
+  const subtitle = escapeXml(style.subtitle.trim() || `混剪第 ${batchIndex} 条`);
+  const titleSize = Math.round((style.fontSize / 1080) * preset.width);
+  const subtitleSize = Math.round(titleSize * 0.44);
+  const titleY = Math.round(preset.height * (style.verticalPercent / 100));
+  const subtitleY = titleY + Math.round(titleSize * 1.12);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${preset.width}" height="${preset.height}" viewBox="0 0 ${preset.width} ${preset.height}">
+  <rect width="100%" height="100%" fill="${style.backgroundColor}"/>
+  <rect x="${Math.round(preset.width * 0.07)}" y="${Math.round(preset.height * 0.08)}" width="${Math.round(preset.width * 0.86)}" height="${Math.round(preset.height * 0.012)}" fill="${style.accentColor}"/>
+  <text x="${Math.round(preset.width * 0.08)}" y="${titleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${titleSize}" fill="${style.textColor}" font-weight="${style.fontWeight === "bold" ? "700" : "400"}">${title}</text>
+  <text x="${Math.round(preset.width * 0.08)}" y="${subtitleY}" font-family="${escapeXml(style.fontFamily)}" font-size="${subtitleSize}" fill="${style.textColor}" opacity="0.76">${subtitle}</text>
+</svg>
+`;
+}
+
+function createBatchManifest(
+  task: VideoTask,
+  records: MixedCutEditDecisionRecord[],
+  targetCount: number
+) {
+  return {
+    generatedBy: "Digital Human Studio mixed-cut batch",
+    generatedAt: new Date().toISOString(),
+    task: {
+      id: task.id,
+      title: task.title,
+      mixedCutTargetCount: targetCount,
+      selectedOutputPresets: task.selectedOutputPresets
+    },
+    records,
+    note: "混剪模式只负责批量组合；需要进一步去重时，请把成片导入“视频去重处理”模式。"
+  };
+}
+
+function createPublishingPackage(task: VideoTask, targetCount: number): PublishingPackage {
+  return {
+    title: task.coverStyle.title.trim() || task.title,
+    description: "批量混剪视频已生成。需要进一步原创度处理时，请进入“视频去重处理”模式。",
+    tags: ["混剪视频", "短视频", "素材重组"],
+    notes: `本批次按素材组合与重复率自动生成 ${targetCount} 条；原创度评分请在视频去重处理模式中运行。`
+  };
+}
+
+function copyBatchToExportDirectory(
+  paths: AppPaths,
+  taskId: string,
+  task: VideoTask,
+  records: MixedCutEditDecisionRecord[],
+  targetCount: number,
+  generatedVideoDirectory?: string
+): string | undefined {
+  const selectedDirectory = task.exportDirectory?.trim() || generatedVideoDirectory?.trim();
+  if (!selectedDirectory) {
+    return undefined;
+  }
+
+  const targetDirectory = path.join(
+    path.resolve(selectedDirectory),
+    `${safeFileName(task.title)}-mixed-cut-${formatTimestamp(new Date())}`
+  );
+  fs.mkdirSync(targetDirectory, { recursive: true });
+
+  for (const record of records) {
+    copyTaskAsset(
+      paths,
+      taskId,
+      record.outputVideo,
+      path.join(targetDirectory, "videos", path.basename(record.outputVideo))
+    );
+    copyTaskAsset(
+      paths,
+      taskId,
+      record.subtitleFile,
+      path.join(targetDirectory, "subtitles", path.basename(record.subtitleFile))
+    );
+    copyTaskAsset(
+      paths,
+      taskId,
+      record.coverFile,
+      path.join(targetDirectory, "covers", path.basename(record.coverFile))
+    );
+  }
+
+  fs.writeFileSync(
+    path.join(targetDirectory, "manifest.json"),
+    JSON.stringify(createBatchManifest(task, records, targetCount), null, 2),
+    "utf8"
+  );
+
+  return targetDirectory;
+}
+
+function copyTaskAsset(
+  paths: AppPaths,
+  taskId: string,
+  relativePath: string,
+  targetPath: string
+): void {
+  const sourcePath = absoluteTaskPath(paths, taskId, relativePath);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`导出文件不存在：${relativePath}`);
+  }
+
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(sourcePath, targetPath);
+}
+
+function createBatchWarnings(materialCount: number, targetCount: number): string[] {
+  const warnings: string[] = [];
+  if (materialCount < 3) {
+    warnings.push("素材少于 3 个，批量混剪容易出现同质化。建议补充更多素材。");
+  }
+  if (targetCount > Math.max(1, materialCount * 2)) {
+    warnings.push("生成数量明显高于素材数量，建议后续进入视频去重处理模式做原创度评分。");
+  }
+  return warnings;
+}
+
+function videoStartOffset(batchIndex: number, segmentIndex: number): number {
+  return ((batchIndex + segmentIndex) % 4) * 0.6;
+}
+
+function segmentRole(index: number): string {
+  return ["hook", "context", "proof", "detail", "result", "cta"][index] ?? "b-roll";
 }
 
 function formatSrtTime(seconds: number): string {
@@ -218,11 +593,47 @@ function writeTaskFile(
   paths: AppPaths,
   taskId: string,
   relativePath: string,
-  content: string
+  content: string | Buffer
 ): void {
   const absolutePath = absoluteTaskPath(paths, taskId, relativePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-  fs.writeFileSync(absolutePath, content, "utf8");
+  fs.writeFileSync(absolutePath, content);
+}
+
+function escapeConcatPath(value: string): string {
+  return value.replaceAll("\\", "/").replaceAll("'", "'\\''");
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function safeFileName(value: string): string {
+  return (
+    Array.from(value.trim())
+      .map((character) =>
+        character.charCodeAt(0) < 32 || /[<>:"/\\|?*]/.test(character) ? "-" : character
+      )
+      .join("")
+      .slice(0, 60) || "mixed-cut"
+  );
+}
+
+function formatTimestamp(value: Date): string {
+  const padPart = (input: number) => String(input).padStart(2, "0");
+  return [
+    value.getFullYear(),
+    padPart(value.getMonth() + 1),
+    padPart(value.getDate()),
+    "-",
+    padPart(value.getHours()),
+    padPart(value.getMinutes()),
+    padPart(value.getSeconds())
+  ].join("");
 }
 
 function requireFfmpegPath(): string {

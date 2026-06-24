@@ -5,6 +5,7 @@ import type { PresenterImageWorkflowService } from "../image/presenterImageWorkf
 import type { ScriptWorkflowService } from "../script/scriptWorkflowService";
 import type { ExportWorkflowService } from "./exportWorkflowService";
 import type { MixedCutWorkflowService } from "./mixedCutWorkflowService";
+import type { VideoDedupWorkflowService } from "./videoDedupWorkflowService";
 
 export class RealWorkflowRunner {
   constructor(
@@ -13,7 +14,8 @@ export class RealWorkflowRunner {
     private readonly presenterImageWorkflowService: PresenterImageWorkflowService,
     private readonly avatarWorkflowService: AvatarWorkflowService,
     private readonly exportWorkflowService: ExportWorkflowService,
-    private readonly mixedCutWorkflowService?: MixedCutWorkflowService
+    private readonly mixedCutWorkflowService?: MixedCutWorkflowService,
+    private readonly videoDedupWorkflowService?: VideoDedupWorkflowService
   ) {}
 
   async runTask(taskId: string): Promise<VideoTask> {
@@ -52,11 +54,21 @@ export class RealWorkflowRunner {
       }
 
       task = this.mixedCutWorkflowService.prepareMixedCut(taskId);
-      if (task.steps.find((step) => step.id === "post-production")?.status === "retry-ready") {
-        return task;
+      return task;
+    }
+
+    task = this.requireTask(taskId);
+    if (task.generationMode === "video-dedup") {
+      if (!this.videoDedupWorkflowService) {
+        return this.taskRepository.updateStepStatus(
+          taskId,
+          "post-production",
+          "retry-ready",
+          "视频去重处理服务尚未接入。"
+        );
       }
 
-      return this.exportWorkflowService.exportTask(taskId);
+      return this.videoDedupWorkflowService.runVideoDedup(taskId);
     }
 
     task = this.requireTask(taskId);
