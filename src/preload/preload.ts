@@ -73,6 +73,7 @@ const IPC_CHANNELS = {
   testServiceConfiguration: "service-configurations:test",
   listServiceModels: "service-configurations:list-models",
   startHeyGenOAuth: "service-configurations:heygen-oauth-start",
+  authorizeHeyGenOAuth: "service-configurations:heygen-oauth-authorize",
   completeHeyGenOAuth: "service-configurations:heygen-oauth-complete",
   getAppPathSettings: "app-settings:get-paths",
   chooseAppPathSetting: "app-settings:choose-path"
@@ -171,6 +172,8 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.listServiceModels, input) as Promise<ServiceModelList>,
   startHeyGenOAuth: (input: StartHeyGenOAuthInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.startHeyGenOAuth, input) as Promise<StartHeyGenOAuthResult>,
+  authorizeHeyGenOAuth: (input: StartHeyGenOAuthInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.authorizeHeyGenOAuth, input) as Promise<ServiceConnectionCheck>,
   completeHeyGenOAuth: (input: CompleteHeyGenOAuthInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.completeHeyGenOAuth, input) as Promise<ServiceConnectionCheck>,
   getAppPathSettings: () =>

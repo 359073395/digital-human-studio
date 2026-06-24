@@ -2510,7 +2510,7 @@ label {
 
 .oauth-actions {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
   gap: 8px;
   align-items: end;
   margin-top: 10px;
@@ -2519,6 +2519,12 @@ label {
 .oauth-actions button {
   min-height: 34px;
   padding: 0 12px;
+}
+
+.oauth-actions .primary-action {
+  color: #ffffff;
+  border-color: #4b6f66;
+  background: #4b6f66;
 }
 
 .oauth-actions input {

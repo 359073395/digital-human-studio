@@ -3,10 +3,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
-import type {
-  ListServiceModelsInput,
-  ProviderId,
-  SaveServiceConfigurationInput
+import {
+  DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI,
+  type ListServiceModelsInput,
+  type ProviderId,
+  type SaveServiceConfigurationInput
 } from "../shared/serviceConfig";
 import type { AppPathSettingKind } from "../shared/appSettings";
 import {
@@ -27,6 +28,7 @@ import { AvatarWorkflowService } from "./avatar/avatarWorkflowService";
 import { HeyGenAvatarCatalog } from "./avatar/heyGenAvatarCatalog";
 import { HeyGenAvatarCreator } from "./avatar/heyGenAvatarCreator";
 import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
+import { createHeyGenLocalOAuthCallbackServer } from "./avatar/heyGenLocalOAuthCallback";
 import { OpenAiImageProvider } from "./image/openAiImageProvider";
 import { PresenterImageWorkflowService } from "./image/presenterImageWorkflowService";
 import { OpenAiCompatibleSourceTranscriptionProvider } from "./media/sourceTranscriptionProvider";
@@ -706,10 +708,48 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.startHeyGenOAuth, async (_event, input: StartHeyGenOAuthInput) => {
-    const result = serviceConfigurationRepository.startHeyGenOAuth(input);
+    const result = serviceConfigurationRepository.startHeyGenOAuth({
+      settings: {
+        ...input.settings,
+        authMode: "oauth-bearer",
+        oauthRedirectUri: input.settings.oauthRedirectUri || DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI
+      }
+    });
     await shell.openExternal(result.authorizationUrl);
     return result;
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.authorizeHeyGenOAuth,
+    async (_event, input: StartHeyGenOAuthInput) => {
+      const settings = {
+        ...input.settings,
+        authMode: "oauth-bearer" as const,
+        enabled: true,
+        oauthRedirectUri: chooseHeyGenLocalOAuthRedirectUri(input.settings.oauthRedirectUri)
+      };
+      const oauthStart = serviceConfigurationRepository.startHeyGenOAuth({ settings });
+      const callbackServer = createHeyGenLocalOAuthCallbackServer({
+        expectedState: oauthStart.state,
+        redirectUri: oauthStart.redirectUri
+      });
+
+      try {
+        await callbackServer.ready;
+        await shell.openExternal(oauthStart.authorizationUrl);
+        const callbackUrlOrCode = await callbackServer.callback;
+        return await serviceConfigurationRepository.completeHeyGenOAuth({
+          settings,
+          callbackUrlOrCode,
+          codeVerifier: oauthStart.codeVerifier,
+          expectedState: oauthStart.state
+        });
+      } catch (error) {
+        callbackServer.close();
+        throw error;
+      }
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.completeHeyGenOAuth, (_event, input: CompleteHeyGenOAuthInput) =>
     serviceConfigurationRepository.completeHeyGenOAuth(input)
@@ -728,6 +768,24 @@ function registerIpcHandlers(repositories: MainRepositories): void {
       return new Response("Invalid asset URL", { status: 400 });
     }
   });
+}
+
+function chooseHeyGenLocalOAuthRedirectUri(redirectUri: string | undefined): string {
+  const trimmedRedirectUri = redirectUri?.trim();
+  if (!trimmedRedirectUri) {
+    return DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI;
+  }
+
+  try {
+    const url = new URL(trimmedRedirectUri);
+    if (url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.port) {
+      return trimmedRedirectUri;
+    }
+  } catch {
+    return DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI;
+  }
+
+  return DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI;
 }
 
 function createTaskAssetUrl(taskId: string, relativePath: string): string {

@@ -79,6 +79,7 @@ export interface DigitalHumanStudioAPI {
   testServiceConfiguration: (providerId: ProviderId) => Promise<ServiceConnectionCheck>;
   listServiceModels: (input: ListServiceModelsInput) => Promise<ServiceModelList>;
   startHeyGenOAuth: (input: StartHeyGenOAuthInput) => Promise<StartHeyGenOAuthResult>;
+  authorizeHeyGenOAuth: (input: StartHeyGenOAuthInput) => Promise<ServiceConnectionCheck>;
   completeHeyGenOAuth: (input: CompleteHeyGenOAuthInput) => Promise<ServiceConnectionCheck>;
   getAppPathSettings: () => Promise<AppPathSettings>;
   chooseAppPathSetting: (kind: AppPathSettingKind) => Promise<AppPathSettings>;
@@ -128,6 +129,7 @@ export const IPC_CHANNELS = {
   testServiceConfiguration: "service-configurations:test",
   listServiceModels: "service-configurations:list-models",
   startHeyGenOAuth: "service-configurations:heygen-oauth-start",
+  authorizeHeyGenOAuth: "service-configurations:heygen-oauth-authorize",
   completeHeyGenOAuth: "service-configurations:heygen-oauth-complete",
   getAppPathSettings: "app-settings:get-paths",
   chooseAppPathSetting: "app-settings:choose-path"

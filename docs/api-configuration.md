@@ -98,7 +98,15 @@ HeyGen can be replaced directly from the settings modal:
   - `自动` uses Video Agent first when the auth mode is `会员/OAuth Token`; otherwise it uses Direct Video and falls back to Video Agent only when Direct Video reports API credits are required.
   - `Direct Video` calls `POST /v3/videos` and is the most deterministic script-to-lip-sync path, but HeyGen may require API credits.
   - `Video Agent` calls `POST /v3/video-agents` and is the route that best matches HeyGen's member/OAuth flow.
-- For member/OAuth mode, enter the HeyGen OAuth Client ID and the Redirect URI that has been approved in HeyGen. The app uses the official PKCE flow:
+- For member/OAuth mode, enter the HeyGen OAuth Client ID. The recommended desktop Redirect URI is:
+
+  ```text
+  http://127.0.0.1:53682/heygen/oauth/callback
+  ```
+
+  Register the same Redirect URI in the HeyGen OAuth app before authorizing. Click `本机一键授权` to let the desktop app start a temporary localhost callback server, open the HeyGen authorization page, receive the callback automatically, exchange the code, and save the encrypted OAuth token bundle.
+
+- If the local callback is not accepted by the HeyGen OAuth app, use the manual fallback:
   1. Click `打开 HeyGen 授权页`.
   2. Complete the browser authorization.
   3. Paste the final callback URL or only the `code` value into the callback field.
@@ -134,7 +142,7 @@ Optional HeyGen OAuth setup fields for scripted configuration:
 $env:HEYGEN_AUTH_MODE="oauth-bearer"
 $env:HEYGEN_GENERATION_ROUTE="auto"
 $env:HEYGEN_OAUTH_CLIENT_ID="your-oauth-client-id"
-$env:HEYGEN_OAUTH_REDIRECT_URI="your-approved-redirect-uri"
+$env:HEYGEN_OAUTH_REDIRECT_URI="http://127.0.0.1:53682/heygen/oauth/callback"
 $env:HEYGEN_OAUTH_AUTHORIZE_URL="https://app.heygen.com/oauth/authorize"
 $env:HEYGEN_OAUTH_TOKEN_URL="https://api2.heygen.com/v1/oauth/token"
 $env:HEYGEN_OAUTH_REFRESH_TOKEN_URL="https://api2.heygen.com/v1/oauth/refresh_token"

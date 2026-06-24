@@ -4,6 +4,9 @@ export type HeyGenAuthMode = "api-key" | "oauth-bearer";
 export type HeyGenGenerationRoute = "auto" | "direct-video" | "video-agent";
 export type AsrMode = "audio-transcriptions" | "chat-audio";
 
+export const DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI =
+  "http://127.0.0.1:53682/heygen/oauth/callback";
+
 export type ProviderKind =
   | "avatar"
   | "source-parser"
@@ -141,7 +144,7 @@ export function defaultServiceSettings(providerId: ProviderId): ServiceConfigura
         authMode: "api-key",
         generationRoute: "auto",
         oauthClientId: "",
-        oauthRedirectUri: "",
+        oauthRedirectUri: DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI,
         oauthAuthorizeUrl: "https://app.heygen.com/oauth/authorize",
         oauthTokenUrl: "https://api2.heygen.com/v1/oauth/token",
         oauthRefreshTokenUrl: "https://api2.heygen.com/v1/oauth/refresh_token",
