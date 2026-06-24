@@ -351,3 +351,11 @@ _Avoid_: Content language
 **Content Language**:
 The language of generated scripts, avatar speech, subtitles, and publishing copy. The MVP supports Chinese, English, and Indonesian content languages.
 _Avoid_: Interface language
+
+**Video Dedup Processing**:
+A standalone video mode that imports an existing MP4, mixed-cut output, downloaded source video, or finished video, then produces processed MP4 variants plus an originality score report. It is separate from mixed-cut generation.
+_Avoid_: Mixed-cut setting, platform guarantee, filter-only edit
+
+**Storyboard Preview Fallback**:
+A local SVG storyboard preview written when the AI image provider fails after the structured visual storyboard has already been generated. It preserves shot order, timing, visual actions, captions, and the image-provider error for later regeneration.
+_Avoid_: Successful AI storyboard image, finished video, cover image

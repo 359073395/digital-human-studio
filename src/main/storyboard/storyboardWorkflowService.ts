@@ -150,6 +150,25 @@ export class StoryboardWorkflowService {
         );
       } catch (error) {
         imageError = error instanceof Error ? error.message : "故事板图生成失败。";
+        const fallbackRelativePath = "storyboard/visual-storyboard-fallback.svg";
+        writeTaskFile(
+          this.paths,
+          taskId,
+          fallbackRelativePath,
+          renderFallbackStoryboardSvg(result.storyboard, imageError)
+        );
+        writeTaskFile(
+          this.paths,
+          taskId,
+          "storyboard/visual-storyboard-image-error.txt",
+          imageError
+        );
+        this.taskRepository.addMediaAsset(taskId, "visual-storyboard", fallbackRelativePath);
+        this.taskRepository.addMediaAsset(
+          taskId,
+          "visual-storyboard",
+          "storyboard/visual-storyboard-image-error.txt"
+        );
       }
 
       const latestTask = this.requireTask(taskId);
@@ -163,10 +182,6 @@ export class StoryboardWorkflowService {
           aiVideoPrompt: result.storyboard.wholeVideoPrompt
         }
       });
-
-      if (imageError) {
-        return this.taskRepository.updateStepStatus(taskId, "script", "retry-ready", imageError);
-      }
 
       return this.taskRepository.updateStepStatus(taskId, "script", "complete");
     } catch (error) {
@@ -292,6 +307,74 @@ function summarizeStoryboard(storyboard: VisualStoryboardPackage): string {
 
 function escapeTableCell(value: string): string {
   return value.replaceAll("|", "\\|").replace(/\r?\n/g, " ");
+}
+
+function renderFallbackStoryboardSvg(
+  storyboard: VisualStoryboardPackage,
+  imageError: string
+): string {
+  const width = 1536;
+  const height = 1024;
+  const shots = storyboard.shots.slice(0, 12);
+  const columns = shots.length <= 6 ? 3 : 4;
+  const rows = Math.ceil(shots.length / columns);
+  const gap = 18;
+  const margin = 42;
+  const headerHeight = 118;
+  const cardWidth = (width - margin * 2 - gap * (columns - 1)) / columns;
+  const cardHeight = (height - headerHeight - margin - gap * (rows - 1)) / rows;
+  const cards = shots
+    .map((shot, index) => {
+      const x = margin + (index % columns) * (cardWidth + gap);
+      const y = headerHeight + Math.floor(index / columns) * (cardHeight + gap);
+      const title = `镜头 ${shot.shotNumber} · ${shot.durationSeconds}s`;
+      const body = [shot.visualAction, shot.subjectAction, shot.voiceoverOrText]
+        .filter(Boolean)
+        .join(" / ");
+      return [
+        `<g transform="translate(${x}, ${y})">`,
+        `<rect width="${cardWidth}" height="${cardHeight}" rx="18" fill="#f8f3ee" stroke="#b9aaa0" stroke-width="2"/>`,
+        `<rect x="18" y="18" width="${cardWidth - 36}" height="${Math.max(92, cardHeight * 0.42)}" rx="14" fill="#d9cfc5"/>`,
+        `<text x="30" y="48" font-family="Microsoft YaHei, Arial" font-size="24" font-weight="700" fill="#2f3330">${escapeXml(title)}</text>`,
+        ...wrapSvgText(body, cardWidth - 52, 21).map(
+          (line, lineIndex) =>
+            `<text x="26" y="${Math.max(132, cardHeight * 0.5) + lineIndex * 28}" font-family="Microsoft YaHei, Arial" font-size="21" fill="#3d413e">${escapeXml(line)}</text>`
+        ),
+        `<text x="26" y="${cardHeight - 28}" font-family="Microsoft YaHei, Arial" font-size="18" fill="#7b6f66">${escapeXml(shot.cameraMovement || shot.shotType)}</text>`,
+        "</g>"
+      ].join("");
+    })
+    .join("");
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    `<rect width="100%" height="100%" fill="#eee7df"/>`,
+    `<text x="${margin}" y="52" font-family="Microsoft YaHei, Arial" font-size="34" font-weight="800" fill="#2f3330">${escapeXml(storyboard.title)}</text>`,
+    `<text x="${margin}" y="88" font-family="Microsoft YaHei, Arial" font-size="20" fill="#6d625a">AI 故事板图接口暂时失败，已生成本地可预览故事板：${escapeXml(imageError).slice(0, 180)}</text>`,
+    cards,
+    "</svg>"
+  ].join("");
+}
+
+function wrapSvgText(text: string, maxWidth: number, fontSize: number): string[] {
+  const maxChars = Math.max(10, Math.floor(maxWidth / (fontSize * 0.58)));
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return [];
+  }
+  const lines: string[] = [];
+  for (let index = 0; index < normalized.length && lines.length < 4; index += maxChars) {
+    lines.push(normalized.slice(index, index + maxChars));
+  }
+  return lines;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function writeTaskFile(

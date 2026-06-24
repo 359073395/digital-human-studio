@@ -115,6 +115,30 @@ export class OpenAiImageProvider implements ImageProvider {
     });
 
     let responseText = await response.text();
+    if (!response.ok && isTransientImageFailure(response.status, responseText)) {
+      const retryResponse = await this.fetchImpl(generationUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: modelName,
+          prompt: promptPreview,
+          size: "1536x1024",
+          response_format: "b64_json"
+        })
+      });
+      const retryResponseText = await retryResponse.text();
+      if (retryResponse.ok) {
+        return readImageResult(
+          this.fetchImpl,
+          retryResponseText,
+          promptPreview,
+          "OpenAI 故事板图响应缺少图片数据。"
+        );
+      }
+    }
     if (!response.ok && isUnsupportedContentTypeResponse(response.status, responseText)) {
       const formData = new FormData();
       formData.append("model", modelName);
@@ -261,4 +285,11 @@ function normalizeBaseUrl(baseUrl: string): string {
 
 function isUnsupportedContentTypeResponse(status: number, responseText: string): boolean {
   return status === 400 && /unsupported content type/i.test(responseText);
+}
+
+function isTransientImageFailure(status: number, responseText: string): boolean {
+  return (
+    [408, 429, 500, 502, 503, 504].includes(status) ||
+    /timeout|timed out|gateway|overloaded|rate limit|网关|超时|限流|过载/i.test(responseText)
+  );
 }

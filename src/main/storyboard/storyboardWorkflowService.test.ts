@@ -71,6 +71,16 @@ class SuccessfulImageProvider implements ImageProvider {
   }
 }
 
+class FailingStoryboardImageProvider implements ImageProvider {
+  async generateProductPresenterImage(): Promise<ProductPresenterImageResult> {
+    throw new Error("unused");
+  }
+
+  async generateVisualStoryboardImage(): Promise<VisualStoryboardImageResult> {
+    throw new Error("Gateway Time-out");
+  }
+}
+
 let tempDir: string;
 let appPaths: AppPaths;
 let database: TaskDatabase;
@@ -176,6 +186,48 @@ describe("StoryboardWorkflowService", () => {
     expect(
       fs.readFileSync(path.join(taskDirectory, "storyboard", "visual-storyboard.md"), "utf8")
     ).toContain("## 分镜提示词");
+  });
+
+  it("writes a fallback storyboard preview when AI storyboard image generation fails", async () => {
+    const storyboardProvider = new SuccessfulStoryboardProvider();
+    const imageProvider = new FailingStoryboardImageProvider();
+    const service = new StoryboardWorkflowService(
+      repository,
+      appPaths,
+      storyboardProvider,
+      imageProvider
+    );
+    const task = repository.createTask({
+      title: "Viral fallback storyboard",
+      sourceScript: "A reference script with hook and proof."
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "viral-remix",
+      originalVideoUrl: "https://example.com/video",
+      finalScript: "Confirmed editable script."
+    });
+
+    const updated = await service.generateVisualStoryboard(task.id, 8);
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+
+    expect(updated.steps.find((step) => step.id === "script")?.status).toBe("complete");
+    expect(
+      updated.mediaAssets
+        .filter((asset) => asset.kind === "visual-storyboard")
+        .map((asset) => asset.relativePath)
+    ).toEqual(
+      expect.arrayContaining([
+        "storyboard/visual-storyboard-fallback.svg",
+        "storyboard/visual-storyboard-image-error.txt"
+      ])
+    );
+    expect(
+      fs.readFileSync(
+        path.join(taskDirectory, "storyboard", "visual-storyboard-fallback.svg"),
+        "utf8"
+      )
+    ).toContain("Gateway Time-out");
   });
 });
 

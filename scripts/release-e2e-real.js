@@ -44,6 +44,9 @@ const { RealWorkflowRunner } = require("../dist-electron/main/workflow/realWorkf
 const {
   MixedCutWorkflowService
 } = require("../dist-electron/main/workflow/mixedCutWorkflowService");
+const {
+  VideoDedupWorkflowService
+} = require("../dist-electron/main/workflow/videoDedupWorkflowService");
 const { SourceAssetService } = require("../dist-electron/main/source/sourceAssetService");
 const {
   OpenAiCompatibleStoryboardProvider
@@ -512,6 +515,10 @@ function createServices(runtime) {
     runtime.taskRepository,
     runtime.appPaths
   );
+  const videoDedupWorkflowService = new VideoDedupWorkflowService(
+    runtime.taskRepository,
+    runtime.appPaths
+  );
   const sourceAssetService = new SourceAssetService(
     runtime.taskRepository,
     runtime.appPaths,
@@ -534,6 +541,7 @@ function createServices(runtime) {
     avatarWorkflowService,
     exportWorkflowService,
     mixedCutWorkflowService,
+    videoDedupWorkflowService,
     sourceAssetService,
     storyboardWorkflowService,
     realWorkflowRunner: new RealWorkflowRunner(
@@ -542,7 +550,8 @@ function createServices(runtime) {
       presenterImageWorkflowService,
       avatarWorkflowService,
       exportWorkflowService,
-      mixedCutWorkflowService
+      mixedCutWorkflowService,
+      videoDedupWorkflowService
     ),
     avatarCatalog: new HeyGenAvatarCatalog(runtime.serviceRepository, runtime.credentialStore)
   };
@@ -662,6 +671,9 @@ async function runMode(runtime, services, materials, exportRoot, avatarLook, mod
       materials.productImage
     ]);
     await services.sourceAssetService.analyzeSourceVisuals(task.id);
+  }
+  if (mode.importDedupSourceVideo) {
+    services.videoDedupWorkflowService.importSourceVideo(task.id, materials.sampleVideo);
   }
   if (mode.storyboard) {
     const storyTask = await services.storyboardWorkflowService.generateStoryScriptOptions(task.id);
@@ -897,6 +909,17 @@ function modeCases() {
         "先放素材，再配上清晰字幕。混剪视频不一定要真人出镜，重点是节奏、证明和信息密度。",
       importMixedMaterials: true,
       coverTitle: "混剪验收"
+    },
+    {
+      generationMode: "video-dedup",
+      avatarMode: "preset-avatar",
+      title: "发布验收-视频去重处理",
+      contentLanguage: "zh-CN",
+      sourceScript: "对一段已有视频做内容级重构，输出原创度评分报告。",
+      shortScript:
+        "视频去重不是简单加滤镜。要重新组织画面、节奏、字幕和封面，用原创度评分判断是否达到内部阈值。",
+      importDedupSourceVideo: true,
+      coverTitle: "去重验收"
     }
   ];
 }
@@ -996,7 +1019,6 @@ async function main() {
         };
         report.failures.push(failure);
         report.modes.push({ ok: false, ...failure });
-        break;
       }
     }
   } catch (error) {

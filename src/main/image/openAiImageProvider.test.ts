@@ -214,6 +214,31 @@ describe("OpenAiImageProvider", () => {
     expect(result.imageBytes.toString()).toBe("storyboard-image-from-form");
   });
 
+  it("retries visual storyboard image generation after a temporary gateway failure", async () => {
+    const imageBytes = Buffer.from("storyboard-image-after-retry");
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response("Gateway Time-out", {
+          status: 504,
+          statusText: "Gateway Time-out"
+        });
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: [{ b64_json: imageBytes.toString("base64") }]
+        })
+      );
+    });
+
+    const result = await createProvider({ fetchImpl: fetchMock }).generateVisualStoryboardImage({
+      prompt: "Create one visual storyboard with 9 consistent panels."
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.imageBytes.toString()).toBe("storyboard-image-after-retry");
+  });
+
   it("is unavailable when the image provider is disabled or missing credentials", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 
