@@ -51,6 +51,7 @@ npm run release:ui
 
 ## 当前主要功能模块
 
+- 桌面体验：Windows 桌面版默认隐藏 Electron 系统菜单栏，不显示无关的 `File / Edit / View / Window`。
 - 视频分析中心：原视频链接、下载/上传、提取文案、画面分析、模式推荐。
 - 预设数字人口播：HeyGen Avatar + AI 文案 + 输出比例。
 - 商品/带货视频：商品资料、人物商品图、可选数字人口播。

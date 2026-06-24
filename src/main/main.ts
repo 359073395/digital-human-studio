@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import type {
   ListServiceModelsInput,
@@ -84,12 +84,15 @@ function getRendererEntry(): string {
 }
 
 function createMainWindow(): void {
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 860,
     minWidth: 1180,
     minHeight: 720,
     title: APP_DISPLAY_NAME,
+    autoHideMenuBar: true,
     backgroundColor: "#f5f7fb",
     show: false,
     webPreferences: {
