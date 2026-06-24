@@ -2527,8 +2527,25 @@ label {
   background: #4b6f66;
 }
 
+.oauth-actions .primary-action:disabled {
+  color: #84918c;
+  border-color: #d5ded9;
+  background: #edf2ef;
+  cursor: not-allowed;
+}
+
 .oauth-actions input {
   min-width: 0;
+}
+
+.oauth-inline-alert {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(160, 91, 78, 0.35);
+  border-radius: 8px;
+  color: #7b392f;
+  background: #fff2ee;
+  line-height: 1.55;
 }
 
 .settings-enabled-row {

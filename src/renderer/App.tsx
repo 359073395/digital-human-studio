@@ -1953,6 +1953,10 @@ export function App() {
       setSettingsMessage("本地预览模式无法启动 HeyGen 授权");
       return;
     }
+    if (!draft.oauthClientId?.trim()) {
+      setSettingsMessage("请先填写 HeyGen OAuth Client ID，再开始会员授权。");
+      return;
+    }
 
     setSettingsBusyProviderId("heygen");
     try {
@@ -1973,6 +1977,10 @@ export function App() {
     const draft = settingsDraft.heygen;
     if (!window.digitalHumanStudio || !draft) {
       setSettingsMessage("本地预览模式无法启动 HeyGen 授权");
+      return;
+    }
+    if (!draft.oauthClientId?.trim()) {
+      setSettingsMessage("请先填写 HeyGen OAuth Client ID，再使用本机一键授权。");
       return;
     }
 
@@ -2117,6 +2125,10 @@ export function App() {
     activeSettingsConfiguration && activeSettingsDraft
       ? canFetchServiceModels(activeSettingsConfiguration.providerId)
       : false;
+  const activeHeyGenOauthClientIdMissing =
+    activeSettingsConfiguration?.providerId === "heygen" &&
+    activeSettingsDraft?.authMode === "oauth-bearer" &&
+    !activeSettingsDraft.oauthClientId?.trim();
 
   return (
     <div className="app-shell">
@@ -3886,14 +3898,18 @@ export function App() {
                           <button
                             type="button"
                             className="primary-action"
-                            disabled={Boolean(settingsBusyProviderId)}
+                            disabled={
+                              Boolean(settingsBusyProviderId) || activeHeyGenOauthClientIdMissing
+                            }
                             onClick={() => void authorizeHeyGenOAuth()}
                           >
                             本机一键授权
                           </button>
                           <button
                             type="button"
-                            disabled={Boolean(settingsBusyProviderId)}
+                            disabled={
+                              Boolean(settingsBusyProviderId) || activeHeyGenOauthClientIdMissing
+                            }
                             onClick={() => void startHeyGenOAuth()}
                           >
                             打开 HeyGen 授权页
@@ -3912,6 +3928,12 @@ export function App() {
                             完成会员授权
                           </button>
                         </div>
+                        {activeHeyGenOauthClientIdMissing ? (
+                          <p className="oauth-inline-alert">
+                            还缺 HeyGen OAuth Client ID。这个不是 sk_ API Key，需要在 HeyGen OAuth
+                            应用里获取；填好后本机一键授权才会打开浏览器。
+                          </p>
+                        ) : null}
                         <p className="settings-route-note">
                           本机一键授权会监听上方 Redirect URI 并自动保存会员登录态；请先在 HeyGen
                           OAuth 应用里登记同一个本机回调地址。手动授权入口保留为备用。
@@ -6379,8 +6401,8 @@ function createSettingsDraft(
         generationRoute: configuration.settings.generationRoute ?? "auto",
         oauthClientId: configuration.settings.oauthClientId ?? "",
         oauthRedirectUri:
-          configuration.settings.oauthRedirectUri ??
-          defaultServiceSettings(configuration.providerId).oauthRedirectUri ??
+          configuration.settings.oauthRedirectUri ||
+          defaultServiceSettings(configuration.providerId).oauthRedirectUri ||
           "",
         oauthAuthorizeUrl:
           configuration.settings.oauthAuthorizeUrl ??
