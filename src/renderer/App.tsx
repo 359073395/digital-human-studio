@@ -1953,7 +1953,9 @@ export function App() {
       setSettingsMessage("本地预览模式无法启动 HeyGen 授权");
       return;
     }
-    if (!draft.oauthClientId?.trim()) {
+    const oauthDraft = withHeyGenOAuthDefaults(draft);
+    setSettingsDraft((current) => updateDraft(current, "heygen", oauthDraft));
+    if (!oauthDraft.oauthClientId?.trim()) {
       setSettingsMessage("请先填写 HeyGen OAuth Client ID，再开始会员授权。");
       return;
     }
@@ -1961,7 +1963,7 @@ export function App() {
     setSettingsBusyProviderId("heygen");
     try {
       const result = await window.digitalHumanStudio.startHeyGenOAuth({
-        settings: buildHeyGenOAuthSettings(draft)
+        settings: buildHeyGenOAuthSettings(oauthDraft)
       });
       setHeyGenOAuthSession(result);
       setHeyGenOAuthCallback("");
@@ -1979,17 +1981,19 @@ export function App() {
       setSettingsMessage("本地预览模式无法启动 HeyGen 授权");
       return;
     }
-    if (!draft.oauthClientId?.trim()) {
+    const oauthDraft = withHeyGenOAuthDefaults(draft);
+    setSettingsDraft((current) => updateDraft(current, "heygen", oauthDraft));
+    if (!oauthDraft.oauthClientId?.trim()) {
       setSettingsMessage("请先填写 HeyGen OAuth Client ID，再使用本机一键授权。");
       return;
     }
 
-    const redirectUri = draft.oauthRedirectUri || DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI;
+    const redirectUri = oauthDraft.oauthRedirectUri || DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI;
     setSettingsBusyProviderId("heygen");
     setSettingsMessage(`正在打开 HeyGen 授权页，请在浏览器中完成授权。回调地址：${redirectUri}`);
     try {
       const result = await window.digitalHumanStudio.authorizeHeyGenOAuth({
-        settings: buildHeyGenOAuthSettings(draft)
+        settings: buildHeyGenOAuthSettings(oauthDraft)
       });
       setSettingsCheckResults((current) => ({ ...current, heygen: result }));
       setSettingsMessage(`HeyGen 会员授权已自动保存。${result.message}`);
@@ -3725,9 +3729,15 @@ export function App() {
                             value={activeSettingsDraft.authMode ?? "api-key"}
                             onChange={(event) =>
                               setSettingsDraft((current) =>
-                                updateDraft(current, activeSettingsConfiguration.providerId, {
-                                  authMode: event.target.value as SettingsDraft["authMode"]
-                                })
+                                updateDraft(
+                                  current,
+                                  activeSettingsConfiguration.providerId,
+                                  event.target.value === "oauth-bearer"
+                                    ? withHeyGenOAuthDefaults(current.heygen ?? activeSettingsDraft)
+                                    : {
+                                        authMode: "api-key"
+                                      }
+                                )
                               )
                             }
                           >
@@ -3898,18 +3908,14 @@ export function App() {
                           <button
                             type="button"
                             className="primary-action"
-                            disabled={
-                              Boolean(settingsBusyProviderId) || activeHeyGenOauthClientIdMissing
-                            }
+                            disabled={Boolean(settingsBusyProviderId)}
                             onClick={() => void authorizeHeyGenOAuth()}
                           >
                             本机一键授权
                           </button>
                           <button
                             type="button"
-                            disabled={
-                              Boolean(settingsBusyProviderId) || activeHeyGenOauthClientIdMissing
-                            }
+                            disabled={Boolean(settingsBusyProviderId)}
                             onClick={() => void startHeyGenOAuth()}
                           >
                             打开 HeyGen 授权页
@@ -6460,6 +6466,21 @@ function createEmptySettingsDraft(): SettingsDraft {
     resolution: "720p",
     enabled: true,
     apiKey: ""
+  };
+}
+
+function withHeyGenOAuthDefaults(draft: SettingsDraft): SettingsDraft {
+  const defaults = defaultServiceSettings("heygen");
+  return {
+    ...draft,
+    baseUrl: draft.baseUrl || defaults.baseUrl || "https://api.heygen.com",
+    authMode: "oauth-bearer",
+    generationRoute: draft.generationRoute || "auto",
+    oauthRedirectUri: draft.oauthRedirectUri || DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI,
+    oauthAuthorizeUrl: draft.oauthAuthorizeUrl || defaults.oauthAuthorizeUrl || "",
+    oauthTokenUrl: draft.oauthTokenUrl || defaults.oauthTokenUrl || "",
+    oauthRefreshTokenUrl: draft.oauthRefreshTokenUrl || defaults.oauthRefreshTokenUrl || "",
+    enabled: true
   };
 }
 
