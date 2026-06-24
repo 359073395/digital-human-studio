@@ -78,6 +78,8 @@ export interface DigitalHumanStudioAPI {
   clearServiceCredential: (providerId: ProviderId) => Promise<ServiceConfiguration>;
   testServiceConfiguration: (providerId: ProviderId) => Promise<ServiceConnectionCheck>;
   listServiceModels: (input: ListServiceModelsInput) => Promise<ServiceModelList>;
+  startHeyGenOAuth: (input: StartHeyGenOAuthInput) => Promise<StartHeyGenOAuthResult>;
+  completeHeyGenOAuth: (input: CompleteHeyGenOAuthInput) => Promise<ServiceConnectionCheck>;
   getAppPathSettings: () => Promise<AppPathSettings>;
   chooseAppPathSetting: (kind: AppPathSettingKind) => Promise<AppPathSettings>;
 }
@@ -125,6 +127,8 @@ export const IPC_CHANNELS = {
   clearServiceCredential: "service-configurations:clear-credential",
   testServiceConfiguration: "service-configurations:test",
   listServiceModels: "service-configurations:list-models",
+  startHeyGenOAuth: "service-configurations:heygen-oauth-start",
+  completeHeyGenOAuth: "service-configurations:heygen-oauth-complete",
   getAppPathSettings: "app-settings:get-paths",
   chooseAppPathSetting: "app-settings:choose-path"
 } as const;
@@ -195,6 +199,25 @@ export interface SelectGeneratedPresenterImageInput {
 export interface SetMixedCutTargetCountInput {
   taskId: string;
   count: number;
+}
+
+export interface StartHeyGenOAuthInput {
+  settings: ServiceConfiguration["settings"];
+}
+
+export interface StartHeyGenOAuthResult {
+  authorizationUrl: string;
+  codeVerifier: string;
+  state: string;
+  redirectUri: string;
+  message: string;
+}
+
+export interface CompleteHeyGenOAuthInput {
+  settings: ServiceConfiguration["settings"];
+  callbackUrlOrCode: string;
+  codeVerifier: string;
+  expectedState: string;
 }
 
 export interface HeyGenAvatarLook {

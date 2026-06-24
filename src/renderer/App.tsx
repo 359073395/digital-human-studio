@@ -45,7 +45,12 @@ import {
   type VideoTask,
   type VideoTaskSummary
 } from "../shared/domain";
-import type { DigitalHumanStudioAPI, HeyGenAvatarLook, UpdateTaskInput } from "../shared/ipc";
+import type {
+  DigitalHumanStudioAPI,
+  HeyGenAvatarLook,
+  StartHeyGenOAuthResult,
+  UpdateTaskInput
+} from "../shared/ipc";
 import { calculateMixedCutBatchPlan, type MixedCutBatchPlan } from "../shared/mixedCutPlanning";
 import {
   getProductionModeWorkflow,
@@ -273,6 +278,8 @@ export function App() {
   const [activeSettingsProviderId, setActiveSettingsProviderId] = useState<ProviderId | "">("");
   const [settingsBusyProviderId, setSettingsBusyProviderId] = useState<ProviderId | "">("");
   const [settingsMessage, setSettingsMessage] = useState("");
+  const [heyGenOAuthSession, setHeyGenOAuthSession] = useState<StartHeyGenOAuthResult | null>(null);
+  const [heyGenOAuthCallback, setHeyGenOAuthCallback] = useState("");
   const [appPathSettings, setAppPathSettings] =
     useState<AppPathSettings>(DEFAULT_APP_PATH_SETTINGS);
   const [pathSettingsMessage, setPathSettingsMessage] = useState("");
@@ -1844,6 +1851,12 @@ export function App() {
         modelName: draft.modelName,
         authMode: draft.authMode,
         generationRoute: draft.generationRoute,
+        oauthClientId: draft.oauthClientId,
+        oauthRedirectUri: draft.oauthRedirectUri,
+        oauthAuthorizeUrl: draft.oauthAuthorizeUrl,
+        oauthTokenUrl: draft.oauthTokenUrl,
+        oauthRefreshTokenUrl: draft.oauthRefreshTokenUrl,
+        oauthScope: draft.oauthScope,
         asrMode: draft.asrMode,
         avatarId: draft.avatarId,
         voiceId: draft.voiceId,
@@ -1933,6 +1946,93 @@ export function App() {
     }
   }
 
+  async function startHeyGenOAuth() {
+    const draft = settingsDraft.heygen;
+    if (!window.digitalHumanStudio || !draft) {
+      setSettingsMessage("本地预览模式无法启动 HeyGen 授权");
+      return;
+    }
+
+    setSettingsBusyProviderId("heygen");
+    try {
+      const result = await window.digitalHumanStudio.startHeyGenOAuth({
+        settings: {
+          baseUrl: draft.baseUrl,
+          authMode: "oauth-bearer",
+          generationRoute: draft.generationRoute,
+          oauthClientId: draft.oauthClientId,
+          oauthRedirectUri: draft.oauthRedirectUri,
+          oauthAuthorizeUrl: draft.oauthAuthorizeUrl,
+          oauthTokenUrl: draft.oauthTokenUrl,
+          oauthRefreshTokenUrl: draft.oauthRefreshTokenUrl,
+          oauthScope: draft.oauthScope,
+          avatarId: draft.avatarId,
+          voiceId: draft.voiceId,
+          resolution: draft.resolution,
+          enabled: draft.enabled
+        }
+      });
+      setHeyGenOAuthSession(result);
+      setHeyGenOAuthCallback("");
+      setSettingsMessage(result.message);
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "HeyGen OAuth 授权启动失败");
+    } finally {
+      setSettingsBusyProviderId("");
+    }
+  }
+
+  async function completeHeyGenOAuth() {
+    const draft = settingsDraft.heygen;
+    if (!window.digitalHumanStudio || !draft || !heyGenOAuthSession) {
+      setSettingsMessage("请先点击打开 HeyGen 授权页。");
+      return;
+    }
+
+    setSettingsBusyProviderId("heygen");
+    setSettingsMessage("正在完成 HeyGen 会员授权...");
+    try {
+      const result = await window.digitalHumanStudio.completeHeyGenOAuth({
+        settings: {
+          baseUrl: draft.baseUrl,
+          authMode: "oauth-bearer",
+          generationRoute: draft.generationRoute,
+          oauthClientId: draft.oauthClientId,
+          oauthRedirectUri: draft.oauthRedirectUri,
+          oauthAuthorizeUrl: draft.oauthAuthorizeUrl,
+          oauthTokenUrl: draft.oauthTokenUrl,
+          oauthRefreshTokenUrl: draft.oauthRefreshTokenUrl,
+          oauthScope: draft.oauthScope,
+          avatarId: draft.avatarId,
+          voiceId: draft.voiceId,
+          resolution: draft.resolution,
+          enabled: true
+        },
+        callbackUrlOrCode: heyGenOAuthCallback,
+        codeVerifier: heyGenOAuthSession.codeVerifier,
+        expectedState: heyGenOAuthSession.state
+      });
+      setSettingsCheckResults((current) => ({ ...current, heygen: result }));
+      setSettingsMessage(`HeyGen 会员授权已保存。${result.message}`);
+      setHeyGenOAuthSession(null);
+      setHeyGenOAuthCallback("");
+      await loadServiceConfigurations();
+      if (result.ok) {
+        void refreshHeyGenAvatarLooks(true);
+      }
+    } catch (error) {
+      const result: ServiceConnectionCheck = {
+        providerId: "heygen",
+        ok: false,
+        message: error instanceof Error ? error.message : "HeyGen OAuth 授权完成失败"
+      };
+      setSettingsCheckResults((current) => ({ ...current, heygen: result }));
+      setSettingsMessage(result.message);
+    } finally {
+      setSettingsBusyProviderId("");
+    }
+  }
+
   async function fetchServiceModels(providerId: ProviderId) {
     const draft = settingsDraft[providerId];
     if (!window.digitalHumanStudio || !draft) {
@@ -1952,6 +2052,12 @@ export function App() {
           modelName: draft.modelName,
           authMode: draft.authMode,
           generationRoute: draft.generationRoute,
+          oauthClientId: draft.oauthClientId,
+          oauthRedirectUri: draft.oauthRedirectUri,
+          oauthAuthorizeUrl: draft.oauthAuthorizeUrl,
+          oauthTokenUrl: draft.oauthTokenUrl,
+          oauthRefreshTokenUrl: draft.oauthRefreshTokenUrl,
+          oauthScope: draft.oauthScope,
           avatarId: draft.avatarId,
           voiceId: draft.voiceId,
           resolution: draft.resolution,
@@ -3673,6 +3779,127 @@ export function App() {
                             <option value="1080p">1080p</option>
                           </select>
                         </label>
+                      </div>
+                    ) : null}
+
+                    {activeSettingsConfiguration.providerId === "heygen" &&
+                    activeSettingsDraft.authMode === "oauth-bearer" ? (
+                      <div className="oauth-panel">
+                        <div className="settings-form-grid two">
+                          <label>
+                            OAuth Client ID
+                            <input
+                              type="text"
+                              value={activeSettingsDraft.oauthClientId ?? ""}
+                              placeholder="HeyGen 提供的 OAuth Client ID"
+                              onChange={(event) =>
+                                setSettingsDraft((current) =>
+                                  updateDraft(current, activeSettingsConfiguration.providerId, {
+                                    oauthClientId: event.target.value
+                                  })
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Redirect URI
+                            <input
+                              type="text"
+                              value={activeSettingsDraft.oauthRedirectUri ?? ""}
+                              placeholder="HeyGen 后台登记过的回调地址"
+                              onChange={(event) =>
+                                setSettingsDraft((current) =>
+                                  updateDraft(current, activeSettingsConfiguration.providerId, {
+                                    oauthRedirectUri: event.target.value
+                                  })
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            授权地址
+                            <input
+                              type="text"
+                              value={activeSettingsDraft.oauthAuthorizeUrl ?? ""}
+                              onChange={(event) =>
+                                setSettingsDraft((current) =>
+                                  updateDraft(current, activeSettingsConfiguration.providerId, {
+                                    oauthAuthorizeUrl: event.target.value
+                                  })
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Token 地址
+                            <input
+                              type="text"
+                              value={activeSettingsDraft.oauthTokenUrl ?? ""}
+                              onChange={(event) =>
+                                setSettingsDraft((current) =>
+                                  updateDraft(current, activeSettingsConfiguration.providerId, {
+                                    oauthTokenUrl: event.target.value
+                                  })
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Refresh Token 地址
+                            <input
+                              type="text"
+                              value={activeSettingsDraft.oauthRefreshTokenUrl ?? ""}
+                              onChange={(event) =>
+                                setSettingsDraft((current) =>
+                                  updateDraft(current, activeSettingsConfiguration.providerId, {
+                                    oauthRefreshTokenUrl: event.target.value
+                                  })
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            Scope（可选）
+                            <input
+                              type="text"
+                              value={activeSettingsDraft.oauthScope ?? ""}
+                              placeholder="留空则使用 HeyGen 默认权限"
+                              onChange={(event) =>
+                                setSettingsDraft((current) =>
+                                  updateDraft(current, activeSettingsConfiguration.providerId, {
+                                    oauthScope: event.target.value
+                                  })
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
+                        <div className="oauth-actions">
+                          <button
+                            type="button"
+                            disabled={Boolean(settingsBusyProviderId)}
+                            onClick={() => void startHeyGenOAuth()}
+                          >
+                            打开 HeyGen 授权页
+                          </button>
+                          <input
+                            type="text"
+                            value={heyGenOAuthCallback}
+                            placeholder="授权完成后粘贴回调地址或 code"
+                            onChange={(event) => setHeyGenOAuthCallback(event.target.value)}
+                          />
+                          <button
+                            type="button"
+                            disabled={Boolean(settingsBusyProviderId) || !heyGenOAuthSession}
+                            onClick={() => void completeHeyGenOAuth()}
+                          >
+                            完成会员授权
+                          </button>
+                        </div>
+                        <p className="settings-route-note">
+                          OAuth 登录态会加密保存到本机；生成时优先走 Video Agent
+                          会员路由，并自动刷新 access token。
+                        </p>
                       </div>
                     ) : null}
 
@@ -6134,6 +6361,21 @@ function createSettingsDraft(
         modelName: configuration.settings.modelName ?? "",
         authMode: configuration.settings.authMode ?? "api-key",
         generationRoute: configuration.settings.generationRoute ?? "auto",
+        oauthClientId: configuration.settings.oauthClientId ?? "",
+        oauthRedirectUri: configuration.settings.oauthRedirectUri ?? "",
+        oauthAuthorizeUrl:
+          configuration.settings.oauthAuthorizeUrl ??
+          defaultServiceSettings(configuration.providerId).oauthAuthorizeUrl ??
+          "",
+        oauthTokenUrl:
+          configuration.settings.oauthTokenUrl ??
+          defaultServiceSettings(configuration.providerId).oauthTokenUrl ??
+          "",
+        oauthRefreshTokenUrl:
+          configuration.settings.oauthRefreshTokenUrl ??
+          defaultServiceSettings(configuration.providerId).oauthRefreshTokenUrl ??
+          "",
+        oauthScope: configuration.settings.oauthScope ?? "",
         asrMode: configuration.settings.asrMode ?? "audio-transcriptions",
         avatarId: configuration.settings.avatarId ?? "",
         voiceId: configuration.settings.voiceId ?? "",
@@ -6165,6 +6407,12 @@ function createEmptySettingsDraft(): SettingsDraft {
     modelName: "",
     authMode: "api-key",
     generationRoute: "auto",
+    oauthClientId: "",
+    oauthRedirectUri: "",
+    oauthAuthorizeUrl: defaultServiceSettings("heygen").oauthAuthorizeUrl ?? "",
+    oauthTokenUrl: defaultServiceSettings("heygen").oauthTokenUrl ?? "",
+    oauthRefreshTokenUrl: defaultServiceSettings("heygen").oauthRefreshTokenUrl ?? "",
+    oauthScope: "",
     asrMode: "audio-transcriptions",
     avatarId: "",
     voiceId: "",

@@ -15,7 +15,17 @@ import {
   type ServiceModelList
 } from "../../shared/serviceConfig";
 import { redactSecret } from "../security/redaction";
-import { buildHeyGenAuthHeaders, heyGenCredentialLabel } from "../avatar/heyGenAuth";
+import {
+  buildHeyGenAuthHeaders,
+  createHeyGenOAuthAuthorization,
+  exchangeHeyGenOAuthCode,
+  heyGenCredentialLabel,
+  readHeyGenCredentialForRequest,
+  stringifyHeyGenOAuthCredential,
+  type HeyGenOAuthExchangeInput,
+  type HeyGenOAuthStartInput,
+  type HeyGenOAuthStartResult
+} from "../avatar/heyGenAuth";
 import { normalizeHeyGenBaseUrl } from "../avatar/heyGenUrls";
 import type { CredentialStore } from "./credentialStore";
 import type { TaskDatabase } from "./database";
@@ -84,6 +94,42 @@ export class ServiceConfigurationRepository {
   async clearCredential(providerId: ProviderId): Promise<ServiceConfiguration> {
     await this.credentialStore.clearCredential(providerId);
     return this.getConfiguration(providerId);
+  }
+
+  startHeyGenOAuth(input: HeyGenOAuthStartInput): HeyGenOAuthStartResult {
+    const currentConfiguration = this.getConfiguration("heygen");
+    return createHeyGenOAuthAuthorization({
+      settings: {
+        ...currentConfiguration.settings,
+        ...sanitizeSettings(input.settings),
+        authMode: "oauth-bearer"
+      }
+    });
+  }
+
+  async completeHeyGenOAuth(input: HeyGenOAuthExchangeInput): Promise<ServiceConnectionCheck> {
+    const currentConfiguration = this.getConfiguration("heygen");
+    const settings = {
+      ...currentConfiguration.settings,
+      ...sanitizeSettings(input.settings),
+      authMode: "oauth-bearer" as const,
+      enabled: true
+    };
+    const credential = await exchangeHeyGenOAuthCode(this.fetchImpl, {
+      ...input,
+      settings
+    });
+
+    await this.saveConfiguration({
+      providerId: "heygen",
+      settings: {
+        ...settings,
+        generationRoute: settings.generationRoute || "auto"
+      }
+    });
+    await this.credentialStore.saveCredential("heygen", stringifyHeyGenOAuthCredential(credential));
+
+    return this.testHeyGenConnection(this.getConfiguration("heygen"), credential.accessToken);
   }
 
   async listModels(input: ListServiceModelsInput): Promise<ServiceModelList> {
@@ -205,7 +251,10 @@ export class ServiceConfigurationRepository {
       };
     }
 
-    const apiKey = await this.readCredentialForCheck(providerId, definition.label);
+    const apiKey =
+      providerId === "heygen"
+        ? await this.readHeyGenCredentialForCheck(configuration)
+        : await this.readCredentialForCheck(providerId, definition.label);
     if (!apiKey.ok) {
       return {
         providerId,
@@ -322,6 +371,33 @@ export class ServiceConfigurationRepository {
       return {
         ok: false,
         message: error instanceof Error ? error.message : `${label} API Key 读取失败`
+      };
+    }
+  }
+
+  private async readHeyGenCredentialForCheck(
+    configuration: ServiceConfiguration
+  ): Promise<{ ok: true; value: string } | { ok: false; message: string }> {
+    try {
+      const value = await readHeyGenCredentialForRequest(
+        configuration,
+        this.credentialStore,
+        this.fetchImpl
+      );
+      if (!value) {
+        return {
+          ok: false,
+          message: `${heyGenCredentialLabel(configuration)} 尚未配置`
+        };
+      }
+      return { ok: true, value };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : `${heyGenCredentialLabel(configuration)} 读取失败`
       };
     }
   }
@@ -1073,6 +1149,30 @@ function sanitizeSettings(settings: ServiceConfigurationSettings): ServiceConfig
       settings.generationRoute === "direct-video" || settings.generationRoute === "video-agent"
         ? settings.generationRoute
         : "auto";
+  }
+
+  if (settings.oauthClientId !== undefined) {
+    sanitized.oauthClientId = settings.oauthClientId.trim();
+  }
+
+  if (settings.oauthRedirectUri !== undefined) {
+    sanitized.oauthRedirectUri = settings.oauthRedirectUri.trim();
+  }
+
+  if (settings.oauthAuthorizeUrl !== undefined) {
+    sanitized.oauthAuthorizeUrl = settings.oauthAuthorizeUrl.trim();
+  }
+
+  if (settings.oauthTokenUrl !== undefined) {
+    sanitized.oauthTokenUrl = settings.oauthTokenUrl.trim();
+  }
+
+  if (settings.oauthRefreshTokenUrl !== undefined) {
+    sanitized.oauthRefreshTokenUrl = settings.oauthRefreshTokenUrl.trim();
+  }
+
+  if (settings.oauthScope !== undefined) {
+    sanitized.oauthScope = settings.oauthScope.trim();
   }
 
   if (settings.asrMode !== undefined) {

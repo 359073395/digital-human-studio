@@ -12,4 +12,6 @@ We now store a non-secret `generationRoute` setting for HeyGen:
 
 The settings test remains a connection and catalog-read test. It can confirm the account and avatar list, and it now explains when the saved credential looks like an API Key even though the UI is set to member/Bearer mode. It does not silently claim that every generation route has enough credits, because that would require consuming video-generation credits during configuration.
 
-The renderer only sees the route label, credential-present status, Avatar IDs, Voice ID, and resolution. Secret API Keys and Bearer tokens remain in the local encrypted credential store.
+The member path now supports HeyGen's OAuth PKCE flow from the desktop settings modal. The renderer can request an authorization URL and submit the returned callback URL/code, but token exchange happens in the Electron main process. A successful authorization stores an encrypted OAuth token bundle with access token, refresh token, and expiration time. HeyGen API calls read a fresh access token from that bundle and refresh it when it is near expiration.
+
+The renderer only sees the route label, credential-present status, OAuth setup fields, Avatar IDs, Voice ID, and resolution. Secret API Keys, Bearer tokens, refresh tokens, and OAuth token bundles remain in the local encrypted credential store.

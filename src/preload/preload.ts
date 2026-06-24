@@ -11,6 +11,7 @@ import type {
 } from "../shared/serviceConfig";
 import type {
   AppInfo,
+  CompleteHeyGenOAuthInput,
   CreateHeyGenAvatarInput,
   CreateHeyGenAvatarResult,
   CreateTaskInput,
@@ -22,6 +23,8 @@ import type {
   RetryWorkflowStepInput,
   SelectGeneratedPresenterImageInput,
   SetMixedCutTargetCountInput,
+  StartHeyGenOAuthInput,
+  StartHeyGenOAuthResult,
   UpdateTaskInput
 } from "../shared/ipc";
 import type { SourceTranscriptionResult } from "../shared/scriptGeneration";
@@ -69,6 +72,8 @@ const IPC_CHANNELS = {
   clearServiceCredential: "service-configurations:clear-credential",
   testServiceConfiguration: "service-configurations:test",
   listServiceModels: "service-configurations:list-models",
+  startHeyGenOAuth: "service-configurations:heygen-oauth-start",
+  completeHeyGenOAuth: "service-configurations:heygen-oauth-complete",
   getAppPathSettings: "app-settings:get-paths",
   chooseAppPathSetting: "app-settings:choose-path"
 } as const;
@@ -164,6 +169,10 @@ const api: DigitalHumanStudioAPI = {
     ) as Promise<ServiceConnectionCheck>,
   listServiceModels: (input: ListServiceModelsInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.listServiceModels, input) as Promise<ServiceModelList>,
+  startHeyGenOAuth: (input: StartHeyGenOAuthInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.startHeyGenOAuth, input) as Promise<StartHeyGenOAuthResult>,
+  completeHeyGenOAuth: (input: CompleteHeyGenOAuthInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.completeHeyGenOAuth, input) as Promise<ServiceConnectionCheck>,
   getAppPathSettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getAppPathSettings) as Promise<AppPathSettings>,
   chooseAppPathSetting: (kind: AppPathSettingKind) =>

@@ -26,6 +26,12 @@ export interface ServiceConfigurationSettings {
   modelName?: string;
   authMode?: HeyGenAuthMode;
   generationRoute?: HeyGenGenerationRoute;
+  oauthClientId?: string;
+  oauthRedirectUri?: string;
+  oauthAuthorizeUrl?: string;
+  oauthTokenUrl?: string;
+  oauthRefreshTokenUrl?: string;
+  oauthScope?: string;
   asrMode?: AsrMode;
   avatarId?: string;
   voiceId?: string;
@@ -134,6 +140,12 @@ export function defaultServiceSettings(providerId: ProviderId): ServiceConfigura
         baseUrl: "https://api.heygen.com",
         authMode: "api-key",
         generationRoute: "auto",
+        oauthClientId: "",
+        oauthRedirectUri: "",
+        oauthAuthorizeUrl: "https://app.heygen.com/oauth/authorize",
+        oauthTokenUrl: "https://api2.heygen.com/v1/oauth/token",
+        oauthRefreshTokenUrl: "https://api2.heygen.com/v1/oauth/refresh_token",
+        oauthScope: "",
         resolution: "720p",
         enabled: true
       };

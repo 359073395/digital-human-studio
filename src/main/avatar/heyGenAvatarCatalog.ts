@@ -3,7 +3,7 @@ import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { defaultServiceSettings } from "../../shared/serviceConfig";
 import { redactSecret } from "../security/redaction";
 import { AvatarProviderUnavailableError } from "./avatarProvider";
-import { buildHeyGenAuthHeaders } from "./heyGenAuth";
+import { buildHeyGenAuthHeaders, readHeyGenCredentialForRequest } from "./heyGenAuth";
 import { normalizeHeyGenBaseUrl } from "./heyGenUrls";
 
 interface HeyGenConfigurationReader {
@@ -12,6 +12,7 @@ interface HeyGenConfigurationReader {
 
 interface HeyGenCredentialReader {
   readCredential: (providerId: "heygen") => Promise<string | null>;
+  saveCredential?: (providerId: "heygen", secret: string) => Promise<void>;
 }
 
 interface HeyGenAvatarCatalogOptions {
@@ -46,7 +47,11 @@ export class HeyGenAvatarCatalog {
       throw new AvatarProviderUnavailableError("HeyGen 服务未启用。");
     }
 
-    const apiKey = await this.credentials.readCredential("heygen");
+    const apiKey = await readHeyGenCredentialForRequest(
+      configuration,
+      this.credentials,
+      this.fetchImpl
+    );
     if (!apiKey) {
       throw new AvatarProviderUnavailableError("HeyGen 凭据尚未配置。");
     }

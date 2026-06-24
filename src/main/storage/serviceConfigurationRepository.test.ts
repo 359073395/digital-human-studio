@@ -205,6 +205,79 @@ describe("ServiceConfigurationRepository", () => {
     expect(seenAuthorizations).toEqual(["Bearer oauth-token", "Bearer oauth-token"]);
   });
 
+  it("starts and completes HeyGen OAuth with PKCE", async () => {
+    const seenRequests: Array<{ url: string; authorization?: string; body?: string }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      const body =
+        init?.body instanceof URLSearchParams ? init.body.toString() : String(init?.body ?? "");
+      seenRequests.push({
+        url: String(url),
+        authorization: (init?.headers as Record<string, string> | undefined)?.authorization,
+        body
+      });
+      if (String(url).endsWith("/oauth/token")) {
+        expect(body).toContain("client_id=client-123");
+        expect(body).toContain("code=authorization-code");
+        expect(body).toContain("grant_type=authorization_code");
+        expect(body).toContain("code_verifier=");
+        return Response.json({
+          access_token: "oauth-access-token",
+          refresh_token: "oauth-refresh-token",
+          expires_in: 864000,
+          token_type: "Bearer"
+        });
+      }
+      const data = String(url).endsWith("/v3/users/me")
+        ? { billing_type: "subscription" }
+        : { avatar_looks: [{ id: "avatar-123" }] };
+      return Response.json({ data });
+    };
+    repository = new ServiceConfigurationRepository(database, credentialStore, fetchImpl);
+
+    const settings = {
+      baseUrl: "https://api.heygen.com",
+      authMode: "oauth-bearer" as const,
+      generationRoute: "auto" as const,
+      oauthClientId: "client-123",
+      oauthRedirectUri: "https://example.com/oauth/callback",
+      oauthAuthorizeUrl: "https://app.heygen.com/oauth/authorize",
+      oauthTokenUrl: "https://api2.heygen.com/v1/oauth/token",
+      oauthRefreshTokenUrl: "https://api2.heygen.com/v1/oauth/refresh_token",
+      enabled: true
+    };
+    const start = repository.startHeyGenOAuth({ settings });
+    const authorizationUrl = new URL(start.authorizationUrl);
+    expect(authorizationUrl.origin + authorizationUrl.pathname).toBe(
+      "https://app.heygen.com/oauth/authorize"
+    );
+    expect(authorizationUrl.searchParams.get("client_id")).toBe("client-123");
+    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
+      "https://example.com/oauth/callback"
+    );
+    expect(authorizationUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(authorizationUrl.searchParams.get("response_type")).toBe("code");
+
+    const result = await repository.completeHeyGenOAuth({
+      settings,
+      callbackUrlOrCode: `https://example.com/oauth/callback?code=authorization-code&state=${start.state}`,
+      codeVerifier: start.codeVerifier,
+      expectedState: start.state
+    });
+
+    expect(result.ok).toBe(true);
+    expect(repository.getConfiguration("heygen").settings.authMode).toBe("oauth-bearer");
+    expect(await credentialStore.readCredential("heygen")).toContain("heygen-oauth-v1");
+    expect(seenRequests.map((request) => request.url)).toEqual([
+      "https://api2.heygen.com/v1/oauth/token",
+      "https://api.heygen.com/v3/users/me",
+      "https://api.heygen.com/v3/avatars/looks?limit=1"
+    ]);
+    expect(seenRequests.slice(1).map((request) => request.authorization)).toEqual([
+      "Bearer oauth-access-token",
+      "Bearer oauth-access-token"
+    ]);
+  });
+
   it("tests the source parser provider with the quota endpoint", async () => {
     const seenRequests: Array<{ url: string; xApiKey?: string }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {

@@ -12,6 +12,7 @@ import type { AppPathSettingKind } from "../shared/appSettings";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type CompleteHeyGenOAuthInput,
   type CreateHeyGenAvatarInput,
   type CreateTaskInput,
   type GeneratePresenterImagesInput,
@@ -19,6 +20,7 @@ import {
   type ResolveTaskAssetUrlInput,
   type RetryWorkflowStepInput,
   type SelectGeneratedPresenterImageInput,
+  type StartHeyGenOAuthInput,
   type UpdateTaskInput
 } from "../shared/ipc";
 import { AvatarWorkflowService } from "./avatar/avatarWorkflowService";
@@ -701,6 +703,16 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
   ipcMain.handle(IPC_CHANNELS.listServiceModels, (_event, input: ListServiceModelsInput) =>
     serviceConfigurationRepository.listModels(input)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.startHeyGenOAuth, async (_event, input: StartHeyGenOAuthInput) => {
+    const result = serviceConfigurationRepository.startHeyGenOAuth(input);
+    await shell.openExternal(result.authorizationUrl);
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.completeHeyGenOAuth, (_event, input: CompleteHeyGenOAuthInput) =>
+    serviceConfigurationRepository.completeHeyGenOAuth(input)
   );
 
   protocol.handle(ASSET_PROTOCOL, (request) => {

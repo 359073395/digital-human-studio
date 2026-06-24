@@ -78,6 +78,12 @@ async function main() {
       "HEYGEN_RESOLUTION",
       "HEYGEN_AUTH_MODE",
       "HEYGEN_GENERATION_ROUTE",
+      "HEYGEN_OAUTH_CLIENT_ID",
+      "HEYGEN_OAUTH_REDIRECT_URI",
+      "HEYGEN_OAUTH_AUTHORIZE_URL",
+      "HEYGEN_OAUTH_TOKEN_URL",
+      "HEYGEN_OAUTH_REFRESH_TOKEN_URL",
+      "HEYGEN_OAUTH_SCOPE",
       "HEYGEN_API_KEY"
     ])
   ) {
@@ -92,6 +98,12 @@ async function main() {
           resolution: env("HEYGEN_RESOLUTION"),
           authMode: env("HEYGEN_AUTH_MODE"),
           generationRoute: env("HEYGEN_GENERATION_ROUTE"),
+          oauthClientId: env("HEYGEN_OAUTH_CLIENT_ID"),
+          oauthRedirectUri: env("HEYGEN_OAUTH_REDIRECT_URI"),
+          oauthAuthorizeUrl: env("HEYGEN_OAUTH_AUTHORIZE_URL"),
+          oauthTokenUrl: env("HEYGEN_OAUTH_TOKEN_URL"),
+          oauthRefreshTokenUrl: env("HEYGEN_OAUTH_REFRESH_TOKEN_URL"),
+          oauthScope: env("HEYGEN_OAUTH_SCOPE"),
           enabled: true
         },
         env("HEYGEN_API_KEY")

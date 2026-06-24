@@ -16,6 +16,7 @@ import {
 import type { ServiceConfiguration } from "../../shared/serviceConfig";
 import { AvatarProviderUnavailableError } from "./avatarProvider";
 import { HeyGenAvatarProvider } from "./heyGenAvatarProvider";
+import { stringifyHeyGenOAuthCredential } from "./heyGenAuth";
 
 const TEST_API_KEY = "sk-heygen-secret-123456";
 
@@ -255,6 +256,84 @@ describe("HeyGenAvatarProvider", () => {
     });
     const [createUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(createUrl).toBe("https://api.heygen.test/v3/video-agents");
+  });
+
+  it("refreshes an expired HeyGen OAuth credential before rendering", async () => {
+    let savedCredential = stringifyHeyGenOAuthCredential({
+      kind: "heygen-oauth-v1",
+      accessToken: "expired-token",
+      refreshToken: "refresh-token",
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      tokenType: "Bearer"
+    });
+    const seenAuthorizations: Array<string | undefined> = [];
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith("/oauth/refresh_token")) {
+        const body = init?.body instanceof URLSearchParams ? init.body.toString() : "";
+        expect(body).toContain("client_id=client-123");
+        expect(body).toContain("grant_type=refresh_token");
+        expect(body).toContain("refresh_token=refresh-token");
+        return Response.json({
+          access_token: "fresh-token",
+          refresh_token: "fresh-refresh-token",
+          expires_in: 864000,
+          token_type: "Bearer"
+        });
+      }
+
+      seenAuthorizations.push((init?.headers as Record<string, string>).authorization);
+      if (String(url).endsWith("/v3/video-agents") && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { session_id: "session-123" } }));
+      }
+
+      if (String(url).endsWith("/v3/video-agents/session-123") && init?.method === "GET") {
+        return new Response(JSON.stringify({ data: { video_id: "video-123" } }));
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            status: "completed",
+            video_url: "https://cdn.heygen.test/video.mp4"
+          }
+        })
+      );
+    });
+
+    const provider = new HeyGenAvatarProvider(
+      {
+        getConfiguration: () =>
+          createConfiguration({
+            authMode: "oauth-bearer",
+            oauthClientId: "client-123",
+            oauthRefreshTokenUrl: "https://api2.heygen.com/v1/oauth/refresh_token"
+          })
+      },
+      {
+        readCredential: async () => savedCredential,
+        saveCredential: async (_providerId, secret) => {
+          savedCredential = secret;
+        }
+      },
+      {
+        fetchImpl: fetchMock,
+        pollIntervalMs: 0,
+        maxPollAttempts: 2
+      }
+    );
+
+    const result = await provider.renderAvatar({
+      task: createTask(),
+      preset: OUTPUT_PRESETS[0]
+    });
+
+    expect(result.videoUrl).toBe("https://cdn.heygen.test/video.mp4");
+    expect(savedCredential).toContain("fresh-token");
+    expect(seenAuthorizations).toEqual([
+      "Bearer fresh-token",
+      "Bearer fresh-token",
+      "Bearer fresh-token"
+    ]);
   });
 
   it("uploads a generated presenter image and creates an image-based HeyGen render", async () => {

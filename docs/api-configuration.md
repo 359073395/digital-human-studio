@@ -92,11 +92,18 @@ HeyGen can be replaced directly from the settings modal:
 - Base URL should normally be `https://api.heygen.com`. If the user enters `/v1`, `/v2`, or `/v3`, the app normalizes it back to the HeyGen API root before calling v3 endpoints.
 - Choose the auth mode:
   - `API Key` sends `X-Api-Key` and is the right choice for accounts with HeyGen API credits.
-  - `会员/OAuth Token` sends `Authorization: Bearer ...` and is intended for a real HeyGen OAuth/Bearer token. A value starting with `sk_` may still be an API Key, even if HeyGen accepts it for account reads.
+  - `会员/OAuth Token` sends `Authorization: Bearer ...` and is intended for a real HeyGen OAuth access token. A value starting with `sk_` may still be an API Key, even if HeyGen accepts it for account reads.
 - Choose the generation route:
   - `自动` uses Video Agent first when the auth mode is `会员/OAuth Token`; otherwise it uses Direct Video and falls back to Video Agent only when Direct Video reports API credits are required.
   - `Direct Video` calls `POST /v3/videos` and is the most deterministic script-to-lip-sync path, but HeyGen may require API credits.
   - `Video Agent` calls `POST /v3/video-agents` and is the route that best matches HeyGen's member/OAuth flow.
+- For member/OAuth mode, enter the HeyGen OAuth Client ID and the Redirect URI that has been approved in HeyGen. The app uses the official PKCE flow:
+  1. Click `打开 HeyGen 授权页`.
+  2. Complete the browser authorization.
+  3. Paste the final callback URL or only the `code` value into the callback field.
+  4. Click `完成会员授权`.
+- A successful OAuth authorization stores an encrypted local token bundle containing the access token, refresh token, and expiration time. The renderer never receives the token value, and the bundle is not stored in SQLite.
+- When the OAuth access token is near expiration, the main process uses the saved refresh token to obtain a fresh access token before calling HeyGen.
 - Enter a new HeyGen API Key or Bearer token and save to replace the previous credential.
 - Leave the API Key field empty and save to keep the previous key.
 - Saving or checking a valid HeyGen API Key automatically reads the account's preset avatar list. Choose the avatar in the video task.
@@ -117,5 +124,18 @@ $env:HEYGEN_GENERATION_ROUTE="auto"
 $env:HEYGEN_AVATAR_ID="optional-default-avatar-id"
 $env:HEYGEN_VOICE_ID="your-voice-id"
 $env:HEYGEN_RESOLUTION="720p"
+npm run configure:services
+```
+
+Optional HeyGen OAuth setup fields for scripted configuration:
+
+```powershell
+$env:HEYGEN_AUTH_MODE="oauth-bearer"
+$env:HEYGEN_GENERATION_ROUTE="auto"
+$env:HEYGEN_OAUTH_CLIENT_ID="your-oauth-client-id"
+$env:HEYGEN_OAUTH_REDIRECT_URI="your-approved-redirect-uri"
+$env:HEYGEN_OAUTH_AUTHORIZE_URL="https://app.heygen.com/oauth/authorize"
+$env:HEYGEN_OAUTH_TOKEN_URL="https://api2.heygen.com/v1/oauth/token"
+$env:HEYGEN_OAUTH_REFRESH_TOKEN_URL="https://api2.heygen.com/v1/oauth/refresh_token"
 npm run configure:services
 ```

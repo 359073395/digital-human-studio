@@ -204,6 +204,14 @@ _Avoid_: User account, workspace account, SaaS settings
 The HeyGen video submission path selected in service configuration. `Direct Video` means deterministic `POST /v3/videos` rendering that may require API credits. `Video Agent` means `POST /v3/video-agents` and is the route that best matches HeyGen member/OAuth workflows. `Auto` chooses the safer route from auth mode and falls back from Direct Video to Video Agent when HeyGen reports API credits are required.
 _Avoid_: Auth mode, account plan, avatar mode
 
+**HeyGen Member OAuth Route**:
+The OAuth-based HeyGen login path for accounts that should consume member/subscription credits instead of API-credit-only keys. It requires a HeyGen OAuth Client ID, an approved Redirect URI, browser authorization, and a local token exchange using PKCE.
+_Avoid_: API Key route, pasted sk key, guaranteed credit entitlement
+
+**HeyGen OAuth Token Bundle**:
+The encrypted local credential record created after HeyGen OAuth succeeds. It contains an access token, refresh token, and expiration time, and the main process refreshes it before HeyGen calls when needed. It must never be committed to GitHub or shown in the renderer.
+_Avoid_: SQLite setting, GitHub backup, visible Bearer token
+
 **Flow API Guide**:
 A compact task-level hint panel that shows which generation stages use which local service configuration, model name, Avatar ID, Voice ID, and API Key status. It may show whether a credential is configured, but it must never reveal the API Key value.
 _Avoid_: Secret display, large methodology panel, separate settings duplicate

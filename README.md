@@ -36,7 +36,7 @@ npm run release:ui
 请先阅读 AGENTS.md、CONTEXT.md、docs/adr/ 和 README.md。
 ```
 
-然后按上面的命令安装依赖并启动。API Key、Bearer Token、本地任务数据库、生成视频和本地缓存不会保存在 GitHub，需要在新电脑的软件设置里重新配置。
+然后按上面的命令安装依赖并启动。API Key、Bearer Token、HeyGen OAuth token bundle、本地任务数据库、生成视频和本地缓存不会保存在 GitHub，需要在新电脑的软件设置里重新配置或重新授权。
 
 ## GitHub 同步规则
 
@@ -54,6 +54,7 @@ npm run release:ui
 - 桌面体验：Windows 桌面版默认隐藏 Electron 系统菜单栏，不显示无关的 `File / Edit / View / Window`。
 - 视频分析中心：原视频链接、下载/上传、提取文案、画面分析、模式推荐。
 - 预设数字人口播：HeyGen Avatar + AI 文案 + 输出比例。
+- HeyGen 会员授权：设置页支持 OAuth Client ID + Redirect URI 的 PKCE 授权，成功后本地加密保存 token bundle，生成时可优先走 Video Agent 会员路由。
 - 商品/带货视频：商品资料、人物商品图、可选数字人口播。
 - 图片口型同步：参考人物图或人物商品图 + 口播脚本。
 - 个人 IP 视频：探店、知识输出、观点、人设内容。
