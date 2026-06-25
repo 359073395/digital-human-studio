@@ -138,7 +138,12 @@ export interface CreativeWorkflow {
   mixedCutPlan: string;
 }
 
-export type DedupStrategy = "content-rewrite" | "light-polish";
+export type DedupStrategy =
+  | "fidelity-light"
+  | "fidelity-strong"
+  | "pixel-remix"
+  | "content-rewrite"
+  | "light-polish";
 
 export interface OriginalityScoreReport {
   score: number;

@@ -178,7 +178,7 @@ const MIGRATIONS = [
       ALTER TABLE video_tasks ADD COLUMN mixed_cut_target_count INTEGER NOT NULL DEFAULT 1;
       ALTER TABLE video_tasks ADD COLUMN dedup_source_video_asset_id TEXT NOT NULL DEFAULT '';
       ALTER TABLE video_tasks ADD COLUMN dedup_target_score INTEGER NOT NULL DEFAULT 80;
-      ALTER TABLE video_tasks ADD COLUMN dedup_strategy TEXT NOT NULL DEFAULT 'content-rewrite';
+      ALTER TABLE video_tasks ADD COLUMN dedup_strategy TEXT NOT NULL DEFAULT 'fidelity-strong';
       ALTER TABLE video_tasks ADD COLUMN dedup_attempt_count INTEGER NOT NULL DEFAULT 0;
     `
   },

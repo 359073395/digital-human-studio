@@ -21,6 +21,22 @@ interface PathSettingsReader {
   getPathSettings: () => AppPathSettings;
 }
 
+interface DedupStrategyProfile {
+  id: Exclude<DedupStrategy, "content-rewrite" | "light-polish">;
+  label: string;
+  filters: string[];
+  crf: string;
+  gop: string;
+  preset: string;
+  baseScore: number;
+  metrics: {
+    segmentRestructure: number;
+    sourceReuse: number;
+    visualVariation: number;
+    audioVariation: number;
+  };
+}
+
 export class VideoDedupWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
@@ -210,17 +226,10 @@ function renderDedupVideo(input: {
 }): void {
   const ffmpegPath = requireFfmpegPath();
   fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
-  const strategyFilters =
-    input.strategy === "light-polish"
-      ? ["eq=saturation=1.04:contrast=1.03:brightness=0.005", "setpts=0.985*PTS"]
-      : [
-          "crop=iw*0.96:ih*0.96:iw*0.02:ih*0.02",
-          "eq=saturation=1.08:contrast=1.06:brightness=0.01",
-          "setpts=0.97*PTS"
-        ];
+  const profile = dedupStrategyProfile(input.strategy);
   const videoFilter = [
     `scale=${input.preset.width}:${input.preset.height}:force_original_aspect_ratio=increase`,
-    ...strategyFilters,
+    ...profile.filters,
     `scale=${input.preset.width}:${input.preset.height}:force_original_aspect_ratio=decrease`,
     `pad=${input.preset.width}:${input.preset.height}:(ow-iw)/2:(oh-ih)/2`,
     "setsar=1"
@@ -240,11 +249,17 @@ function renderDedupVideo(input: {
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      profile.preset,
       "-crf",
-      input.strategy === "light-polish" ? "21" : "22",
+      profile.crf,
+      "-g",
+      profile.gop,
+      "-bf",
+      "2",
       "-pix_fmt",
       "yuv420p",
+      "-metadata",
+      `comment=dedup-${profile.id}-${Date.now()}`,
       "-movflags",
       "+faststart",
       input.outputPath
@@ -267,45 +282,138 @@ function renderDedupVideo(input: {
   }
 }
 
+function dedupStrategyProfile(strategy: DedupStrategy): DedupStrategyProfile {
+  const normalized = normalizeRuntimeDedupStrategy(strategy);
+  switch (normalized) {
+    case "fidelity-light":
+      return {
+        id: "fidelity-light",
+        label: "保真轻去重",
+        filters: [
+          "crop=iw*0.988:ih*0.988:iw*0.006:ih*0.006",
+          "eq=saturation=1.025:contrast=1.018:brightness=0.003",
+          "noise=alls=1:allf=t+u",
+          "fps=30000/1001",
+          "setpts=0.992*PTS"
+        ],
+        crf: "21",
+        gop: "53",
+        preset: "veryfast",
+        baseScore: 74,
+        metrics: {
+          segmentRestructure: 58,
+          sourceReuse: 68,
+          visualVariation: 66,
+          audioVariation: 58
+        }
+      };
+    case "pixel-remix":
+      return {
+        id: "pixel-remix",
+        label: "深度像素重塑",
+        filters: [
+          "crop=iw*0.955:ih*0.955:iw*0.022:ih*0.022",
+          "scale=trunc(iw*1.018/2)*2:trunc(ih*1.018/2)*2",
+          "eq=saturation=1.055:contrast=1.045:brightness=0.006:gamma=1.01",
+          "noise=alls=4:allf=t+u",
+          "unsharp=5:5:0.32:3:3:0.08",
+          "fps=30",
+          "setpts=0.982*PTS"
+        ],
+        crf: "22",
+        gop: "41",
+        preset: "veryfast",
+        baseScore: 88,
+        metrics: {
+          segmentRestructure: 78,
+          sourceReuse: 80,
+          visualVariation: 90,
+          audioVariation: 78
+        }
+      };
+    case "fidelity-strong":
+    default:
+      return {
+        id: "fidelity-strong",
+        label: "保真强去重",
+        filters: [
+          "crop=iw*0.972:ih*0.972:iw*0.014:ih*0.014",
+          "scale=trunc(iw*1.012/2)*2:trunc(ih*1.012/2)*2",
+          "eq=saturation=1.04:contrast=1.032:brightness=0.004",
+          "noise=alls=2:allf=t+u",
+          "unsharp=3:3:0.28:3:3:0.0",
+          "fps=30000/1001",
+          "setpts=0.987*PTS"
+        ],
+        crf: "22",
+        gop: "47",
+        preset: "veryfast",
+        baseScore: 82,
+        metrics: {
+          segmentRestructure: 70,
+          sourceReuse: 74,
+          visualVariation: 82,
+          audioVariation: 72
+        }
+      };
+  }
+}
+
+function normalizeRuntimeDedupStrategy(
+  strategy: DedupStrategy
+): Exclude<DedupStrategy, "content-rewrite" | "light-polish"> {
+  if (strategy === "fidelity-light" || strategy === "light-polish") {
+    return "fidelity-light";
+  }
+
+  if (strategy === "pixel-remix") {
+    return "pixel-remix";
+  }
+
+  return "fidelity-strong";
+}
+
 function createOriginalityReport(
   task: VideoTask,
   attempt: number,
   sourceAsset: MediaAsset,
   processedPath: string
 ): OriginalityScoreReport {
-  const isContentRewrite = task.dedupStrategy !== "light-polish";
-  const baseScore = isContentRewrite ? 78 : 66;
-  const attemptBonus = Math.min(10, attempt * 3);
+  const profile = dedupStrategyProfile(task.dedupStrategy);
+  const attemptBonus = Math.min(8, attempt * 2);
   const styleBonus = task.subtitleStyle.enabled || task.frameTitleStyle.enabled ? 4 : 0;
   const processedPathBonus = processedPath.trim() ? 0 : -4;
-  const score = Math.min(95, baseScore + attemptBonus + styleBonus + processedPathBonus);
+  const score = Math.min(95, profile.baseScore + attemptBonus + styleBonus + processedPathBonus);
   const targetScore = task.dedupTargetScore || 80;
   const passed = score >= targetScore;
   return {
     score,
     targetScore,
     passed,
-    strategy: task.dedupStrategy,
+    strategy: profile.id,
     attempt,
     summary: passed
-      ? `内部原创度评分 ${score}，已达到 ${targetScore}+ 阈值。`
-      : `内部原创度评分 ${score}，未达到 ${targetScore}+ 阈值。`,
+      ? `${profile.label}完成：内部重复风险/原创度评分 ${score}，已达到 ${targetScore}+ 阈值。`
+      : `${profile.label}完成：内部重复风险/原创度评分 ${score}，未达到 ${targetScore}+ 阈值。`,
     metrics: {
-      segmentRestructure: isContentRewrite ? 82 : 52,
-      sourceReuse: sourceAsset.kind === "dedup-source-video" ? 68 : 62,
-      visualVariation: isContentRewrite ? 86 : 58,
+      segmentRestructure: profile.metrics.segmentRestructure,
+      sourceReuse:
+        sourceAsset.kind === "dedup-source-video"
+          ? profile.metrics.sourceReuse
+          : Math.max(60, profile.metrics.sourceReuse - 4),
+      visualVariation: profile.metrics.visualVariation,
       subtitleTitleCoverVariation: styleBonus > 0 ? 84 : 64,
-      audioVariation: isContentRewrite ? 78 : 54,
+      audioVariation: profile.metrics.audioVariation,
       scriptSimilarityRisk: task.finalScript.trim() ? 72 : 58,
       watermarkRisk: /watermark|douyin|tiktok|抖音|水印/i.test(sourceAsset.relativePath) ? 45 : 78
     },
     suggestions: passed
-      ? ["建议发布前人工确认画面无水印、字幕无错字、商品事实无误。"]
+      ? ["建议发布前人工确认画面无水印、字幕无错字、素材授权无误；内部评分不代表平台官方判定。"]
       : [
-          "替换更多镜头或补充自有素材。",
-          "重写开头 3 秒字幕和画面标题。",
-          "更换封面构图，避免复用原视频第一帧。",
-          "如已配置视频模型，可对高相似片段做 V2V/图生视频重构。"
+          "提高到“深度像素重塑”或增加自有素材替换高风险片段。",
+          "重做开头 3 秒字幕、画面标题和封面构图。",
+          "确认源视频没有平台水印、搬运标识或未授权人物/商品素材。",
+          "如果已配置视频模型，可后续对高风险片段做 V2V/图生视频重构。"
         ],
     generatedAt: new Date().toISOString()
   };
@@ -316,7 +424,7 @@ function createSourceOnlyReport(task: VideoTask, sourceAsset: MediaAsset): Origi
     score: 42,
     targetScore: task.dedupTargetScore || 80,
     passed: false,
-    strategy: task.dedupStrategy,
+    strategy: normalizeRuntimeDedupStrategy(task.dedupStrategy),
     attempt: task.dedupAttemptCount || 0,
     summary: "当前只导入了待处理视频，还没有生成去重处理版本。",
     metrics: {
@@ -348,8 +456,8 @@ function mergeReports(
     passed: score >= targetScore,
     summary:
       score >= targetScore
-        ? `内部原创度评分 ${score}，已达到 ${targetScore}+ 阈值。`
-        : `内部原创度评分 ${score}，未达到 ${targetScore}+ 阈值。`,
+        ? `内部重复风险/原创度评分 ${score}，已达到 ${targetScore}+ 阈值。`
+        : `内部重复风险/原创度评分 ${score}，未达到 ${targetScore}+ 阈值。`,
     generatedAt: new Date().toISOString()
   };
 }

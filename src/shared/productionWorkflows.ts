@@ -270,10 +270,11 @@ export const PRODUCTION_MODE_WORKFLOWS: Record<VideoGenerationMode, ProductionMo
   "video-dedup": {
     mode: "video-dedup",
     label: "视频去重处理",
-    summary: "导入任意成片或混剪结果后做内容级重构，输出处理后视频和原创度评分报告。",
+    summary:
+      "导入任意成片或混剪结果后做保真去重处理，输出处理后视频和内部重复风险/原创度评分报告。",
     builtInMethods: [
       "Originality score report",
-      "Content-level video rewrite",
+      "Fidelity-preserving technical dedup",
       "Low-value dedup warning",
       "Local render with optional video-model rewrite"
     ],
@@ -291,11 +292,11 @@ export const PRODUCTION_MODE_WORKFLOWS: Record<VideoGenerationMode, ProductionMo
         qualityGate: "没有待处理视频时必须阻止运行。"
       },
       {
-        id: "content-rewrite",
-        label: "内容级重构",
-        goal: "通过片段重组、节奏变化、画面处理、字幕标题封面变化降低重复风险。",
+        id: "fidelity-dedup",
+        label: "保真去重处理",
+        goal: "尽量保持肉眼观感，同时通过重采样、轻微像素扰动、编码结构变化、字幕标题封面变化降低重复风险。",
         method:
-          "Default strategy is content-rewrite: prefer segment restructuring and style changes over shallow MD5/mirror/BGM-only edits. Optional V2V can be added through the OpenAI-compatible video provider.",
+          "Default strategy is fidelity-strong. It changes frame sampling, slight crop/scale, color, noise, GOP, and metadata while avoiding obvious mirror/border tricks. Optional V2V can be added later through the OpenAI-compatible video provider.",
         requiredInputs: ["待处理视频", "目标原创度评分"],
         outputs: ["处理后 MP4", "封面", "字幕"],
         providerNeeds: ["local", "video"],

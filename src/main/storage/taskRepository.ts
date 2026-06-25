@@ -188,7 +188,7 @@ export class TaskRepository {
     const mixedCutBgmVolume = 70;
     const dedupSourceVideoAssetId = "";
     const dedupTargetScore = 80;
-    const dedupStrategy: DedupStrategy = "content-rewrite";
+    const dedupStrategy: DedupStrategy = "fidelity-strong";
     const dedupAttemptCount = 0;
     const customFontAssetId = null;
     const customFontFamily = "";
@@ -1127,7 +1127,15 @@ function normalizeDedupTargetScore(value: unknown): number {
 }
 
 function normalizeDedupStrategy(value: unknown): DedupStrategy {
-  return value === "light-polish" ? "light-polish" : "content-rewrite";
+  if (value === "fidelity-light" || value === "light-polish") {
+    return "fidelity-light";
+  }
+
+  if (value === "pixel-remix") {
+    return "pixel-remix";
+  }
+
+  return "fidelity-strong";
 }
 
 function normalizeDedupAttemptCount(value: unknown): number {

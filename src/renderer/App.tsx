@@ -32,6 +32,7 @@ import {
   DEFAULT_SUBTITLE_STYLE,
   OUTPUT_PRESETS,
   type CoverStyle,
+  type DedupStrategy,
   type FrameTitleStyle,
   type MediaAsset,
   type MixedCutGroupSetting,
@@ -127,7 +128,7 @@ const fallbackTask: VideoTask = {
   mixedCutEnableTransitions: false,
   mixedCutBgmVolume: 70,
   dedupTargetScore: 80,
-  dedupStrategy: "content-rewrite",
+  dedupStrategy: "fidelity-strong",
   dedupAttemptCount: 0,
   customFontFamily: "",
   selectedOutputPresets: ["portrait-9-16"],
@@ -2772,7 +2773,8 @@ export function App() {
                       <div className="mode-note">
                         <strong>视频去重处理</strong>
                         <span>
-                          对本地视频或混剪成片做内容级重构，并输出内部原创度评分报告，默认目标 80+。
+                          对本地视频或混剪成片做保真去重处理，并输出内部重复风险/原创度评分报告，默认目标
+                          80+。
                         </span>
                       </div>
                     ) : null}
@@ -3080,11 +3082,13 @@ export function App() {
                     <div className="mode-material-card dedup-source-card">
                       <div>
                         <strong>待处理视频</strong>
-                        <span>导入混剪成片或本地 MP4，处理后以内部原创度评分 80+ 为通过阈值。</span>
+                        <span>
+                          导入混剪成片或本地 MP4，做保真去重处理并输出内部重复风险/原创度评分。
+                        </span>
                       </div>
                       <div className="mode-settings-grid">
                         <label>
-                          目标原创度评分
+                          目标内部评分
                           <input
                             min={60}
                             max={95}
@@ -3109,15 +3113,13 @@ export function App() {
                             value={selectedTask.dedupStrategy}
                             onChange={(event) =>
                               void updateCurrentTask({
-                                dedupStrategy:
-                                  event.target.value === "light-polish"
-                                    ? "light-polish"
-                                    : "content-rewrite"
+                                dedupStrategy: parseDedupStrategy(event.target.value)
                               })
                             }
                           >
-                            <option value="content-rewrite">内容级重构</option>
-                            <option value="light-polish">轻量后处理</option>
+                            <option value="fidelity-strong">保真强去重（推荐）</option>
+                            <option value="fidelity-light">保真轻去重</option>
+                            <option value="pixel-remix">深度像素重塑</option>
                           </select>
                         </label>
                       </div>
@@ -6031,6 +6033,14 @@ function clampUiNumber(value: string, min: number, max: number, fallback: number
   }
 
   return Math.min(max, Math.max(min, Math.round(numericValue)));
+}
+
+function parseDedupStrategy(value: string): DedupStrategy {
+  if (value === "fidelity-light" || value === "pixel-remix") {
+    return value;
+  }
+
+  return "fidelity-strong";
 }
 
 interface MixedCutGroupRow {

@@ -44,7 +44,7 @@ describe("VideoDedupWorkflowService", () => {
       generationMode: "video-dedup",
       finalScript: "New title, new subtitle spine, and a changed call to action.",
       dedupTargetScore: 80,
-      dedupStrategy: "content-rewrite",
+      dedupStrategy: "fidelity-strong",
       selectedOutputPresets: ["portrait-9-16"]
     });
 
@@ -73,7 +73,41 @@ describe("VideoDedupWorkflowService", () => {
     ) as OriginalityScoreReport;
     expect(report.score).toBeGreaterThanOrEqual(80);
     expect(report.passed).toBe(true);
-    expect(report.summary).toContain("内部原创度评分");
+    expect(report.summary).toContain("内部重复风险/原创度评分");
+    expect(report.strategy).toBe("fidelity-strong");
+  });
+
+  it("renders the deeper pixel-remix strategy for high-risk material", () => {
+    const sourcePath = path.join(tempDir, "source-pixel.mp4");
+    createSampleVideo(sourcePath);
+    const task = repository.createTask({
+      title: "Pixel remix dedup",
+      sourceScript: "Original source script."
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "video-dedup",
+      finalScript: "Keep the same visible story while changing the encoded video structure.",
+      dedupTargetScore: 88,
+      dedupStrategy: "pixel-remix",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const service = new VideoDedupWorkflowService(repository, appPaths);
+    service.importSourceVideo(task.id, sourcePath);
+    const completed = service.runVideoDedup(task.id);
+    const reportAsset = completed.mediaAssets.find(
+      (asset) => asset.kind === "dedup-report" && asset.relativePath.endsWith(".json")
+    );
+
+    const report = JSON.parse(
+      fs.readFileSync(
+        path.join(getTaskDirectory(appPaths, task.id), reportAsset?.relativePath ?? ""),
+        "utf8"
+      )
+    ) as OriginalityScoreReport;
+    expect(report.strategy).toBe("pixel-remix");
+    expect(report.passed).toBe(true);
   });
 });
 

@@ -368,14 +368,67 @@ async function downloadMaterial(materialRoot, material) {
     return filePath;
   }
 
-  const response = await fetch(material.url);
-  if (!response.ok) {
-    throw new Error(`${material.label} 下载失败 (${response.status})`);
-  }
+  try {
+    const response = await fetch(material.url);
+    if (!response.ok) {
+      throw new Error(`${material.label} 下载失败 (${response.status})`);
+    }
 
-  fs.mkdirSync(materialRoot, { recursive: true });
-  fs.writeFileSync(filePath, Buffer.from(await response.arrayBuffer()));
-  return filePath;
+    fs.mkdirSync(materialRoot, { recursive: true });
+    fs.writeFileSync(filePath, Buffer.from(await response.arrayBuffer()));
+    return filePath;
+  } catch (error) {
+    if (!isImageFixturePath(filePath)) {
+      throw error;
+    }
+
+    console.warn(
+      `${material.label} 下载失败，改用本地生成测试图片：${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    createFallbackImage(filePath);
+    return filePath;
+  }
+}
+
+function isImageFixturePath(filePath) {
+  return /\.(?:jpg|jpeg|png|webp)$/i.test(filePath);
+}
+
+function createFallbackImage(outputPath) {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const ffmpegPath = requireFfmpegPath();
+  const result = spawnSync(
+    ffmpegPath,
+    [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=1024x1024:rate=1:duration=1",
+      "-frames:v",
+      "1",
+      "-q:v",
+      "2",
+      outputPath
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: 2 * 60 * 1000
+    }
+  );
+
+  if (result.error) {
+    throw new Error(`本地测试图片生成失败：${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`本地测试图片生成失败：${(result.stderr || result.stdout || "").slice(-1200)}`);
+  }
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+    throw new Error("本地测试图片生成完成但文件为空。");
+  }
 }
 
 async function prepareMaterials(testRoot) {
