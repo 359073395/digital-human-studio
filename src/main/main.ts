@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
+import { autoUpdater } from "electron-updater";
 import type { ActivateLicenseInput } from "../shared/license";
 import {
   DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI,
@@ -56,6 +57,7 @@ import { OpenAiCompatibleStoryboardProvider } from "./storyboard/openAiCompatibl
 import { StoryboardWorkflowService } from "./storyboard/storyboardWorkflowService";
 import { OpenAiAsrSubtitleProvider } from "./subtitles/openAiAsrSubtitleProvider";
 import { TaskRepository } from "./storage/taskRepository";
+import { UpdateService } from "./updates/updateService";
 import { ExportWorkflowService } from "./workflow/exportWorkflowService";
 import { MixedCutWorkflowService } from "./workflow/mixedCutWorkflowService";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
@@ -66,6 +68,7 @@ import type { RuntimePerformanceProfile } from "../shared/performanceProfile";
 
 const APP_DISPLAY_NAME = "跑量自媒体视频工作台";
 const APP_LEGACY_DATA_DIR_NAME = "自媒体视频工作台";
+const UPDATE_RELEASE_PAGE_URL = "https://github.com/359073395/digital-human-studio/releases";
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const ASSET_PROTOCOL = "dhs-asset";
 
@@ -159,6 +162,7 @@ interface MainRepositories {
   videoDedupWorkflowService: VideoDedupWorkflowService;
   realWorkflowRunner: RealWorkflowRunner;
   licenseService: LicenseService;
+  updateService: UpdateService;
   appPaths: ReturnType<typeof createAppPaths>;
   performanceProfile: RuntimePerformanceProfile;
 }
@@ -183,6 +187,13 @@ function createRepositories(): MainRepositories {
     isDevelopment: isDevelopment || !app.isPackaged,
     publicKeyPem: LICENSE_PUBLIC_KEY_PEM,
     machineCodeProvider: getMachineCode
+  });
+  const updateService = new UpdateService({
+    currentVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+    releasePageUrl: UPDATE_RELEASE_PAGE_URL,
+    updater: autoUpdater,
+    openExternal: (url) => shell.openExternal(url)
   });
   const serviceConfigurationRepository = new ServiceConfigurationRepository(
     taskDatabase,
@@ -274,6 +285,7 @@ function createRepositories(): MainRepositories {
     videoDedupWorkflowService,
     realWorkflowRunner,
     licenseService,
+    updateService,
     appPaths,
     performanceProfile
   };
@@ -297,6 +309,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     mixedCutWorkflowService,
     videoDedupWorkflowService,
     licenseService,
+    updateService,
     performanceProfile
   } = repositories;
 
@@ -352,6 +365,16 @@ function registerIpcHandlers(repositories: MainRepositories): void {
 
     return appSettingsRepository.updatePathSetting(kind, result.filePaths[0]);
   });
+
+  protectedHandle(IPC_CHANNELS.getUpdateStatus, () => updateService.getStatus());
+
+  protectedHandle(IPC_CHANNELS.checkForUpdates, () => updateService.checkForUpdates());
+
+  protectedHandle(IPC_CHANNELS.downloadUpdate, () => updateService.downloadUpdate());
+
+  protectedHandle(IPC_CHANNELS.installUpdate, () => updateService.installUpdate());
+
+  protectedHandle(IPC_CHANNELS.openUpdateReleasePage, () => updateService.openReleasePage());
 
   protectedHandle(IPC_CHANNELS.listTasks, () => taskRepository.listTasks());
 

@@ -326,21 +326,27 @@ describe("SourceAssetService", () => {
     );
   });
 
-  it("imports multiple mixed-cut materials without overwriting same-millisecond names", () => {
+  it("imports mixed-cut visuals and keeps audio out of visual materials", () => {
     const service = new SourceAssetService(repository, appPaths);
     const task = repository.createTask({ title: "Mixed cut" });
     const videoPath = path.join(tempDir, "material.mp4");
     const imagePath = path.join(tempDir, "material.jpg");
+    const audioPath = path.join(tempDir, "voice.mp3");
     fs.writeFileSync(videoPath, Buffer.from("video"));
     fs.writeFileSync(imagePath, Buffer.from("image"));
+    fs.writeFileSync(audioPath, Buffer.from("audio"));
 
-    const updated = service.importMixedCutMaterials(task.id, [videoPath, imagePath]);
+    const updated = service.importMixedCutMaterials(task.id, [videoPath, imagePath, audioPath]);
     const assets = updated.mediaAssets.filter((asset) => asset.kind === "mixed-cut-material");
+    const audioAssets = updated.mediaAssets.filter((asset) => asset.kind === "mixed-cut-audio");
 
     expect(updated.steps.find((step) => step.id === "source")?.status).toBe("complete");
     expect(assets).toHaveLength(2);
+    expect(audioAssets).toHaveLength(1);
+    expect(audioAssets[0]?.relativePath).toContain("source/mixed-audio/");
     expect(new Set(assets.map((asset) => asset.relativePath)).size).toBe(2);
     for (const asset of assets) {
+      expect(asset.relativePath).not.toMatch(/\.(mp3|wav|m4a|aac|ogg)$/i);
       expect(
         fs.existsSync(
           path.join(getTaskDirectory(appPaths, task.id), ...asset.relativePath.split("/"))
@@ -363,7 +369,7 @@ describe("SourceAssetService", () => {
 
     expect(updated.steps.find((step) => step.id === "source")?.status).toBe("complete");
     expect(assets).toHaveLength(1);
-    expect(assets[0]?.relativePath).toContain("source/mixed-audio/mixed-cut-audio-");
+    expect(assets[0]?.relativePath).toContain("source/mixed-audio/audio-1-");
     expect(assets[0]?.relativePath).toContain("voice-2.wav");
     expect(
       fs.existsSync(
@@ -384,7 +390,9 @@ describe("SourceAssetService", () => {
     fs.mkdirSync(path.join(firstFolder, "2"), { recursive: true });
     fs.mkdirSync(path.join(secondFolder, "10"), { recursive: true });
     fs.writeFileSync(path.join(firstFolder, "1", "clip-a.mp4"), Buffer.from("video-a"));
+    fs.writeFileSync(path.join(firstFolder, "1", "voice-a.mp3"), Buffer.from("audio-a"));
     fs.writeFileSync(path.join(firstFolder, "2", "clip-b.jpg"), Buffer.from("image-b"));
+    fs.writeFileSync(path.join(firstFolder, "narration.wav"), Buffer.from("audio-root"));
     fs.writeFileSync(path.join(firstFolder, "ignore.txt"), "ignore", "utf8");
     fs.writeFileSync(path.join(secondFolder, "10", "clip-c.webp"), Buffer.from("image-c"));
 
@@ -396,9 +404,17 @@ describe("SourceAssetService", () => {
     const secondAssets = secondSync.mediaAssets.filter(
       (asset) => asset.kind === "mixed-cut-material"
     );
+    const firstAudioAssets = firstSync.mediaAssets.filter(
+      (asset) => asset.kind === "mixed-cut-audio"
+    );
 
     expect(firstSync.mixedCutMaterialDirectory).toBe(path.resolve(firstFolder));
     expect(firstAssets).toHaveLength(2);
+    expect(firstAudioAssets).toHaveLength(2);
+    expect(firstAudioAssets.every((asset) => asset.kind === "mixed-cut-audio")).toBe(true);
+    expect(
+      firstAssets.every((asset) => !/\.(mp3|wav|m4a|aac|ogg)$/i.test(asset.relativePath))
+    ).toBe(true);
     expect(secondSync.mixedCutMaterialDirectory).toBe(path.resolve(secondFolder));
     expect(secondAssets).toHaveLength(1);
     expect(firstSync.mixedCutGroupSettings?.map((setting) => setting.groupId)).toEqual(["1", "2"]);

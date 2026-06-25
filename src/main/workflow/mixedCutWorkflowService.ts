@@ -53,7 +53,7 @@ interface MixedCutEditDecisionRecord {
   coverFile: string;
   audioSourcePath?: string;
   targetDurationSeconds: number;
-  targetDurationSource: "audio" | "script";
+  targetDurationSource: "audio" | "script" | "material";
   warnings: string[];
   performance: {
     mode: RuntimePerformanceProfile["mode"];
@@ -118,8 +118,10 @@ export class MixedCutWorkflowService {
 
       const taskDirectory = getTaskDirectory(this.paths, taskId);
       const mixedCutAudio = resolveMixedCutAudio(task, taskDirectory);
-      if (!task.finalScript.trim() && !mixedCutAudio) {
-        throw new Error("请先生成或填写混剪视频文案，或上传一条混剪配音/音乐。");
+      if (task.mixedCutChapterMode === "fill-with-bgm" && !mixedCutAudio) {
+        throw new Error(
+          "为配音填充画面模式需要先导入一条混剪配音/音乐，音频只会作为时长和音轨使用，不会作为画面素材。"
+        );
       }
 
       const shotGroups = buildMixedCutShotGroups(task, taskDirectory);
@@ -208,12 +210,15 @@ export class MixedCutWorkflowService {
     targetCount: number;
   }): MixedCutEditDecisionRecord {
     const mixedCutAudio = resolveMixedCutAudio(input.task, input.taskDirectory);
-    const targetDurationSeconds = mixedCutAudio
-      ? clampAudioTargetDuration(getMediaDurationSeconds(mixedCutAudio.absolutePath))
-      : estimateScriptDurationSeconds(input.task.finalScript);
     const subtitleScript =
       input.task.finalScript.trim() || input.task.sourceScript.trim() || input.task.title;
     const selectedShots = input.combination.shots;
+    const targetTiming = resolveMixedCutTargetTiming({
+      audio: mixedCutAudio,
+      selectedShotCount: selectedShots.length,
+      task: input.task
+    });
+    const targetDurationSeconds = targetTiming.seconds;
     const segmentDurationSeconds = Math.max(
       SEGMENT_DURATION_SECONDS / 2,
       targetDurationSeconds / Math.max(1, selectedShots.length)
@@ -303,7 +308,7 @@ export class MixedCutWorkflowService {
       coverFile,
       audioSourcePath: mixedCutAudio?.relativePath,
       targetDurationSeconds,
-      targetDurationSource: mixedCutAudio ? "audio" : "script",
+      targetDurationSource: targetTiming.source,
       warnings,
       performance: {
         mode: input.performanceProfile.mode,
@@ -539,7 +544,7 @@ function resolveMixedCutAudio(
   taskDirectory: string
 ): { asset: MediaAsset; relativePath: string; absolutePath: string } | null {
   const asset = [...task.mediaAssets]
-    .reverse()
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
     .find(
       (candidate) =>
         candidate.kind === "mixed-cut-audio" && isAudioMixedCutAsset(candidate.relativePath)
@@ -552,6 +557,35 @@ function resolveMixedCutAudio(
     asset,
     relativePath: asset.relativePath,
     absolutePath: absoluteTaskPathFromDirectory(taskDirectory, asset.relativePath)
+  };
+}
+
+function resolveMixedCutTargetTiming(input: {
+  task: VideoTask;
+  selectedShotCount: number;
+  audio: { absolutePath: string } | null;
+}): { seconds: number; source: MixedCutEditDecisionRecord["targetDurationSource"] } {
+  if (input.task.mixedCutChapterMode === "fill-with-bgm") {
+    if (!input.audio) {
+      throw new Error("为配音填充画面模式需要先导入一条混剪配音/音乐。");
+    }
+
+    return {
+      seconds: clampAudioTargetDuration(getMediaDurationSeconds(input.audio.absolutePath)),
+      source: "audio"
+    };
+  }
+
+  if (input.task.mixedCutChapterMode === "fixed-material-count") {
+    return {
+      seconds: clampMaterialTargetDuration(input.selectedShotCount * SEGMENT_DURATION_SECONDS),
+      source: "material"
+    };
+  }
+
+  return {
+    seconds: estimateScriptDurationSeconds(input.task.finalScript),
+    source: "script"
   };
 }
 
@@ -729,6 +763,17 @@ function clampAudioTargetDuration(seconds: number): number {
   }
 
   return Math.min(MAX_AUDIO_TARGET_DURATION_SECONDS, Math.max(1, Number(seconds.toFixed(2))));
+}
+
+function clampMaterialTargetDuration(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return MIN_TARGET_DURATION_SECONDS;
+  }
+
+  return Math.min(
+    MAX_TARGET_DURATION_SECONDS,
+    Math.max(SEGMENT_DURATION_SECONDS, Number(seconds.toFixed(2)))
+  );
 }
 
 function assertFfmpegSuccess(

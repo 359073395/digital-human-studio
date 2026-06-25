@@ -28,6 +28,7 @@ import type {
 import type { AppPathSettingKind, AppPathSettings } from "./appSettings";
 import type { ActivateLicenseInput, ActivationResult, LicenseStatus } from "./license";
 import type { RuntimePerformanceProfile } from "./performanceProfile";
+import type { AppUpdateStatus } from "./updates";
 
 export type AppEnvironment = "development" | "production";
 
@@ -91,6 +92,11 @@ export interface DigitalHumanStudioAPI {
   completeHeyGenOAuth: (input: CompleteHeyGenOAuthInput) => Promise<ServiceConnectionCheck>;
   getAppPathSettings: () => Promise<AppPathSettings>;
   chooseAppPathSetting: (kind: AppPathSettingKind) => Promise<AppPathSettings>;
+  getUpdateStatus: () => Promise<AppUpdateStatus>;
+  checkForUpdates: () => Promise<AppUpdateStatus>;
+  downloadUpdate: () => Promise<AppUpdateStatus>;
+  installUpdate: () => Promise<AppUpdateStatus>;
+  openUpdateReleasePage: () => Promise<AppUpdateStatus>;
 }
 
 export const IPC_CHANNELS = {
@@ -144,7 +150,12 @@ export const IPC_CHANNELS = {
   authorizeHeyGenOAuth: "service-configurations:heygen-oauth-authorize",
   completeHeyGenOAuth: "service-configurations:heygen-oauth-complete",
   getAppPathSettings: "app-settings:get-paths",
-  chooseAppPathSetting: "app-settings:choose-path"
+  chooseAppPathSetting: "app-settings:choose-path",
+  getUpdateStatus: "updates:get-status",
+  checkForUpdates: "updates:check",
+  downloadUpdate: "updates:download",
+  installUpdate: "updates:install",
+  openUpdateReleasePage: "updates:open-release-page"
 } as const;
 
 export interface CreateTaskInput {

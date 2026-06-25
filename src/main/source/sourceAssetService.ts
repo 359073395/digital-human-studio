@@ -282,8 +282,14 @@ export class SourceAssetService {
     }
 
     this.requireTask(taskId);
+    const audioFilePaths: string[] = [];
     for (const [index, filePath] of filePaths.entries()) {
       const extension = validateExtension(filePath, MIXED_MATERIAL_EXTENSIONS);
+      if (SOURCE_AUDIO_EXTENSIONS.has(extension)) {
+        audioFilePaths.push(filePath);
+        continue;
+      }
+
       const relativePath = `source/mixed-materials/material-${Date.now()}-${index + 1}-${sanitizeBaseName(
         path.basename(filePath, extension)
       )}${extension}`;
@@ -291,18 +297,17 @@ export class SourceAssetService {
       this.taskRepository.addMediaAsset(taskId, "mixed-cut-material", relativePath);
     }
 
+    if (audioFilePaths.length > 0) {
+      this.replaceMixedCutAudioAssets(taskId, audioFilePaths);
+    }
+
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
   importMixedCutAudio(taskId: string, filePath: string): VideoTask {
     this.requireTask(taskId);
-    const extension = validateExtension(filePath, SOURCE_AUDIO_EXTENSIONS);
-    const relativePath = `source/mixed-audio/mixed-cut-audio-${Date.now()}-${sanitizeBaseName(
-      path.basename(filePath, extension)
-    )}${extension}`;
-    copyTaskFile(this.paths, taskId, filePath, relativePath);
-    this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-audio");
-    this.taskRepository.addMediaAsset(taskId, "mixed-cut-audio", relativePath);
+    validateExtension(filePath, SOURCE_AUDIO_EXTENSIONS);
+    this.replaceMixedCutAudioAssets(taskId, [filePath]);
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
@@ -320,8 +325,12 @@ export class SourceAssetService {
       );
     }
 
-    const fileCount = groups.reduce((count, group) => count + group.filePaths.length, 0);
-    if (fileCount === 0) {
+    const audioFilePaths = listSupportedFiles(resolvedDirectory, SOURCE_AUDIO_EXTENSIONS);
+    const visualFileCount = groups.reduce(
+      (count, group) => count + group.visualFilePaths.length,
+      0
+    );
+    if (visualFileCount === 0 && audioFilePaths.length === 0) {
       return this.taskRepository.updateTask({
         taskId: task.id,
         mixedCutMaterialDirectory: resolvedDirectory,
@@ -342,7 +351,7 @@ export class SourceAssetService {
     this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-material");
 
     for (const group of groups) {
-      for (const [index, filePath] of group.filePaths.entries()) {
+      for (const [index, filePath] of group.visualFilePaths.entries()) {
         const extension = validateExtension(filePath, MIXED_VISUAL_EXTENSIONS);
         const relativePath = `source/mixed-materials/${group.groupId}/shot-${index + 1}-${sanitizeBaseName(
           path.basename(filePath, extension)
@@ -350,6 +359,10 @@ export class SourceAssetService {
         copyTaskFile(this.paths, taskId, filePath, relativePath);
         this.taskRepository.addMediaAsset(taskId, "mixed-cut-material", relativePath);
       }
+    }
+
+    if (audioFilePaths.length > 0) {
+      this.replaceMixedCutAudioAssets(taskId, audioFilePaths);
     }
 
     this.taskRepository.updateTask({
@@ -374,11 +387,13 @@ export class SourceAssetService {
 
   async analyzeSourceVisuals(taskId: string): Promise<VideoTask> {
     const task = this.requireTask(taskId);
-    const sourceAssets = task.mediaAssets.filter((asset) =>
-      ["source-video", "mixed-cut-material", "product-image", "reference-image"].includes(
-        asset.kind
-      )
-    );
+    const sourceAssets = task.mediaAssets.filter((asset) => {
+      if (asset.kind === "mixed-cut-material") {
+        return MIXED_VISUAL_EXTENSIONS.has(path.extname(asset.relativePath).toLowerCase());
+      }
+
+      return ["source-video", "product-image", "reference-image"].includes(asset.kind);
+    });
     const originalVideoUrl = task.originalVideoUrl?.trim();
 
     if (sourceAssets.length === 0) {
@@ -455,6 +470,20 @@ export class SourceAssetService {
     }
 
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+  }
+
+  private replaceMixedCutAudioAssets(taskId: string, filePaths: string[]): void {
+    this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-audio");
+    for (const [index, filePath] of [...filePaths]
+      .sort((left, right) => left.localeCompare(right))
+      .entries()) {
+      const extension = validateExtension(filePath, SOURCE_AUDIO_EXTENSIONS);
+      const relativePath = `source/mixed-audio/audio-${index + 1}-${Date.now()}-${sanitizeBaseName(
+        path.basename(filePath, extension)
+      )}${extension}`;
+      copyTaskFile(this.paths, taskId, filePath, relativePath);
+      this.taskRepository.addMediaAsset(taskId, "mixed-cut-audio", relativePath);
+    }
   }
 }
 
@@ -602,7 +631,7 @@ function listSupportedFiles(directoryPath: string, allowed: Set<string>): string
 
 function listGroupedMixedCutFiles(
   directoryPath: string
-): Array<{ groupId: string; filePaths: string[] }> {
+): Array<{ groupId: string; visualFilePaths: string[] }> {
   return fs
     .readdirSync(directoryPath, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
@@ -611,7 +640,7 @@ function listGroupedMixedCutFiles(
       const groupDirectory = path.join(directoryPath, entry.name);
       return {
         groupId: entry.name,
-        filePaths: listSupportedFiles(groupDirectory, MIXED_VISUAL_EXTENSIONS)
+        visualFilePaths: listSupportedFiles(groupDirectory, MIXED_VISUAL_EXTENSIONS)
       };
     });
 }

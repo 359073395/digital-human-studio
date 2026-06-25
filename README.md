@@ -60,7 +60,7 @@ npm run release:ui
 - 图片口型同步：参考人物图或人物商品图 + 口播脚本。
 - 个人 IP 视频：探店、知识输出、观点、人设内容。
 - 爆款视频复刻：拉片分析、结构改写、故事板和分镜提示。
-- 混剪视频：选择素材文件夹，按素材数量、组合和重复率自动估算批量生成数量。
+- 混剪视频：选择素材文件夹，按素材数量、组合和重复率自动估算批量生成数量；音频只作为配音/BGM/时长依据，永远不会作为画面素材使用。
 - 视频去重处理：独立模式，输出内部原创度评分和处理报告。
 
 ## 重要文档
@@ -90,3 +90,16 @@ npm run package:win
 - `release/app/win-unpacked/`
 
 安装包只发给试用同事；授权码生成器和授权私钥只由管理员保管。详细流程见 `docs/windows-internal-test-package.md`。
+
+## 在线更新发布流程
+
+正式安装版会在主界面顶部显示“检查更新 / 立即更新 / 安装重启”。开发版不会直接在线更新，会提示安装正式版。
+
+内部发布新版本时：
+
+1. 更新 `package.json` 里的 `version`。
+2. 运行 `npm run release:check`、`npm run release:ui`、`npm run package:win`。
+3. 在 GitHub 仓库创建对应版本的 Release，上传 `release/app/PaoliangVideoWorkbench-Setup-<version>-win-x64.exe` 以及 electron-builder 生成的更新元数据。
+4. 同事打开软件后，在主界面顶部点击“检查更新”，发现新版本后点击“立即更新”，下载完成后点击“安装重启”。
+
+更新源默认是 [GitHub Releases](https://github.com/359073395/digital-human-studio/releases)。软件是否可进入工作台仍由本机激活码控制。

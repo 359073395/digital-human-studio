@@ -38,6 +38,7 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: "First proof point. Second proof point. Final call to action.",
       mixedCutTargetCount: 2,
+      mixedCutChapterMode: "minimum-duration",
       selectedOutputPresets: ["portrait-9-16", "landscape-16-9"]
     });
 
@@ -110,6 +111,7 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: longScript,
       mixedCutTargetCount: 1,
+      mixedCutChapterMode: "minimum-duration",
       selectedOutputPresets: ["portrait-9-16"]
     });
 
@@ -146,6 +148,7 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: "",
       mixedCutTargetCount: 1,
+      mixedCutChapterMode: "fill-with-bgm",
       selectedOutputPresets: ["portrait-9-16"]
     });
 
@@ -191,6 +194,91 @@ describe("MixedCutWorkflowService", () => {
     ).toBeGreaterThan(1000);
   }, 20_000);
 
+  it("requires audio when filling visuals for a voiceover", () => {
+    const task = repository.createTask({
+      title: "Missing audio mixed cut",
+      sourceScript: ""
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "",
+      mixedCutChapterMode: "fill-with-bgm",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const materialPath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "source",
+      "mixed-materials",
+      "1",
+      "missing-audio.png"
+    );
+    fs.mkdirSync(path.dirname(materialPath), { recursive: true });
+    fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+    repository.addMediaAsset(
+      task.id,
+      "mixed-cut-material",
+      "source/mixed-materials/1/missing-audio.png"
+    );
+
+    const updated = new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+
+    expect(updated.steps.find((step) => step.id === "export")?.status).toBe("retry-ready");
+    expect(updated.steps.find((step) => step.id === "export")?.errorMessage).toContain(
+      "为配音填充画面"
+    );
+  });
+
+  it("does not use audio duration as timing in fixed-material-count mode", () => {
+    const task = repository.createTask({
+      title: "Fixed material mixed cut",
+      sourceScript: ""
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "",
+      mixedCutChapterMode: "fixed-material-count",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const audioPath = path.join(taskDirectory, "source", "mixed-audio", "long-voice.wav");
+    fs.mkdirSync(path.dirname(audioPath), { recursive: true });
+    createSilentWav(audioPath, 8);
+    repository.addMediaAsset(task.id, "mixed-cut-audio", "source/mixed-audio/long-voice.wav");
+
+    const sourceDirectory = path.join(taskDirectory, "source", "mixed-materials");
+    for (const [groupId, fileName] of [
+      ["1", "fixed-a.png"],
+      ["2", "fixed-b.png"]
+    ]) {
+      const materialPath = path.join(sourceDirectory, groupId, fileName);
+      fs.mkdirSync(path.dirname(materialPath), { recursive: true });
+      fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+      repository.addMediaAsset(
+        task.id,
+        "mixed-cut-material",
+        `source/mixed-materials/${groupId}/${fileName}`
+      );
+    }
+
+    new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const editDecisionPath = path.join(
+      taskDirectory,
+      "post",
+      "edit-decisions-mixed-cut-1-portrait-9-16.json"
+    );
+    const record = JSON.parse(fs.readFileSync(editDecisionPath, "utf8")) as {
+      targetDurationSeconds: number;
+      targetDurationSource: string;
+    };
+
+    expect(record.targetDurationSource).toBe("material");
+    expect(record.targetDurationSeconds).toBeLessThan(8);
+  }, 20_000);
+
   it("calculates batch count from material count and reuse rate instead of manual input", () => {
     const task = repository.createTask({
       title: "Auto planned mixed cut",
@@ -201,6 +289,7 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: "Short script for auto batch planning.",
       mixedCutTargetCount: 30,
+      mixedCutChapterMode: "minimum-duration",
       mixedCutReuseRate: 0,
       selectedOutputPresets: ["portrait-9-16"]
     });

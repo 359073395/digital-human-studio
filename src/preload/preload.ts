@@ -29,6 +29,7 @@ import type {
   UpdateTaskInput
 } from "../shared/ipc";
 import type { SourceTranscriptionResult } from "../shared/scriptGeneration";
+import type { AppUpdateStatus } from "../shared/updates";
 
 const IPC_CHANNELS = {
   getAppInfo: "app:get-info",
@@ -81,7 +82,12 @@ const IPC_CHANNELS = {
   authorizeHeyGenOAuth: "service-configurations:heygen-oauth-authorize",
   completeHeyGenOAuth: "service-configurations:heygen-oauth-complete",
   getAppPathSettings: "app-settings:get-paths",
-  chooseAppPathSetting: "app-settings:choose-path"
+  chooseAppPathSetting: "app-settings:choose-path",
+  getUpdateStatus: "updates:get-status",
+  checkForUpdates: "updates:check",
+  downloadUpdate: "updates:download",
+  installUpdate: "updates:install",
+  openUpdateReleasePage: "updates:open-release-page"
 } as const;
 
 const api: DigitalHumanStudioAPI = {
@@ -191,7 +197,15 @@ const api: DigitalHumanStudioAPI = {
   getAppPathSettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getAppPathSettings) as Promise<AppPathSettings>,
   chooseAppPathSetting: (kind: AppPathSettingKind) =>
-    ipcRenderer.invoke(IPC_CHANNELS.chooseAppPathSetting, kind) as Promise<AppPathSettings>
+    ipcRenderer.invoke(IPC_CHANNELS.chooseAppPathSetting, kind) as Promise<AppPathSettings>,
+  getUpdateStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getUpdateStatus) as Promise<AppUpdateStatus>,
+  checkForUpdates: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.checkForUpdates) as Promise<AppUpdateStatus>,
+  downloadUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.downloadUpdate) as Promise<AppUpdateStatus>,
+  installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.installUpdate) as Promise<AppUpdateStatus>,
+  openUpdateReleasePage: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.openUpdateReleasePage) as Promise<AppUpdateStatus>
 };
 
 contextBridge.exposeInMainWorld("digitalHumanStudio", api);

@@ -55,6 +55,7 @@ import type {
 } from "../shared/ipc";
 import type { LicenseStatus } from "../shared/license";
 import type { RuntimePerformanceProfile } from "../shared/performanceProfile";
+import type { AppUpdateStatus } from "../shared/updates";
 import {
   calculateGroupedMixedCutBatchPlan,
   type GroupedMixedCutBatchPlan
@@ -275,6 +276,8 @@ export function App() {
   const [performanceProfile, setPerformanceProfile] = useState<RuntimePerformanceProfile | null>(
     null
   );
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
+  const [isUpdateBusy, setIsUpdateBusy] = useState(false);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [activationCode, setActivationCode] = useState("");
   const [activationMessage, setActivationMessage] = useState("");
@@ -380,7 +383,9 @@ export function App() {
   const mixedCutAudioAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-audio"
   );
-  const latestMixedCutAudioAsset = [...mixedCutAudioAssets].reverse()[0];
+  const currentMixedCutAudioAsset = [...mixedCutAudioAssets].sort((left, right) =>
+    left.relativePath.localeCompare(right.relativePath)
+  )[0];
   const mixedCutGroupRows = useMemo(
     () =>
       buildMixedCutGroupRows(
@@ -616,6 +621,16 @@ export function App() {
 
     void loadServiceConfigurations();
     void loadAppPathSettings();
+    window.digitalHumanStudio
+      .getUpdateStatus()
+      .then(setUpdateStatus)
+      .catch((error) =>
+        setUpdateStatus({
+          status: "error",
+          currentVersion: "",
+          message: error instanceof Error ? error.message : "更新状态读取失败"
+        })
+      );
   }, [licenseStatus?.activated]);
 
   useEffect(() => {
@@ -1265,10 +1280,15 @@ export function App() {
       const materialCount = task.mediaAssets.filter(
         (asset) => asset.kind === "mixed-cut-material"
       ).length;
+      const audioCount = task.mediaAssets.filter(
+        (asset) => asset.kind === "mixed-cut-audio"
+      ).length;
       setActionMessage(
         materialCount > 0
-          ? `已同步 ${materialCount} 个混剪素材`
-          : "所选文件夹里没有找到支持的视频、图片或音频素材"
+          ? `已同步 ${materialCount} 个画面素材${audioCount > 0 ? `，并检测到 ${audioCount} 个音频` : ""}`
+          : audioCount > 0
+            ? `已检测到 ${audioCount} 个音频，但还需要在数字文件夹里放入视频或图片画面素材`
+            : "所选文件夹里没有找到支持的视频、图片或音频素材"
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
@@ -1290,8 +1310,13 @@ export function App() {
     try {
       const task = await api.uploadMixedCutAudio(selectedTask.id);
       const imported = task.mediaAssets.some((asset) => asset.kind === "mixed-cut-audio");
+      const usesAudioTiming = task.mixedCutChapterMode === "fill-with-bgm";
       setActionMessage(
-        imported ? "混剪音频已导入，生成时会按音频长度自动匹配画面时长" : "未选择混剪音频"
+        imported
+          ? usesAudioTiming
+            ? "混剪音频已导入，本模式会按音频长度自动匹配画面时长"
+            : "混剪音频已导入，本模式会作为最终音轨使用，不会决定画面时长"
+          : "未选择混剪音频"
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
@@ -1843,6 +1868,130 @@ export function App() {
     setSettingsOpen(true);
     void loadServiceConfigurations();
     void loadAppPathSettings();
+    void loadUpdateStatus();
+  }
+
+  async function loadUpdateStatus() {
+    if (!window.digitalHumanStudio) {
+      setUpdateStatus({
+        status: "unsupported",
+        currentVersion: appVersion,
+        message: "当前窗口没有连接到桌面版更新服务。"
+      });
+      return;
+    }
+
+    try {
+      const status = await window.digitalHumanStudio.getUpdateStatus();
+      setUpdateStatus(status);
+    } catch (error) {
+      setUpdateStatus({
+        status: "error",
+        currentVersion: appVersion,
+        message: error instanceof Error ? error.message : "更新状态读取失败"
+      });
+    }
+  }
+
+  async function checkForUpdates() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsUpdateBusy(true);
+    setUpdateStatus((current) => ({
+      status: "checking",
+      currentVersion: current?.currentVersion ?? appVersion,
+      releaseUrl: current?.releaseUrl,
+      message: "正在检查更新..."
+    }));
+
+    try {
+      const status = await window.digitalHumanStudio.checkForUpdates();
+      setUpdateStatus(status);
+      setActionMessage(status.message);
+    } catch (error) {
+      const status: AppUpdateStatus = {
+        status: "error",
+        currentVersion: updateStatus?.currentVersion ?? appVersion,
+        releaseUrl: updateStatus?.releaseUrl,
+        message: error instanceof Error ? error.message : "检查更新失败"
+      };
+      setUpdateStatus(status);
+      setActionMessage(status.message);
+    } finally {
+      setIsUpdateBusy(false);
+    }
+  }
+
+  async function downloadUpdate() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsUpdateBusy(true);
+    setUpdateStatus((current) => ({
+      status: "downloading",
+      currentVersion: current?.currentVersion ?? appVersion,
+      availableVersion: current?.availableVersion,
+      releaseUrl: current?.releaseUrl,
+      progressPercent: 0,
+      message: "正在下载更新..."
+    }));
+
+    try {
+      const status = await window.digitalHumanStudio.downloadUpdate();
+      setUpdateStatus(status);
+      setActionMessage(status.message);
+    } catch (error) {
+      const status: AppUpdateStatus = {
+        status: "error",
+        currentVersion: updateStatus?.currentVersion ?? appVersion,
+        releaseUrl: updateStatus?.releaseUrl,
+        message: error instanceof Error ? error.message : "下载更新失败"
+      };
+      setUpdateStatus(status);
+      setActionMessage(status.message);
+    } finally {
+      setIsUpdateBusy(false);
+    }
+  }
+
+  async function installUpdate() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    setIsUpdateBusy(true);
+    try {
+      const status = await window.digitalHumanStudio.installUpdate();
+      setUpdateStatus(status);
+      setActionMessage(status.message);
+    } catch (error) {
+      const status: AppUpdateStatus = {
+        status: "error",
+        currentVersion: updateStatus?.currentVersion ?? appVersion,
+        releaseUrl: updateStatus?.releaseUrl,
+        message: error instanceof Error ? error.message : "安装更新失败"
+      };
+      setUpdateStatus(status);
+      setActionMessage(status.message);
+    } finally {
+      setIsUpdateBusy(false);
+    }
+  }
+
+  async function openUpdateReleasePage() {
+    if (!window.digitalHumanStudio) {
+      return;
+    }
+
+    try {
+      const status = await window.digitalHumanStudio.openUpdateReleasePage();
+      setUpdateStatus(status);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "打开发布页失败");
+    }
   }
 
   async function loadAppPathSettings() {
@@ -2290,6 +2439,14 @@ export function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <UpdateStatusControl
+            busy={isUpdateBusy}
+            onCheck={() => void checkForUpdates()}
+            onDownload={() => void downloadUpdate()}
+            onInstall={() => void installUpdate()}
+            onOpenReleasePage={() => void openUpdateReleasePage()}
+            status={updateStatus}
+          />
           {performanceProfile ? (
             <div className="performance-badge" title={performanceProfile.reason}>
               <Monitor size={15} />
@@ -3026,16 +3183,20 @@ export function App() {
                           </div>
                           <div
                             className={`mixed-cut-sync-state ${
-                              latestMixedCutAudioAsset ? "ok" : "pending"
+                              currentMixedCutAudioAsset ? "ok" : "pending"
                             }`}
                           >
-                            {latestMixedCutAudioAsset
-                              ? "已导入音频，成片时长将按音频长度匹配"
-                              : "未上传音频，将按文案估算成片时长"}
+                            {currentMixedCutAudioAsset
+                              ? selectedTask.mixedCutChapterMode === "fill-with-bgm"
+                                ? "已导入音频，本模式会按音频长度填充画面"
+                                : "已导入音频，本模式只作为最终音轨使用"
+                              : selectedTask.mixedCutChapterMode === "fill-with-bgm"
+                                ? "本模式需要音频：请上传配音/音乐或在素材文件夹中放入音频"
+                                : "未导入音频，将只按画面素材生成"}
                           </div>
-                          <p title={latestMixedCutAudioAsset?.relativePath}>
-                            {latestMixedCutAudioAsset?.relativePath
-                              ? latestMixedCutAudioAsset.relativePath.split("/").at(-1)
+                          <p title={currentMixedCutAudioAsset?.relativePath}>
+                            {currentMixedCutAudioAsset?.relativePath
+                              ? currentMixedCutAudioAsset.relativePath.split("/").at(-1)
                               : "支持 mp3 / wav / m4a / aac / ogg"}
                           </p>
                           <label className="range-field">
@@ -3056,7 +3217,7 @@ export function App() {
                             </div>
                           </label>
                           <p className="field-hint">
-                            如果上传的是旁白或成品配音，系统会以音频时长为准生成对应长度的画面。
+                            只有“为配音填充画面”会用音频长度驱动画面；其他章节模式不会把音频当作画面素材。
                           </p>
                         </div>
                       </div>
@@ -3806,6 +3967,14 @@ export function App() {
               onClear={() => void clearLicenseActivation()}
               status={licenseStatus}
             />
+            <UpdateSettingsPanel
+              busy={isUpdateBusy}
+              onCheck={() => void checkForUpdates()}
+              onDownload={() => void downloadUpdate()}
+              onInstall={() => void installUpdate()}
+              onOpenReleasePage={() => void openUpdateReleasePage()}
+              status={updateStatus}
+            />
             <div className="settings-layout">
               <nav className="settings-provider-nav" aria-label="服务列表">
                 {serviceConfigurations.map((configuration) => {
@@ -4397,6 +4566,88 @@ function LicenseSettingsPanel({
       <button className="danger-button" type="button" onClick={onClear}>
         清除本机激活
       </button>
+    </section>
+  );
+}
+
+function UpdateStatusControl({
+  busy,
+  onCheck,
+  onDownload,
+  onInstall,
+  onOpenReleasePage,
+  status
+}: {
+  busy: boolean;
+  onCheck: () => void;
+  onDownload: () => void;
+  onInstall: () => void;
+  onOpenReleasePage: () => void;
+  status: AppUpdateStatus | null;
+}) {
+  const action = updatePrimaryAction(status);
+  const handleClick =
+    action === "download" ? onDownload : action === "install" ? onInstall : onCheck;
+
+  return (
+    <div
+      className={`update-chip ${status?.status ?? "idle"}`}
+      data-testid="release-update-status"
+      title={status?.message ?? "检查软件更新"}
+    >
+      <RefreshCw size={14} className={busy || status?.status === "checking" ? "spinning" : ""} />
+      <span>{updateStatusLabel(status)}</span>
+      <button type="button" disabled={busy} onClick={handleClick}>
+        {updateActionLabel(status)}
+      </button>
+      {status?.releaseUrl ? (
+        <button
+          type="button"
+          className="ghost"
+          disabled={busy}
+          title="打开 GitHub 发布页"
+          onClick={onOpenReleasePage}
+        >
+          发布页
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function UpdateSettingsPanel({
+  busy,
+  onCheck,
+  onDownload,
+  onInstall,
+  onOpenReleasePage,
+  status
+}: {
+  busy: boolean;
+  onCheck: () => void;
+  onDownload: () => void;
+  onInstall: () => void;
+  onOpenReleasePage: () => void;
+  status: AppUpdateStatus | null;
+}) {
+  const action = updatePrimaryAction(status);
+  const handleClick =
+    action === "download" ? onDownload : action === "install" ? onInstall : onCheck;
+
+  return (
+    <section className="settings-update-panel" aria-label="软件更新">
+      <div>
+        <strong>软件更新</strong>
+        <span>{status?.message ?? "尚未读取更新状态。"}</span>
+      </div>
+      <div className="settings-update-actions">
+        <button type="button" disabled={busy} onClick={handleClick}>
+          {updateActionLabel(status)}
+        </button>
+        <button type="button" disabled={busy} onClick={onOpenReleasePage}>
+          打开发布页
+        </button>
+      </div>
     </section>
   );
 }
@@ -6414,6 +6665,53 @@ function mixedCutGroupIdFromRelativePath(relativePath: string): string {
 
 function isVisualMixedCutAsset(relativePath: string): boolean {
   return /\.(mp4|mov|m4v|webm|mkv|avi|png|jpe?g|webp)$/i.test(relativePath);
+}
+
+function updatePrimaryAction(status: AppUpdateStatus | null): "check" | "download" | "install" {
+  if (status?.status === "available") {
+    return "download";
+  }
+
+  if (status?.status === "downloaded") {
+    return "install";
+  }
+
+  return "check";
+}
+
+function updateActionLabel(status: AppUpdateStatus | null): string {
+  const action = updatePrimaryAction(status);
+  if (action === "download") {
+    return "立即更新";
+  }
+
+  if (action === "install") {
+    return "安装重启";
+  }
+
+  return status?.status === "checking" ? "检查中" : "检查更新";
+}
+
+function updateStatusLabel(status: AppUpdateStatus | null): string {
+  switch (status?.status) {
+    case "available":
+      return `发现 ${status.availableVersion ?? "新版本"}`;
+    case "not-available":
+      return "已是最新";
+    case "checking":
+      return "检查中";
+    case "downloading":
+      return status.progressPercent ? `下载 ${Math.round(status.progressPercent)}%` : "下载中";
+    case "downloaded":
+      return "更新就绪";
+    case "error":
+      return "更新失败";
+    case "unsupported":
+      return "正式版可更新";
+    case "idle":
+    default:
+      return "软件更新";
+  }
 }
 
 function assetFileName(relativePath: string): string {

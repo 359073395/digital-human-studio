@@ -106,6 +106,62 @@ button:disabled {
   font-size: 12px;
 }
 
+.update-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(360px, 38vw);
+  min-height: 34px;
+  padding: 0 6px 0 11px;
+  border: 1px solid rgba(126, 152, 187, 0.38);
+  border-radius: 999px;
+  background: rgba(248, 251, 255, 0.82);
+  color: #243247;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.update-chip span {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.update-chip button {
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.update-chip button.ghost {
+  background: transparent;
+}
+
+.update-chip.available,
+.update-chip.downloaded {
+  border-color: rgba(79, 138, 122, 0.45);
+  background: rgba(218, 233, 225, 0.78);
+  color: #244f45;
+}
+
+.update-chip.error {
+  border-color: rgba(190, 96, 88, 0.45);
+  background: rgba(248, 226, 222, 0.78);
+  color: #8a332e;
+}
+
+.spinning {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .operation-notice {
   position: fixed;
   top: 74px;
@@ -2289,6 +2345,46 @@ label {
   border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.54);
+}
+
+.settings-update-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 0;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.54);
+}
+
+.settings-update-panel > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.settings-update-panel strong {
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.settings-update-panel span {
+  min-width: 0;
+  overflow: hidden;
+  color: #b6c2d2;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .local-path-heading {
@@ -4595,6 +4691,25 @@ body,
   border-color: rgba(255, 250, 241, 0.18);
   background: rgba(255, 250, 241, 0.08);
   color: #fffaf1;
+}
+
+.topbar .update-chip {
+  border-color: rgba(255, 250, 241, 0.18);
+  background: rgba(255, 250, 241, 0.08);
+  color: #fffaf1;
+}
+
+.topbar .update-chip.available,
+.topbar .update-chip.downloaded {
+  border-color: rgba(196, 210, 178, 0.42);
+  background: rgba(196, 210, 178, 0.18);
+  color: #f7ffe9;
+}
+
+.topbar .update-chip.error {
+  border-color: rgba(214, 145, 133, 0.46);
+  background: rgba(214, 145, 133, 0.16);
+  color: #ffe8e2;
 }
 
 .task-strip {
