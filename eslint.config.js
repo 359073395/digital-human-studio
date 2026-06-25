@@ -12,6 +12,7 @@ module.exports = tseslint.config(
       "node_modules/",
       "coverage/",
       "data/",
+      "release/",
       "eslint.config.js",
       ".superpowers/",
       "tmp/"

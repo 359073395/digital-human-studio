@@ -75,6 +75,7 @@ import {
 } from "../shared/serviceConfig";
 import { countCompleteSteps } from "../shared/workbench";
 
+const APP_LOGO_URL = "./app-logo.png";
 const now = new Date().toISOString();
 
 type PreviewMode = "finished" | "cover";
@@ -2254,9 +2255,12 @@ export function App() {
         <style>{`@font-face { font-family: "DHS Custom Font"; src: url("${customFontUrl}"); font-display: swap; }`}</style>
       ) : null}
       <header className="topbar">
-        <div>
-          <h1>跑量自媒体视频工作台</h1>
-          <p>{appVersion || "跑量自媒体视频工作台"}</p>
+        <div className="brand-lockup">
+          <img alt="" className="brand-logo" src={APP_LOGO_URL} />
+          <div>
+            <h1>跑量自媒体视频工作台</h1>
+            <p>{appVersion || "跑量自媒体视频工作台"}</p>
+          </div>
         </div>
         <div className="topbar-actions">
           {performanceProfile ? (
@@ -4260,7 +4264,7 @@ function ActivationGate({
       <section className="activation-card">
         <div className="activation-heading">
           <span>
-            <KeyRound size={22} />
+            <img alt="" src={APP_LOGO_URL} />
           </span>
           <div>
             <h1>跑量自媒体视频工作台</h1>

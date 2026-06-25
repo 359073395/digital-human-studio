@@ -1,3 +1,4 @@
+const fs = require("node:fs");
 const path = require("node:path");
 const { app, BrowserWindow, clipboard, ipcMain } = require("electron");
 const {
@@ -7,9 +8,7 @@ const {
   readPrivateKey
 } = require("./license-utils");
 
-const PRIVATE_KEY_PATH = path.resolve(
-  process.env.DHS_LICENSE_PRIVATE_KEY || DEFAULT_PRIVATE_KEY_PATH
-);
+const PRIVATE_KEY_PATH = resolvePrivateKeyPath();
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -17,7 +16,10 @@ function createWindow() {
     height: 680,
     minWidth: 680,
     minHeight: 580,
-    title: "跑量自媒体视频工作台 - 授权码生成器",
+    title:
+      "\u8dd1\u91cf\u81ea\u5a92\u4f53\u89c6\u9891\u5de5\u4f5c\u53f0 - \u6388\u6743\u7801\u751f\u6210\u5668",
+    icon:
+      resolveAssetPath(["public", "app-logo.ico"]) || resolveAssetPath(["public", "app-logo.png"]),
     backgroundColor: "#efeae1",
     autoHideMenuBar: true,
     webPreferences: {
@@ -47,6 +49,7 @@ ipcMain.handle("license-tool:copy", (_event, value) => {
 });
 
 function renderHtml() {
+  const logoDataUrl = createLogoDataUrl();
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -81,7 +84,17 @@ function renderHtml() {
         box-shadow: 0 18px 48px rgba(47, 51, 47, .12);
       }
       header {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr);
+        gap: 14px;
+        align-items: center;
         padding: 22px;
+      }
+      .logo {
+        width: 58px;
+        height: 58px;
+        object-fit: contain;
+        filter: drop-shadow(0 10px 22px rgba(166, 119, 36, .22));
       }
       h1 {
         margin: 0;
@@ -173,8 +186,11 @@ function renderHtml() {
   <body>
     <main>
       <header>
-        <h1>跑量自媒体视频工作台授权码生成器</h1>
-        <p>输入试用电脑激活页显示的机器码，设置授权对象和有效天数，生成离线激活码。私钥只读取本机 data/license/private-key.pem。</p>
+        <img class="logo" alt="" src="${logoDataUrl}" />
+        <div>
+          <h1>跑量自媒体视频工作台授权码生成器</h1>
+          <p>输入试用电脑激活页显示的机器码，设置授权对象和有效天数，生成离线激活码。私钥只读取本机安全资源，不会联网。</p>
+        </div>
       </header>
       <form id="form">
         <label>
@@ -242,6 +258,37 @@ function renderHtml() {
     </script>
   </body>
 </html>`;
+}
+
+function resolvePrivateKeyPath() {
+  const explicit = process.env.DHS_LICENSE_PRIVATE_KEY;
+  const candidates = [
+    explicit ? path.resolve(explicit) : "",
+    path.join(process.resourcesPath || "", "license-private-key.pem"),
+    path.resolve(DEFAULT_PRIVATE_KEY_PATH)
+  ].filter(Boolean);
+  return (
+    candidates.find((candidate) => fs.existsSync(candidate)) ??
+    path.resolve(DEFAULT_PRIVATE_KEY_PATH)
+  );
+}
+
+function resolveAssetPath(segments) {
+  const candidates = [
+    path.resolve(...segments),
+    path.join(__dirname, "..", ...segments),
+    path.join(process.resourcesPath || "", "app", ...segments)
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+}
+
+function createLogoDataUrl() {
+  const logoPath = resolveAssetPath(["public", "app-logo.png"]);
+  if (!logoPath) {
+    return "";
+  }
+  const data = fs.readFileSync(logoPath);
+  return `data:image/png;base64,${data.toString("base64")}`;
 }
 
 app.whenReady().then(createWindow);

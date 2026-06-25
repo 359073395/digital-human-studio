@@ -4571,6 +4571,21 @@ body,
   font-weight: 800;
 }
 
+.brand-lockup {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.brand-logo {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 18px rgba(244, 193, 90, 0.2));
+}
+
 .topbar p {
   color: #c5d0cb;
 }
@@ -5113,6 +5128,12 @@ select:focus-visible {
   border-radius: 14px;
   background: var(--studio-accent, #496d66);
   color: #fffaf1;
+}
+
+.activation-heading img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
 }
 
 .activation-heading h1 {

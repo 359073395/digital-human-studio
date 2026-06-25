@@ -232,6 +232,8 @@ async function main() {
         };
 
         await waitForText('跑量自媒体视频工作台');
+        const brandLogo = await waitFor('.brand-logo');
+        assert(brandLogo.naturalWidth > 0, '软件 Logo 未正确加载。');
 
         await click('[data-testid="release-new-task"]');
         await submitTaskName('UI验收任务');

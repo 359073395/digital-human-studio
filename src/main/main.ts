@@ -95,6 +95,16 @@ function getRendererEntry(): string {
   return path.join(__dirname, "../../dist-renderer/index.html");
 }
 
+function resolveAppIconPath(): string {
+  const candidates = [
+    path.join(process.cwd(), "public", "app-logo.ico"),
+    path.join(process.cwd(), "public", "app-logo.png"),
+    path.join(__dirname, "../../dist-renderer/app-logo.png"),
+    path.join(__dirname, "../../public/app-logo.png")
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
+}
+
 function createMainWindow(): void {
   Menu.setApplicationMenu(null);
 
@@ -104,6 +114,7 @@ function createMainWindow(): void {
     minWidth: 1180,
     minHeight: 720,
     title: APP_DISPLAY_NAME,
+    icon: resolveAppIconPath(),
     autoHideMenuBar: true,
     backgroundColor: "#f5f7fb",
     show: false,

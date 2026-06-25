@@ -22,6 +22,7 @@
     "license:keygen": "node scripts/license-keygen.js",
     "license:create": "node scripts/license-create.js",
     "license:tool": "electron scripts/license-tool.js",
+    "license:package": "node scripts/package-license-tool.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

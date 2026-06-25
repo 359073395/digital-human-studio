@@ -23,6 +23,20 @@ npm run license:tool
 
 生成器是一个本地小窗口。输入用户激活页显示的机器码、授权对象和有效天数，即可生成 `PLV1...` 激活码，并可一键复制。
 
+## 打包授权码生成器
+
+```bash
+npm run license:package
+```
+
+输出结果：
+
+- 可运行目录：`release/license-tool/license-generator-win-x64/`
+- 启动程序：`release/license-tool/license-generator-win-x64/PaoliangLicenseGenerator.exe`
+- 压缩包：`release/跑量授权码生成器-1.0.0-win-x64.zip`
+
+这个包内置授权私钥，可复制到其它 Windows 电脑使用。它相当于“发证工具”，只能由你本人或授权管理员保管，不能发给普通试用用户。
+
 ## 命令行签发
 
 ```bash
