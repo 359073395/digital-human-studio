@@ -86,7 +86,7 @@ npm run package:win
 
 输出文件：
 
-- `release/app/PaoliangVideoWorkbench-Setup-1.0.0-win-x64.exe`
+- `release/app/PaoliangVideoWorkbench-Setup-<version>-win-x64.exe`
 - `release/app/win-unpacked/`
 
 安装包只发给试用同事；授权码生成器和授权私钥只由管理员保管。详细流程见 `docs/windows-internal-test-package.md`。
@@ -101,6 +101,15 @@ npm run package:win
 2. 运行 `npm run release:check`、`npm run release:ui`、`npm run package:win`。
 3. 在 GitHub 仓库创建对应版本的 Release，上传 `release/app/PaoliangVideoWorkbench-Setup-<version>-win-x64.exe` 以及 electron-builder 生成的更新元数据。
 4. 同事打开软件后，在主界面顶部点击“检查更新”，发现新版本后点击“立即更新”，下载完成后点击“安装重启”。
+
+也可以用 GitHub Actions 自动发布。提交并推送代码后，创建并推送版本标签：
+
+```bash
+git tag v<version>
+git push origin v<version>
+```
+
+仓库会自动运行 `Build Windows Release`，生成并上传安装包、blockmap 和 `latest.yml`。例如本次 `1.0.1` 版本使用 `v1.0.1`。
 
 更新源默认是 [GitHub Releases](https://github.com/359073395/digital-human-studio/releases)。软件是否可进入工作台仍由本机激活码控制。
 
