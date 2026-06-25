@@ -19,6 +19,9 @@
     "release:e2e:real": "npm run build && node scripts/release-e2e-real.js",
     "release:ui": "npm run build && node scripts/release-ui-check.js",
     "configure:services": "npm run build:main && electron scripts/configure-services.js",
+    "license:keygen": "node scripts/license-keygen.js",
+    "license:create": "node scripts/license-create.js",
+    "license:tool": "electron scripts/license-tool.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

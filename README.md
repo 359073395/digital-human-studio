@@ -69,6 +69,7 @@ npm run release:ui
 - `CONTEXT.md`：产品语言、边界和术语。
 - `docs/adr/`：重要架构和产品决策记录。
 - `docs/api-configuration.md`：API 配置说明。
+- `docs/license-activation.md`：离线激活码、授权码生成器和私钥备份说明。
 - `docs/release-small-scope-validation.md`：小范围交付版验收标准。
 
 ## 安全原则

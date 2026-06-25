@@ -26,6 +26,7 @@ import type {
   ServiceConnectionCheck
 } from "./serviceConfig";
 import type { AppPathSettingKind, AppPathSettings } from "./appSettings";
+import type { ActivateLicenseInput, ActivationResult, LicenseStatus } from "./license";
 import type { RuntimePerformanceProfile } from "./performanceProfile";
 
 export type AppEnvironment = "development" | "production";
@@ -40,6 +41,9 @@ export interface AppInfo {
 
 export interface DigitalHumanStudioAPI {
   getAppInfo: () => Promise<AppInfo>;
+  getLicenseStatus: () => Promise<LicenseStatus>;
+  activateLicense: (input: ActivateLicenseInput) => Promise<ActivationResult>;
+  clearLicense: () => Promise<LicenseStatus>;
   openSettings: () => Promise<void>;
   listTasks: () => Promise<VideoTaskSummary[]>;
   getTask: (taskId: string) => Promise<VideoTask | null>;
@@ -90,6 +94,9 @@ export interface DigitalHumanStudioAPI {
 
 export const IPC_CHANNELS = {
   getAppInfo: "app:get-info",
+  getLicenseStatus: "license:get-status",
+  activateLicense: "license:activate",
+  clearLicense: "license:clear",
   openSettings: "app:open-settings",
   listTasks: "tasks:list",
   getTask: "tasks:get",

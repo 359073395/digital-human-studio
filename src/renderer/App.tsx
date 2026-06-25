@@ -53,6 +53,7 @@ import type {
   StartHeyGenOAuthResult,
   UpdateTaskInput
 } from "../shared/ipc";
+import type { LicenseStatus } from "../shared/license";
 import type { RuntimePerformanceProfile } from "../shared/performanceProfile";
 import {
   calculateGroupedMixedCutBatchPlan,
@@ -273,6 +274,10 @@ export function App() {
   const [performanceProfile, setPerformanceProfile] = useState<RuntimePerformanceProfile | null>(
     null
   );
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [activationCode, setActivationCode] = useState("");
+  const [activationMessage, setActivationMessage] = useState("");
+  const [isActivating, setIsActivating] = useState(false);
   const [taskSummaries, setTaskSummaries] = useState<VideoTaskSummary[]>(fallbackTasks);
   const [selectedTaskId, setSelectedTaskId] = useState(fallbackTask.id);
   const [selectedTask, setSelectedTask] = useState<VideoTask>(fallbackTask);
@@ -591,12 +596,25 @@ export function App() {
         setPerformanceProfile(info.performanceProfile);
       })
       .catch(() => setAppVersion("跑量自媒体视频工作台"));
-    void loadServiceConfigurations();
-    void loadAppPathSettings();
+    window.digitalHumanStudio
+      .getLicenseStatus()
+      .then(setLicenseStatus)
+      .catch((error) =>
+        setActivationMessage(error instanceof Error ? error.message : "授权状态读取失败")
+      );
   }, []);
 
   useEffect(() => {
-    if (!window.digitalHumanStudio) {
+    if (!window.digitalHumanStudio || !licenseStatus?.activated) {
+      return;
+    }
+
+    void loadServiceConfigurations();
+    void loadAppPathSettings();
+  }, [licenseStatus?.activated]);
+
+  useEffect(() => {
+    if (!window.digitalHumanStudio || !licenseStatus?.activated) {
       return;
     }
 
@@ -635,11 +653,11 @@ export function App() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [licenseStatus?.activated]);
 
   useEffect(() => {
     const api = window.digitalHumanStudio;
-    if (!api || previewRelativePaths.length === 0) {
+    if (!api || !licenseStatus?.activated || previewRelativePaths.length === 0) {
       return;
     }
 
@@ -673,7 +691,7 @@ export function App() {
     return () => {
       ignore = true;
     };
-  }, [previewPathSignature, previewRelativePaths, selectedTask.id]);
+  }, [licenseStatus?.activated, previewPathSignature, previewRelativePaths, selectedTask.id]);
 
   useEffect(() => {
     if (!storyScriptJsonUrl) {
@@ -2137,6 +2155,59 @@ export function App() {
     }
   }
 
+  async function submitActivation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const api = window.digitalHumanStudio;
+    if (!api) {
+      setActivationMessage("桌面版后端未连接，无法激活。");
+      return;
+    }
+
+    setIsActivating(true);
+    setActivationMessage("正在校验激活码...");
+    try {
+      const result = await api.activateLicense({ code: activationCode });
+      setLicenseStatus(result.status);
+      setActivationMessage(result.message);
+      if (result.ok) {
+        setActivationCode("");
+      }
+    } catch (error) {
+      setActivationMessage(error instanceof Error ? error.message : "激活失败。");
+    } finally {
+      setIsActivating(false);
+    }
+  }
+
+  async function copyMachineCode() {
+    if (!licenseStatus?.machineCode) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(licenseStatus.machineCode);
+      setActivationMessage("机器码已复制。");
+    } catch {
+      setActivationMessage(`机器码：${licenseStatus.machineCode}`);
+    }
+  }
+
+  async function clearLicenseActivation() {
+    const api = window.digitalHumanStudio;
+    if (!api) {
+      return;
+    }
+
+    try {
+      const status = await api.clearLicense();
+      setLicenseStatus(status);
+      setSettingsOpen(false);
+      setActivationMessage("本机激活已清除，请重新输入激活码。");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "清除激活失败。");
+    }
+  }
+
   const activeSettingsConfiguration =
     serviceConfigurations.find(
       (configuration) => configuration.providerId === activeSettingsProviderId
@@ -2161,6 +2232,21 @@ export function App() {
     activeSettingsConfiguration?.providerId === "heygen" &&
     activeSettingsDraft?.authMode === "oauth-bearer" &&
     !activeSettingsDraft.oauthClientId?.trim();
+
+  if (!licenseStatus?.activated) {
+    return (
+      <ActivationGate
+        activationCode={activationCode}
+        appVersion={appVersion}
+        isActivating={isActivating}
+        message={activationMessage || licenseStatus?.error || ""}
+        onActivationCodeChange={setActivationCode}
+        onCopyMachineCode={() => void copyMachineCode()}
+        onSubmit={(event) => void submitActivation(event)}
+        status={licenseStatus}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -3664,6 +3750,10 @@ export function App() {
               onChoose={(kind) => void chooseAppPathSetting(kind)}
               settings={appPathSettings}
             />
+            <LicenseSettingsPanel
+              onClear={() => void clearLicenseActivation()}
+              status={licenseStatus}
+            />
             <div className="settings-layout">
               <nav className="settings-provider-nav" aria-label="服务列表">
                 {serviceConfigurations.map((configuration) => {
@@ -4019,7 +4109,7 @@ export function App() {
                     {activeSettingsConfiguration.providerId === "asr" ? (
                       <div className="settings-form-grid">
                         <label>
-                          ASR æŽ¥å£æ¨¡å¼
+                          ASR 接口模式
                           <select
                             value={activeSettingsDraft.asrMode ?? "audio-transcriptions"}
                             onChange={(event) =>
@@ -4031,7 +4121,7 @@ export function App() {
                             }
                           >
                             <option value="chat-audio">
-                              OpenAI Chat éŸ³é¢‘è¾“å…¥ï¼ˆGemini ä¸­è½¬æŽ¨èï¼‰
+                              OpenAI Chat 音频输入（Gemini 中转推荐）
                             </option>
                             <option value="audio-transcriptions">
                               OpenAI audio/transcriptions
@@ -4142,6 +4232,129 @@ export function App() {
       ) : null}
     </div>
   );
+}
+
+function ActivationGate({
+  activationCode,
+  appVersion,
+  isActivating,
+  message,
+  onActivationCodeChange,
+  onCopyMachineCode,
+  onSubmit,
+  status
+}: {
+  activationCode: string;
+  appVersion: string;
+  isActivating: boolean;
+  message: string;
+  onActivationCodeChange: (value: string) => void;
+  onCopyMachineCode: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  status: LicenseStatus | null;
+}) {
+  const machineCode = status?.machineCode ?? "正在读取...";
+
+  return (
+    <main className="activation-shell">
+      <section className="activation-card">
+        <div className="activation-heading">
+          <span>
+            <KeyRound size={22} />
+          </span>
+          <div>
+            <h1>跑量自媒体视频工作台</h1>
+            <p>{appVersion}</p>
+          </div>
+        </div>
+
+        <div className="activation-machine-card">
+          <small>本机机器码</small>
+          <strong data-testid="release-license-machine-code">{machineCode}</strong>
+          <button type="button" onClick={onCopyMachineCode} disabled={!status?.machineCode}>
+            复制机器码
+          </button>
+        </div>
+
+        <form className="activation-form" onSubmit={onSubmit}>
+          <label>
+            激活码
+            <textarea
+              data-testid="release-license-code-input"
+              value={activationCode}
+              disabled={isActivating}
+              placeholder="请输入 PLV1 开头的离线激活码"
+              onChange={(event) => onActivationCodeChange(event.target.value.trim())}
+            />
+          </label>
+          <button
+            className="primary"
+            data-testid="release-license-submit"
+            type="submit"
+            disabled={isActivating || !activationCode.trim()}
+          >
+            {isActivating ? "正在激活..." : "激活软件"}
+          </button>
+        </form>
+
+        {message ? (
+          <p
+            className={
+              message.includes("成功") || message.includes("复制")
+                ? "activation-message ok"
+                : "activation-message"
+            }
+          >
+            {message}
+          </p>
+        ) : (
+          <p className="activation-message">未激活前不能进入工作台、设置 API 或生成视频。</p>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function LicenseSettingsPanel({
+  onClear,
+  status
+}: {
+  onClear: () => void;
+  status: LicenseStatus | null;
+}) {
+  return (
+    <section className="license-info-panel">
+      <div>
+        <span>授权信息</span>
+        <strong>{status?.holder || "已激活"}</strong>
+      </div>
+      <dl>
+        <div>
+          <dt>机器码</dt>
+          <dd>{status?.machineCode || "-"}</dd>
+        </div>
+        <div>
+          <dt>到期时间</dt>
+          <dd>{status?.expiresAt ? formatLicenseDate(status.expiresAt) : "-"}</dd>
+        </div>
+        <div>
+          <dt>剩余天数</dt>
+          <dd>{status?.daysRemaining ?? "-"} 天</dd>
+        </div>
+      </dl>
+      <button className="danger-button" type="button" onClick={onClear}>
+        清除本机激活
+      </button>
+    </section>
+  );
+}
+
+function formatLicenseDate(value: string): string {
+  return new Date(value).toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
 }
 
 function LocalPathSettingsPanel({

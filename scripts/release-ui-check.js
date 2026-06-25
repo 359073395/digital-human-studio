@@ -4,6 +4,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { once } = require("node:events");
+const { createLicenseCode, readPrivateKey } = require("./license-utils");
 
 const DEBUG_PORT = Number(process.env.RELEASE_UI_DEBUG_PORT || 9333);
 
@@ -127,6 +128,7 @@ async function main() {
     env: {
       ...process.env,
       DHS_APP_DATA_DIR: appDataDir,
+      DHS_LICENSE_TEST_BYPASS: "1",
       ELECTRON_DISABLE_SECURITY_WARNINGS: "true"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -143,6 +145,48 @@ async function main() {
     client = new CdpClient(page.webSocketDebuggerUrl);
     await client.open();
     await client.call("Runtime.enable");
+    const machineCode = await client.evaluate(`
+      (async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        for (let i = 0; i < 100; i += 1) {
+          const element = document.querySelector('[data-testid="release-license-machine-code"]');
+          const value = element?.textContent?.trim() || '';
+          if (/^[A-Z0-9]{4}-[A-Z0-9]{4}/.test(value)) {
+            return value;
+          }
+          await wait(100);
+        }
+        return '';
+      })()
+    `);
+
+    if (machineCode) {
+      const privateKeyPem = readPrivateKey();
+      const activation = createLicenseCode({
+        machineCode,
+        holder: "发布UI验收",
+        days: 7,
+        privateKeyPem
+      });
+      await client.evaluate(`
+        (async () => {
+          const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const input = document.querySelector('[data-testid="release-license-code-input"]');
+          if (!input) return;
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+          setter.call(input, ${JSON.stringify(activation.code)});
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          document.querySelector('[data-testid="release-license-submit"]').click();
+          for (let i = 0; i < 100; i += 1) {
+            if (!document.querySelector('[data-testid="release-license-code-input"]')) return;
+            await wait(100);
+          }
+          throw new Error('自动激活后仍停留在激活页。');
+        })()
+      `);
+    }
+
     await client.evaluate(`
       (async () => {
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

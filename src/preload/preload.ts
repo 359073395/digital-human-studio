@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { VideoTask, VideoTaskSummary } from "../shared/domain";
 import type { AppPathSettingKind, AppPathSettings } from "../shared/appSettings";
+import type { ActivateLicenseInput, ActivationResult, LicenseStatus } from "../shared/license";
 import type {
   ProviderId,
   ListServiceModelsInput,
@@ -31,6 +32,9 @@ import type { SourceTranscriptionResult } from "../shared/scriptGeneration";
 
 const IPC_CHANNELS = {
   getAppInfo: "app:get-info",
+  getLicenseStatus: "license:get-status",
+  activateLicense: "license:activate",
+  clearLicense: "license:clear",
   openSettings: "app:open-settings",
   listTasks: "tasks:list",
   getTask: "tasks:get",
@@ -81,6 +85,11 @@ const IPC_CHANNELS = {
 
 const api: DigitalHumanStudioAPI = {
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.getAppInfo) as Promise<AppInfo>,
+  getLicenseStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getLicenseStatus) as Promise<LicenseStatus>,
+  activateLicense: (input: ActivateLicenseInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.activateLicense, input) as Promise<ActivationResult>,
+  clearLicense: () => ipcRenderer.invoke(IPC_CHANNELS.clearLicense) as Promise<LicenseStatus>,
   openSettings: () => ipcRenderer.invoke(IPC_CHANNELS.openSettings) as Promise<void>,
   listTasks: () => ipcRenderer.invoke(IPC_CHANNELS.listTasks) as Promise<VideoTaskSummary[]>,
   getTask: (taskId: string) =>

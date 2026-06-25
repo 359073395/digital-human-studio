@@ -5076,3 +5076,132 @@ select:focus-visible {
 .task-dialog {
   box-shadow: 0 24px 72px rgba(32, 43, 44, 0.24);
 }
+
+.activation-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(135deg, rgba(255, 253, 248, 0.48), rgba(226, 220, 209, 0.9)),
+    var(--studio-shell, #e9e6de);
+}
+
+.activation-card {
+  display: grid;
+  width: min(620px, 100%);
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--studio-line-strong, #bcb2a0);
+  border-radius: 14px;
+  background: rgba(255, 253, 248, 0.94);
+  box-shadow: 0 24px 72px rgba(32, 43, 44, 0.22);
+}
+
+.activation-heading {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.activation-heading > span {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--studio-accent, #496d66);
+  color: #fffaf1;
+}
+
+.activation-heading h1 {
+  margin: 0;
+  color: var(--studio-ink-strong, #142021);
+  font-size: 26px;
+}
+
+.activation-heading p {
+  margin: 5px 0 0;
+  color: var(--studio-muted, #5f6c6a);
+  font-size: 13px;
+}
+
+.activation-machine-card,
+.license-info-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--studio-line, #d5cec0);
+  border-radius: 10px;
+  background: rgba(247, 243, 234, 0.92);
+}
+
+.activation-machine-card small,
+.license-info-panel span,
+.license-info-panel dt {
+  color: var(--studio-muted, #5f6c6a);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.activation-machine-card strong {
+  overflow-wrap: anywhere;
+  color: var(--studio-accent-ink, #233d39);
+  font-size: 24px;
+  letter-spacing: 0.08em;
+}
+
+.activation-form {
+  display: grid;
+  gap: 12px;
+}
+
+.activation-form textarea {
+  min-height: 112px;
+  margin-top: 8px;
+}
+
+.activation-message {
+  margin: 0;
+  color: var(--studio-danger, #9a5d4e);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.activation-message.ok {
+  color: var(--studio-accent-ink, #233d39);
+}
+
+.license-info-panel {
+  margin: 12px 0;
+}
+
+.license-info-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.license-info-panel strong {
+  color: var(--studio-ink-strong, #142021);
+  font-size: 14px;
+}
+
+.license-info-panel dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.license-info-panel dd {
+  min-width: 0;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--studio-ink, #202b2c);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

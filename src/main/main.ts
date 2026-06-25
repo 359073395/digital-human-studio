@@ -1,8 +1,9 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
+import type { ActivateLicenseInput } from "../shared/license";
 import {
   DEFAULT_HEYGEN_LOCAL_OAUTH_REDIRECT_URI,
   type ListServiceModelsInput,
@@ -31,6 +32,10 @@ import { HeyGenAvatarProvider } from "./avatar/heyGenAvatarProvider";
 import { createHeyGenLocalOAuthCallbackServer } from "./avatar/heyGenLocalOAuthCallback";
 import { OpenAiImageProvider } from "./image/openAiImageProvider";
 import { PresenterImageWorkflowService } from "./image/presenterImageWorkflowService";
+import { getMachineCode } from "./license/machineCode";
+import { LICENSE_PUBLIC_KEY_PEM } from "./license/licensePublicKey";
+import { LicenseRepository } from "./license/licenseRepository";
+import { LicenseService } from "./license/licenseService";
 import { OpenAiCompatibleSourceTranscriptionProvider } from "./media/sourceTranscriptionProvider";
 import { OpenAiCompatibleVisualAnalysisProvider } from "./media/visualAnalysisProvider";
 import {
@@ -142,6 +147,7 @@ interface MainRepositories {
   mixedCutWorkflowService: MixedCutWorkflowService;
   videoDedupWorkflowService: VideoDedupWorkflowService;
   realWorkflowRunner: RealWorkflowRunner;
+  licenseService: LicenseService;
   appPaths: ReturnType<typeof createAppPaths>;
   performanceProfile: RuntimePerformanceProfile;
 }
@@ -162,6 +168,11 @@ function createRepositories(): MainRepositories {
   );
   const taskRepository = new TaskRepository(taskDatabase, appPaths);
   const appSettingsRepository = new AppSettingsRepository(taskDatabase);
+  const licenseService = new LicenseService(new LicenseRepository(taskDatabase), {
+    isDevelopment: isDevelopment || !app.isPackaged,
+    publicKeyPem: LICENSE_PUBLIC_KEY_PEM,
+    machineCodeProvider: getMachineCode
+  });
   const serviceConfigurationRepository = new ServiceConfigurationRepository(
     taskDatabase,
     credentialStore
@@ -251,6 +262,7 @@ function createRepositories(): MainRepositories {
     mixedCutWorkflowService,
     videoDedupWorkflowService,
     realWorkflowRunner,
+    licenseService,
     appPaths,
     performanceProfile
   };
@@ -273,6 +285,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     taskRepository,
     mixedCutWorkflowService,
     videoDedupWorkflowService,
+    licenseService,
     performanceProfile
   } = repositories;
 
@@ -286,13 +299,31 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.openSettings, () => {
+  ipcMain.handle(IPC_CHANNELS.getLicenseStatus, () => licenseService.getStatus());
+
+  ipcMain.handle(IPC_CHANNELS.activateLicense, (_event, input: ActivateLicenseInput) =>
+    licenseService.activate(input)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.clearLicense, () => licenseService.clear());
+
+  const protectedHandle = (
+    channel: string,
+    listener: Parameters<typeof ipcMain.handle>[1]
+  ): void => {
+    ipcMain.handle(channel, async (event, ...args) => {
+      licenseService.requireActivated();
+      return listener(event, ...args);
+    });
+  };
+
+  protectedHandle(IPC_CHANNELS.openSettings, () => {
     mainWindow?.webContents.send(IPC_CHANNELS.openSettings);
   });
 
-  ipcMain.handle(IPC_CHANNELS.getAppPathSettings, () => appSettingsRepository.getPathSettings());
+  protectedHandle(IPC_CHANNELS.getAppPathSettings, () => appSettingsRepository.getPathSettings());
 
-  ipcMain.handle(IPC_CHANNELS.chooseAppPathSetting, async (_event, kind: AppPathSettingKind) => {
+  protectedHandle(IPC_CHANNELS.chooseAppPathSetting, async (_event, kind: AppPathSettingKind) => {
     const current = appSettingsRepository.getPathSettings();
     const defaultPath = resolveExistingDirectory(
       current[kind] || defaultPathSettingDirectory(kind) || app.getPath("documents")
@@ -311,24 +342,24 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return appSettingsRepository.updatePathSetting(kind, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.listTasks, () => taskRepository.listTasks());
+  protectedHandle(IPC_CHANNELS.listTasks, () => taskRepository.listTasks());
 
-  ipcMain.handle(IPC_CHANNELS.getTask, (_event, taskId: string) => taskRepository.getTask(taskId));
+  protectedHandle(IPC_CHANNELS.getTask, (_event, taskId: string) => taskRepository.getTask(taskId));
 
-  ipcMain.handle(IPC_CHANNELS.createTask, (_event, input?: CreateTaskInput) =>
+  protectedHandle(IPC_CHANNELS.createTask, (_event, input?: CreateTaskInput) =>
     taskRepository.createTask(input)
   );
 
-  ipcMain.handle(IPC_CHANNELS.deleteTask, (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.deleteTask, (_event, taskId: string) => {
     taskRepository.deleteTask(taskId);
     return taskRepository.listTasks();
   });
 
-  ipcMain.handle(IPC_CHANNELS.updateTask, (_event, input: UpdateTaskInput) =>
+  protectedHandle(IPC_CHANNELS.updateTask, (_event, input: UpdateTaskInput) =>
     taskRepository.updateTask(input)
   );
 
-  ipcMain.handle(IPC_CHANNELS.chooseExportDirectory, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.chooseExportDirectory, async (_event, taskId: string) => {
     const task = taskRepository.getTask(taskId);
     if (!task) {
       throw new Error(`Task ${taskId} was not found.`);
@@ -356,19 +387,19 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.generateScript, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.generateScript, (_event, taskId: string) =>
     scriptWorkflowService.generateScript(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.transcribeSource, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.transcribeSource, (_event, taskId: string) =>
     scriptWorkflowService.transcribeSource(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.downloadOriginalVideo, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.downloadOriginalVideo, (_event, taskId: string) =>
     sourceAssetService.downloadOriginalVideo(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.uploadSourceVideo, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.uploadSourceVideo, async (_event, taskId: string) => {
     const sourceVideoDialogOptions: OpenDialogOptions = {
       title: "选择原视频或原音频",
       properties: ["openFile"],
@@ -394,7 +425,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return sourceAssetService.importSourceVideo(taskId, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.uploadMixedCutMaterial, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.uploadMixedCutMaterial, async (_event, taskId: string) => {
     const materialDialogOptions: OpenDialogOptions = {
       title: "选择混剪素材",
       properties: ["openFile", "multiSelections"],
@@ -436,7 +467,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return sourceAssetService.importMixedCutMaterials(taskId, result.filePaths);
   });
 
-  ipcMain.handle(IPC_CHANNELS.chooseMixedCutMaterialDirectory, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.chooseMixedCutMaterialDirectory, async (_event, taskId: string) => {
     const directoryDialogOptions: OpenDialogOptions = {
       title: "选择混剪素材文件夹",
       properties: ["openDirectory"]
@@ -456,18 +487,18 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return sourceAssetService.importMixedCutMaterialDirectory(taskId, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.setMixedCutTargetCount, (_event, input) =>
+  protectedHandle(IPC_CHANNELS.setMixedCutTargetCount, (_event, input) =>
     taskRepository.updateTask({
       taskId: input.taskId,
       mixedCutTargetCount: input.count
     })
   );
 
-  ipcMain.handle(IPC_CHANNELS.renderMixedCutBatch, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.renderMixedCutBatch, (_event, taskId: string) =>
     mixedCutWorkflowService.prepareMixedCut(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.importDedupSourceVideo, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.importDedupSourceVideo, async (_event, taskId: string) => {
     const dedupDialogOptions: OpenDialogOptions = {
       title: "选择待去重视频",
       properties: ["openFile"],
@@ -493,15 +524,15 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return videoDedupWorkflowService.importSourceVideo(taskId, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.runVideoDedup, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.runVideoDedup, (_event, taskId: string) =>
     videoDedupWorkflowService.runVideoDedup(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.runOriginalityScore, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.runOriginalityScore, (_event, taskId: string) =>
     videoDedupWorkflowService.runOriginalityScore(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.uploadKnowledgeDocuments, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.uploadKnowledgeDocuments, async (_event, taskId: string) => {
     const knowledgeDialogOptions: OpenDialogOptions = {
       title: "选择知识库文档",
       properties: ["openFile", "multiSelections"],
@@ -527,7 +558,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return sourceAssetService.importKnowledgeDocuments(taskId, result.filePaths);
   });
 
-  ipcMain.handle(IPC_CHANNELS.uploadViralCopyReferences, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.uploadViralCopyReferences, async (_event, taskId: string) => {
     const referenceDialogOptions: OpenDialogOptions = {
       title: "选择爆款文案/案例",
       properties: ["openFile", "multiSelections"],
@@ -553,21 +584,21 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return sourceAssetService.importViralCopyReferences(taskId, result.filePaths);
   });
 
-  ipcMain.handle(IPC_CHANNELS.analyzeSourceVisuals, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.analyzeSourceVisuals, (_event, taskId: string) =>
     sourceAssetService.analyzeSourceVisuals(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.generateStoryScriptOptions, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.generateStoryScriptOptions, (_event, taskId: string) =>
     storyboardWorkflowService.generateStoryScriptOptions(taskId)
   );
 
-  ipcMain.handle(
+  protectedHandle(
     IPC_CHANNELS.generateVisualStoryboard,
     (_event, input: GenerateVisualStoryboardInput) =>
       storyboardWorkflowService.generateVisualStoryboard(input.taskId, input.panelCount)
   );
 
-  ipcMain.handle(IPC_CHANNELS.uploadProductImage, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.uploadProductImage, async (_event, taskId: string) => {
     const productImageDialogOptions: OpenDialogOptions = {
       title: "选择商品图片",
       properties: ["openFile"],
@@ -593,7 +624,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return presenterImageWorkflowService.importProductImage(taskId, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.uploadReferenceImage, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.uploadReferenceImage, async (_event, taskId: string) => {
     const referenceImageDialogOptions: OpenDialogOptions = {
       title: "选择人物图片",
       properties: ["openFile"],
@@ -619,7 +650,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return presenterImageWorkflowService.importReferenceImage(taskId, result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.uploadCustomFont, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.uploadCustomFont, async (_event, taskId: string) => {
     const fontDialogOptions: OpenDialogOptions = {
       title: "选择字体文件",
       properties: ["openFile"],
@@ -645,41 +676,41 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return presenterImageWorkflowService.importCustomFont(taskId, result.filePaths[0]);
   });
 
-  ipcMain.handle(
+  protectedHandle(
     IPC_CHANNELS.generatePresenterImages,
     (_event, input: string | GeneratePresenterImagesInput) =>
       presenterImageWorkflowService.generatePresenterImages(input)
   );
 
-  ipcMain.handle(
+  protectedHandle(
     IPC_CHANNELS.selectGeneratedPresenterImage,
     (_event, input: SelectGeneratedPresenterImageInput) =>
       presenterImageWorkflowService.selectGeneratedPresenterImage(input)
   );
 
-  ipcMain.handle(IPC_CHANNELS.renderHeyGenAvatar, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.renderHeyGenAvatar, (_event, taskId: string) =>
     avatarWorkflowService.renderHeyGenAvatar(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.listHeyGenAvatarLooks, () => heyGenAvatarCatalog.listAvatarLooks());
+  protectedHandle(IPC_CHANNELS.listHeyGenAvatarLooks, () => heyGenAvatarCatalog.listAvatarLooks());
 
-  ipcMain.handle(IPC_CHANNELS.createHeyGenAvatar, (_event, input: CreateHeyGenAvatarInput) =>
+  protectedHandle(IPC_CHANNELS.createHeyGenAvatar, (_event, input: CreateHeyGenAvatarInput) =>
     heyGenAvatarCreator.createPromptAvatar(input)
   );
 
-  ipcMain.handle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.runMockWorkflow, (_event, taskId: string) =>
     mockWorkflowRunner.runTask(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.runRealWorkflow, (_event, taskId: string) =>
+  protectedHandle(IPC_CHANNELS.runRealWorkflow, (_event, taskId: string) =>
     realWorkflowRunner.runTask(taskId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.retryMockWorkflowStep, (_event, input: RetryWorkflowStepInput) =>
+  protectedHandle(IPC_CHANNELS.retryMockWorkflowStep, (_event, input: RetryWorkflowStepInput) =>
     mockWorkflowRunner.retryStep(input.taskId, input.stepId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.resolveTaskAssetUrl, (_event, input: ResolveTaskAssetUrlInput) => {
+  protectedHandle(IPC_CHANNELS.resolveTaskAssetUrl, (_event, input: ResolveTaskAssetUrlInput) => {
     const absolutePath = resolveTaskAssetPath(appPaths, input.taskId, input.relativePath);
     if (!fs.existsSync(absolutePath)) {
       throw new Error(`素材文件不存在：${input.relativePath}`);
@@ -688,7 +719,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return createTaskAssetUrl(input.taskId, input.relativePath);
   });
 
-  ipcMain.handle(IPC_CHANNELS.openTaskExports, async (_event, taskId: string) => {
+  protectedHandle(IPC_CHANNELS.openTaskExports, async (_event, taskId: string) => {
     const task = taskRepository.getTask(taskId);
     const exportsDirectory = task?.publishingPackage.exportDirectory
       ? resolveExportDirectory(appPaths, taskId, task.publishingPackage.exportDirectory)
@@ -696,29 +727,29 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     await shell.openPath(exportsDirectory);
   });
 
-  ipcMain.handle(IPC_CHANNELS.listServiceConfigurations, () =>
+  protectedHandle(IPC_CHANNELS.listServiceConfigurations, () =>
     serviceConfigurationRepository.listConfigurations()
   );
 
-  ipcMain.handle(
+  protectedHandle(
     IPC_CHANNELS.saveServiceConfiguration,
     (_event, input: SaveServiceConfigurationInput) =>
       serviceConfigurationRepository.saveConfiguration(input)
   );
 
-  ipcMain.handle(IPC_CHANNELS.clearServiceCredential, (_event, providerId: ProviderId) =>
+  protectedHandle(IPC_CHANNELS.clearServiceCredential, (_event, providerId: ProviderId) =>
     serviceConfigurationRepository.clearCredential(providerId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.testServiceConfiguration, (_event, providerId: ProviderId) =>
+  protectedHandle(IPC_CHANNELS.testServiceConfiguration, (_event, providerId: ProviderId) =>
     serviceConfigurationRepository.testConfiguration(providerId)
   );
 
-  ipcMain.handle(IPC_CHANNELS.listServiceModels, (_event, input: ListServiceModelsInput) =>
+  protectedHandle(IPC_CHANNELS.listServiceModels, (_event, input: ListServiceModelsInput) =>
     serviceConfigurationRepository.listModels(input)
   );
 
-  ipcMain.handle(IPC_CHANNELS.startHeyGenOAuth, async (_event, input: StartHeyGenOAuthInput) => {
+  protectedHandle(IPC_CHANNELS.startHeyGenOAuth, async (_event, input: StartHeyGenOAuthInput) => {
     const result = serviceConfigurationRepository.startHeyGenOAuth({
       settings: {
         ...input.settings,
@@ -730,7 +761,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return result;
   });
 
-  ipcMain.handle(
+  protectedHandle(
     IPC_CHANNELS.authorizeHeyGenOAuth,
     async (_event, input: StartHeyGenOAuthInput) => {
       const settings = {
@@ -762,7 +793,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.completeHeyGenOAuth, (_event, input: CompleteHeyGenOAuthInput) =>
+  protectedHandle(IPC_CHANNELS.completeHeyGenOAuth, (_event, input: CompleteHeyGenOAuthInput) =>
     serviceConfigurationRepository.completeHeyGenOAuth(input)
   );
 
