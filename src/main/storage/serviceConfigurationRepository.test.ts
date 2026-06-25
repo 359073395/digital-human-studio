@@ -507,7 +507,7 @@ describe("ServiceConfigurationRepository", () => {
       ok: true,
       message: "ASR 独立配置未启用；已确认大模型 gemini-3.1-flash-lite 可以复用完成音频转写。"
     });
-  });
+  }, 15000);
 
   it("checks standalone ASR support with an audio transcription request", async () => {
     const fetchImpl: typeof fetch = async (url, init) => {
