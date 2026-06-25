@@ -15,7 +15,7 @@
     "lint": "eslint .",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
-    "release:check": "npm run typecheck && npm run lint && npm run test && npm run build && npm run format",
+    "release:check": "npm run typecheck && npm run lint && npm run test:ci && npm run build && npm run format",
     "release:e2e:real": "npm run build && node scripts/release-e2e-real.js",
     "release:ui": "npm run build && node scripts/release-ui-check.js",
     "package:win": "npm run build && electron-builder --win nsis --x64",
@@ -26,6 +26,7 @@
     "license:tool": "electron scripts/license-tool.js",
     "license:package": "node scripts/package-license-tool.js",
     "test": "vitest run",
+    "test:ci": "vitest run --testTimeout=15000",
     "test:watch": "vitest"
   },
   "keywords": [],

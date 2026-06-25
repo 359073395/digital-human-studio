@@ -27,8 +27,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run release checks
-        run: npm run release:check
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test:ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Format check
+        run: npm run format
 
       - name: Package Windows installer
         run: npm run package:win
