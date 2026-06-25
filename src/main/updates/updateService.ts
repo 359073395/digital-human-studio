@@ -79,6 +79,9 @@ export class UpdateService {
       };
       return this.getStatus();
     } catch (error) {
+      if (isMissingOnlineUpdatePackageError(error)) {
+        return this.setNoOnlinePackageStatus();
+      }
       return this.setErrorStatus(error, "检查更新失败");
     }
   }
@@ -229,7 +232,22 @@ export class UpdateService {
     return this.getStatus();
   }
 
+  private setNoOnlinePackageStatus(): AppUpdateStatus {
+    this.status = {
+      status: "not-available",
+      currentVersion: this.options.currentVersion,
+      releaseUrl: this.options.releasePageUrl,
+      message:
+        "还没有发布在线更新包。请先在 GitHub Release 上传新版安装包、latest.yml 和 blockmap。"
+    };
+    return this.getStatus();
+  }
+
   private setErrorStatus(error: unknown, fallback: string): AppUpdateStatus {
+    if (isMissingOnlineUpdatePackageError(error)) {
+      return this.setNoOnlinePackageStatus();
+    }
+
     const message = error instanceof Error ? error.message : String(error || fallback);
     this.status = {
       ...this.status,
@@ -252,4 +270,11 @@ function readDownloadProgress(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isMissingOnlineUpdatePackageError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /latest\.yml|releases\/latest|No published versions|404|not found|Cannot find/i.test(
+    message
+  );
 }

@@ -3,14 +3,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { UpdateService } from "./updateService";
 
-function createUpdaterStub(input?: { version?: string; downloadFails?: boolean }) {
+function createUpdaterStub(input?: {
+  version?: string;
+  downloadFails?: boolean;
+  checkFails?: Error;
+}) {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
   return {
     updater: {
       autoDownload: true,
-      checkForUpdates: vi.fn(async () => ({
-        updateInfo: input?.version ? { version: input.version } : { version: "1.0.0" }
-      })),
+      checkForUpdates: vi.fn(async () => {
+        if (input?.checkFails) {
+          throw input.checkFails;
+        }
+        return {
+          updateInfo: input?.version ? { version: input.version } : { version: "1.0.0" }
+        };
+      }),
       downloadUpdate: vi.fn(async () => {
         if (input?.downloadFails) {
           throw new Error("network down");
@@ -64,6 +73,24 @@ describe("UpdateService", () => {
     expect(updater.autoDownload).toBe(false);
     expect(status.status).toBe("available");
     expect(status.availableVersion).toBe("1.1.0");
+  });
+
+  it("reports missing GitHub release metadata as no online package", async () => {
+    const { updater } = createUpdaterStub({
+      checkFails: new Error("Cannot find latest.yml in the latest release artifacts (404)")
+    });
+    const service = new UpdateService({
+      currentVersion: "1.0.1",
+      isPackaged: true,
+      releasePageUrl: "https://github.com/example/repo/releases",
+      updater,
+      openExternal: vi.fn()
+    });
+
+    const status = await service.checkForUpdates();
+
+    expect(status.status).toBe("not-available");
+    expect(status.message).toContain("还没有发布在线更新包");
   });
 
   it("downloads an available update and allows install", async () => {

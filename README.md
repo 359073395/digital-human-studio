@@ -103,3 +103,9 @@ npm run package:win
 4. 同事打开软件后，在主界面顶部点击“检查更新”，发现新版本后点击“立即更新”，下载完成后点击“安装重启”。
 
 更新源默认是 [GitHub Releases](https://github.com/359073395/digital-human-studio/releases)。软件是否可进入工作台仍由本机激活码控制。
+
+如果检查更新提示“还没有发布在线更新包”，说明 GitHub Release 里缺少自动更新文件。每次发布至少上传这 3 个文件：
+
+- `PaoliangVideoWorkbench-Setup-<version>-win-x64.exe`
+- `PaoliangVideoWorkbench-Setup-<version>-win-x64.exe.blockmap`
+- `latest.yml`

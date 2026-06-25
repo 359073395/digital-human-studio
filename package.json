@@ -1,6 +1,6 @@
 {
   "name": "digital-human-studio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Windows desktop workbench for API-first digital-human talking-head video generation.",
   "main": "dist-electron/main/main.js",
   "private": true,
