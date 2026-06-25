@@ -83,6 +83,29 @@ button:disabled {
   gap: 8px;
 }
 
+.performance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(45, 212, 191, 0.32);
+  border-radius: 999px;
+  background: rgba(45, 212, 191, 0.1);
+  color: #27566a;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.performance-badge span {
+  font-weight: 700;
+}
+
+.performance-badge small {
+  color: #66758b;
+  font-size: 12px;
+}
+
 .operation-notice {
   position: fixed;
   top: 74px;
@@ -3192,6 +3215,16 @@ textarea:focus-visible {
   border-color: rgba(45, 212, 191, 0.34);
   background: rgba(10, 19, 28, 0.96);
   color: #8df3e5;
+}
+
+.performance-badge {
+  border-color: rgba(45, 212, 191, 0.34);
+  background: rgba(45, 212, 191, 0.1);
+  color: #dffef9;
+}
+
+.performance-badge small {
+  color: #8fa3b8;
 }
 
 .task-strip {

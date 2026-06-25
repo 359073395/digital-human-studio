@@ -12,6 +12,10 @@ import {
   type VideoTask
 } from "../../shared/domain";
 import type { AppPathSettings } from "../../shared/appSettings";
+import {
+  DEFAULT_RUNTIME_PERFORMANCE_PROFILE,
+  type RuntimePerformanceProfile
+} from "../../shared/performanceProfile";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 
@@ -19,6 +23,10 @@ const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi
 
 interface PathSettingsReader {
   getPathSettings: () => AppPathSettings;
+}
+
+interface PerformanceProfileReader {
+  getPerformanceProfile: () => RuntimePerformanceProfile;
 }
 
 interface DedupStrategyProfile {
@@ -41,7 +49,8 @@ export class VideoDedupWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
-    private readonly pathSettingsReader?: PathSettingsReader
+    private readonly pathSettingsReader?: PathSettingsReader,
+    private readonly performanceProfileReader?: PerformanceProfileReader
   ) {}
 
   importSourceVideo(taskId: string, filePath: string): VideoTask {
@@ -81,6 +90,9 @@ export class VideoDedupWorkflowService {
 
       const attempt = Math.min(10, (task.dedupAttemptCount || 0) + 1);
       const reports: OriginalityScoreReport[] = [];
+      const performanceProfile =
+        this.performanceProfileReader?.getPerformanceProfile() ??
+        DEFAULT_RUNTIME_PERFORMANCE_PROFILE;
 
       for (const presetId of task.selectedOutputPresets) {
         const preset = requireOutputPreset(presetId);
@@ -93,6 +105,7 @@ export class VideoDedupWorkflowService {
           sourcePath,
           outputPath: absoluteTaskPath(this.paths, taskId, outputVideo),
           preset,
+          performanceProfile,
           strategy: task.dedupStrategy
         });
         writeTaskFile(this.paths, taskId, subtitleFile, createTimedTextSrt(task));
@@ -222,6 +235,7 @@ function renderDedupVideo(input: {
   sourcePath: string;
   outputPath: string;
   preset: OutputPreset;
+  performanceProfile: RuntimePerformanceProfile;
   strategy: DedupStrategy;
 }): void {
   const ffmpegPath = requireFfmpegPath();
@@ -249,9 +263,13 @@ function renderDedupVideo(input: {
       "-c:v",
       "libx264",
       "-preset",
-      profile.preset,
+      input.performanceProfile.mode === "low-spec"
+        ? input.performanceProfile.ffmpegPreset
+        : profile.preset,
       "-crf",
-      profile.crf,
+      String(Number(profile.crf) + input.performanceProfile.crfOffset),
+      "-threads",
+      String(input.performanceProfile.ffmpegThreads),
       "-g",
       profile.gop,
       "-bf",

@@ -53,6 +53,7 @@ import type {
   StartHeyGenOAuthResult,
   UpdateTaskInput
 } from "../shared/ipc";
+import type { RuntimePerformanceProfile } from "../shared/performanceProfile";
 import {
   calculateGroupedMixedCutBatchPlan,
   type GroupedMixedCutBatchPlan
@@ -268,7 +269,10 @@ const WORKSPACE_TABS: Array<{
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState("自媒体视频工作台 本地预览");
+  const [appVersion, setAppVersion] = useState("跑量自媒体视频工作台 本地预览");
+  const [performanceProfile, setPerformanceProfile] = useState<RuntimePerformanceProfile | null>(
+    null
+  );
   const [taskSummaries, setTaskSummaries] = useState<VideoTaskSummary[]>(fallbackTasks);
   const [selectedTaskId, setSelectedTaskId] = useState(fallbackTask.id);
   const [selectedTask, setSelectedTask] = useState<VideoTask>(fallbackTask);
@@ -582,8 +586,11 @@ export function App() {
 
     window.digitalHumanStudio
       .getAppInfo()
-      .then((info) => setAppVersion(`${info.name} ${info.version}`))
-      .catch(() => setAppVersion("自媒体视频工作台"));
+      .then((info) => {
+        setAppVersion(`${info.name} ${info.version}`);
+        setPerformanceProfile(info.performanceProfile);
+      })
+      .catch(() => setAppVersion("跑量自媒体视频工作台"));
     void loadServiceConfigurations();
     void loadAppPathSettings();
   }, []);
@@ -2162,10 +2169,17 @@ export function App() {
       ) : null}
       <header className="topbar">
         <div>
-          <h1>自媒体视频工作台</h1>
-          <p>{appVersion || "自媒体视频工作台"}</p>
+          <h1>跑量自媒体视频工作台</h1>
+          <p>{appVersion || "跑量自媒体视频工作台"}</p>
         </div>
         <div className="topbar-actions">
+          {performanceProfile ? (
+            <div className="performance-badge" title={performanceProfile.reason}>
+              <Monitor size={15} />
+              <span>{performanceProfile.label}</span>
+              <small>自动 {performanceProfile.maxParallelVideos} 条</small>
+            </div>
+          ) : null}
           <button
             className="icon-button"
             data-testid="release-open-settings"

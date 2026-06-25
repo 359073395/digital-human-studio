@@ -187,7 +187,7 @@ async function main() {
           await wait(600);
         };
 
-        await waitForText('自媒体视频工作台');
+        await waitForText('跑量自媒体视频工作台');
 
         await click('[data-testid="release-new-task"]');
         await submitTaskName('UI验收任务');

@@ -15,6 +15,10 @@ import {
   type GroupedMixedCutBatchPlan
 } from "../../shared/mixedCutPlanning";
 import type { AppPathSettings } from "../../shared/appSettings";
+import {
+  DEFAULT_RUNTIME_PERFORMANCE_PROFILE,
+  type RuntimePerformanceProfile
+} from "../../shared/performanceProfile";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 
@@ -26,6 +30,10 @@ const SEGMENT_DURATION_SECONDS = 2.4;
 
 interface PathSettingsReader {
   getPathSettings: () => AppPathSettings;
+}
+
+interface PerformanceProfileReader {
+  getPerformanceProfile: () => RuntimePerformanceProfile;
 }
 
 interface MixedCutEditDecisionRecord {
@@ -42,6 +50,11 @@ interface MixedCutEditDecisionRecord {
   subtitleFile: string;
   coverFile: string;
   warnings: string[];
+  performance: {
+    mode: RuntimePerformanceProfile["mode"];
+    label: RuntimePerformanceProfile["label"];
+    ffmpegThreads: number;
+  };
   segments: Array<{
     order: number;
     sourceAssetId: string;
@@ -83,7 +96,8 @@ export class MixedCutWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
-    private readonly pathSettingsReader?: PathSettingsReader
+    private readonly pathSettingsReader?: PathSettingsReader,
+    private readonly performanceProfileReader?: PerformanceProfileReader
   ) {}
 
   prepareMixedCut(taskId: string): VideoTask {
@@ -119,6 +133,9 @@ export class MixedCutWorkflowService {
       const combinations = createUniqueMixedCutCombinations(shotGroups, groupedPlan.targetCount);
       const targetCount = combinations.length;
       const generatedRecords: MixedCutEditDecisionRecord[] = [];
+      const performanceProfile =
+        this.performanceProfileReader?.getPerformanceProfile() ??
+        DEFAULT_RUNTIME_PERFORMANCE_PROFILE;
 
       for (let batchIndex = 1; batchIndex <= targetCount; batchIndex += 1) {
         const combination = combinations[batchIndex - 1];
@@ -131,6 +148,7 @@ export class MixedCutWorkflowService {
             batchIndex,
             combination,
             groupedPlan,
+            performanceProfile,
             task,
             taskDirectory,
             preset,
@@ -177,6 +195,7 @@ export class MixedCutWorkflowService {
     task: VideoTask;
     combination: MixedCutCombination;
     groupedPlan: GroupedMixedCutBatchPlan;
+    performanceProfile: RuntimePerformanceProfile;
     taskDirectory: string;
     preset: OutputPreset;
     batchIndex: number;
@@ -209,6 +228,7 @@ export class MixedCutWorkflowService {
         sourcePath,
         outputPath,
         preset: input.preset,
+        performanceProfile: input.performanceProfile,
         startSeconds: videoStartOffset(input.batchIndex, index),
         durationSeconds: segmentDurationSeconds
       });
@@ -222,6 +242,9 @@ export class MixedCutWorkflowService {
       targetDurationSeconds,
       workingDirectory: segmentDirectory
     });
+    if (input.performanceProfile.cleanupIntermediateFiles) {
+      fs.rmSync(segmentDirectory, { recursive: true, force: true });
+    }
 
     const subtitleFile = `subtitles/mixed-cut-batch-${input.batchIndex}-${input.preset.id}.srt`;
     const coverFile = `post/mixed-cut-cover-${input.batchIndex}-${input.preset.id}.svg`;
@@ -254,6 +277,11 @@ export class MixedCutWorkflowService {
       subtitleFile,
       coverFile,
       warnings,
+      performance: {
+        mode: input.performanceProfile.mode,
+        label: input.performanceProfile.label,
+        ffmpegThreads: input.performanceProfile.ffmpegThreads
+      },
       segments: selectedShots.map((shot, index) => ({
         order: index + 1,
         sourceAssetId: shot.asset.id,
@@ -482,6 +510,7 @@ function renderSegment(input: {
   sourcePath: string;
   outputPath: string;
   preset: OutputPreset;
+  performanceProfile: RuntimePerformanceProfile;
   startSeconds: number;
   durationSeconds: number;
 }): void {
@@ -508,9 +537,11 @@ function renderSegment(input: {
     "-c:v",
     "libx264",
     "-preset",
-    "veryfast",
+    input.performanceProfile.ffmpegPreset,
     "-crf",
-    "22",
+    String(22 + input.performanceProfile.crfOffset),
+    "-threads",
+    String(input.performanceProfile.ffmpegThreads),
     "-pix_fmt",
     "yuv420p",
     input.outputPath

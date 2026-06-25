@@ -55,9 +55,12 @@ import { ExportWorkflowService } from "./workflow/exportWorkflowService";
 import { MixedCutWorkflowService } from "./workflow/mixedCutWorkflowService";
 import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 import { RealWorkflowRunner } from "./workflow/realWorkflowRunner";
+import { detectRuntimePerformanceProfile } from "./workflow/runtimePerformanceProfile";
 import { VideoDedupWorkflowService } from "./workflow/videoDedupWorkflowService";
+import type { RuntimePerformanceProfile } from "../shared/performanceProfile";
 
-const APP_DISPLAY_NAME = "自媒体视频工作台";
+const APP_DISPLAY_NAME = "跑量自媒体视频工作台";
+const APP_LEGACY_DATA_DIR_NAME = "自媒体视频工作台";
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const ASSET_PROTOCOL = "dhs-asset";
 
@@ -140,12 +143,15 @@ interface MainRepositories {
   videoDedupWorkflowService: VideoDedupWorkflowService;
   realWorkflowRunner: RealWorkflowRunner;
   appPaths: ReturnType<typeof createAppPaths>;
+  performanceProfile: RuntimePerformanceProfile;
 }
 
 function createRepositories(): MainRepositories {
-  const appDataDir = process.env.DHS_APP_DATA_DIR || app.getPath("userData");
+  const appDataDir =
+    process.env.DHS_APP_DATA_DIR || path.join(app.getPath("appData"), APP_LEGACY_DATA_DIR_NAME);
   const appPaths = createAppPaths(appDataDir);
   ensureAppPaths(appPaths);
+  const performanceProfile = detectRuntimePerformanceProfile(appDataDir);
 
   taskDatabase = openTaskDatabase(appPaths.databasePath);
   runMigrations(taskDatabase);
@@ -211,12 +217,14 @@ function createRepositories(): MainRepositories {
   const mixedCutWorkflowService = new MixedCutWorkflowService(
     taskRepository,
     appPaths,
-    appSettingsRepository
+    appSettingsRepository,
+    { getPerformanceProfile: () => performanceProfile }
   );
   const videoDedupWorkflowService = new VideoDedupWorkflowService(
     taskRepository,
     appPaths,
-    appSettingsRepository
+    appSettingsRepository,
+    { getPerformanceProfile: () => performanceProfile }
   );
   const realWorkflowRunner = new RealWorkflowRunner(
     taskRepository,
@@ -243,7 +251,8 @@ function createRepositories(): MainRepositories {
     mixedCutWorkflowService,
     videoDedupWorkflowService,
     realWorkflowRunner,
-    appPaths
+    appPaths,
+    performanceProfile
   };
 }
 
@@ -263,7 +272,8 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     storyboardWorkflowService,
     taskRepository,
     mixedCutWorkflowService,
-    videoDedupWorkflowService
+    videoDedupWorkflowService,
+    performanceProfile
   } = repositories;
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, (): AppInfo => {
@@ -271,7 +281,8 @@ function registerIpcHandlers(repositories: MainRepositories): void {
       name: APP_DISPLAY_NAME,
       version: app.getVersion(),
       environment: isDevelopment ? "development" : "production",
-      platform: process.platform
+      platform: process.platform,
+      performanceProfile
     };
   });
 

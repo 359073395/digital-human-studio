@@ -26,6 +26,7 @@ import type {
   ServiceConnectionCheck
 } from "./serviceConfig";
 import type { AppPathSettingKind, AppPathSettings } from "./appSettings";
+import type { RuntimePerformanceProfile } from "./performanceProfile";
 
 export type AppEnvironment = "development" | "production";
 
@@ -34,6 +35,7 @@ export interface AppInfo {
   version: string;
   environment: AppEnvironment;
   platform: string;
+  performanceProfile: RuntimePerformanceProfile;
 }
 
 export interface DigitalHumanStudioAPI {
