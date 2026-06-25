@@ -309,6 +309,8 @@ export function App() {
   const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
   const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null);
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+  const [workflowProgressPercent, setWorkflowProgressPercent] = useState(0);
+  const [workflowProgressLabel, setWorkflowProgressLabel] = useState("");
   const [taskNameDialog, setTaskNameDialog] = useState<TaskNameDialog | null>(null);
   const [isTaskNameSaving, setIsTaskNameSaving] = useState(false);
   const [deleteTaskDialog, setDeleteTaskDialog] = useState<VideoTaskSummary | null>(null);
@@ -331,6 +333,14 @@ export function App() {
 
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
+  const taskStepProgressPercent = useMemo(() => calculateTaskProgressPercent(steps), [steps]);
+  const visibleProgressPercent = isWorkflowRunning
+    ? Math.max(taskStepProgressPercent, workflowProgressPercent)
+    : taskStepProgressPercent;
+  const visibleProgressLabel = isWorkflowRunning
+    ? workflowProgressLabel ||
+      activeOperationProgressLabel(activeOperation, selectedTask.generationMode)
+    : taskCurrentStepLabel(steps);
   const frameTitleStyle = selectedTask.frameTitleStyle ?? DEFAULT_FRAME_TITLE_STYLE;
   const subtitleStyle = selectedTask.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
   const coverStyle = selectedTask.coverStyle ?? DEFAULT_COVER_STYLE;
@@ -593,6 +603,21 @@ export function App() {
     setOperationNotice(notice);
     setActionMessage(notice.detail ? `${notice.title}: ${notice.detail}` : notice.title);
   }
+
+  useEffect(() => {
+    if (!isWorkflowRunning) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsedSeconds = Math.max(0, (Date.now() - startedAt) / 1000);
+      const estimatedPercent = Math.min(95, Math.round(8 + Math.log2(elapsedSeconds + 1) * 18));
+      setWorkflowProgressPercent((current) => Math.max(current, estimatedPercent));
+    }, 800);
+
+    return () => window.clearInterval(timer);
+  }, [isWorkflowRunning, selectedTaskId]);
 
   useEffect(() => {
     if (!window.digitalHumanStudio) {
@@ -1026,6 +1051,8 @@ export function App() {
 
     setOutputConfirmTask(null);
     setIsWorkflowRunning(true);
+    setWorkflowProgressLabel(`正在生成：${generationModeLabel(taskForRun.generationMode)}`);
+    setWorkflowProgressPercent(6);
     setActionMessage("正在输出视频、封面和字幕文件...");
 
     try {
@@ -1070,6 +1097,7 @@ export function App() {
         personalIpProfile: taskForRun.personalIpProfile
       });
       const task = await api.runRealWorkflow(taskForRun.id);
+      setWorkflowProgressPercent(100);
       const failedStep = task.steps.find(
         (step) => step.status === "retry-ready" || step.status === "failed"
       );
@@ -1089,6 +1117,8 @@ export function App() {
       );
     } finally {
       setIsWorkflowRunning(false);
+      setWorkflowProgressLabel("");
+      setWorkflowProgressPercent(0);
     }
   }
 
@@ -2525,6 +2555,16 @@ export function App() {
         </div>
         {taskError ? <p className="task-error">{taskError}</p> : null}
       </section>
+
+      {taskSummaries.length > 0 ? (
+        <TaskProgressBar
+          completeCount={completeCount}
+          isRunning={isWorkflowRunning}
+          label={visibleProgressLabel}
+          percent={visibleProgressPercent}
+          stepCount={steps.length}
+        />
+      ) : null}
 
       {taskSummaries.length === 0 ? (
         <main className="empty-workspace">
@@ -5641,6 +5681,46 @@ function ModeRecommendationPanel({
   );
 }
 
+function TaskProgressBar({
+  completeCount,
+  isRunning,
+  label,
+  percent,
+  stepCount
+}: {
+  completeCount: number;
+  isRunning: boolean;
+  label: string;
+  percent: number;
+  stepCount: number;
+}) {
+  const normalizedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+
+  return (
+    <section className={`task-progress ${isRunning ? "running" : ""}`} aria-label="生成进度">
+      <div className="task-progress-copy">
+        <span>{isRunning ? "正在处理" : "当前进度"}</span>
+        <strong>{label}</strong>
+      </div>
+      <div
+        className="task-progress-meter"
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={normalizedPercent}
+        role="progressbar"
+      >
+        <i style={{ width: `${normalizedPercent}%` }} />
+      </div>
+      <div className="task-progress-meta">
+        <b>{normalizedPercent}%</b>
+        <small>
+          {completeCount}/{stepCount} 步
+        </small>
+      </div>
+    </section>
+  );
+}
+
 function TaskResourceLibrary({
   generatedPresenterCount,
   knowledgeCount,
@@ -6368,6 +6448,60 @@ function generationModeLabel(mode: VideoGenerationMode): string {
   };
 
   return labels[mode];
+}
+
+function calculateTaskProgressPercent(steps: VideoTask["steps"]): number {
+  if (steps.length === 0) {
+    return 0;
+  }
+
+  const score = steps.reduce((total, step) => {
+    if (step.status === "complete") {
+      return total + 1;
+    }
+    if (step.status === "running") {
+      return total + 0.55;
+    }
+    if (step.status === "retry-ready" || step.status === "failed") {
+      return total + 0.35;
+    }
+    return total;
+  }, 0);
+
+  return Math.max(0, Math.min(100, Math.round((score / steps.length) * 100)));
+}
+
+function taskCurrentStepLabel(steps: VideoTask["steps"]): string {
+  const activeStep =
+    steps.find((step) => step.status === "running") ??
+    steps.find((step) => step.status === "retry-ready" || step.status === "failed") ??
+    steps.find((step) => step.status !== "complete");
+
+  if (!activeStep) {
+    return "全部步骤已完成";
+  }
+
+  if (activeStep.status === "retry-ready" || activeStep.status === "failed") {
+    return `${activeStep.label}需要处理`;
+  }
+
+  return activeStep.label;
+}
+
+function activeOperationProgressLabel(
+  operation: ActiveOperation | null,
+  mode: VideoGenerationMode
+): string {
+  if (operation === "download-original") {
+    return "正在下载原视频";
+  }
+  if (operation === "extract-copy") {
+    return "正在提取文案";
+  }
+  if (operation === "visual-analysis") {
+    return "正在做画面分析";
+  }
+  return `正在处理：${generationModeLabel(mode)}`;
 }
 
 function modeNeedsEditableScript(mode: VideoGenerationMode): boolean {

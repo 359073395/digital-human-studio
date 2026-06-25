@@ -29,6 +29,8 @@ const MIN_TARGET_DURATION_SECONDS = 12;
 const MAX_TARGET_DURATION_SECONDS = 180;
 const MAX_AUDIO_TARGET_DURATION_SECONDS = 600;
 const SEGMENT_DURATION_SECONDS = 2.4;
+const MIN_VIDEO_SEGMENT_SECONDS = 0.2;
+const SAFE_VIDEO_HEAD_OFFSET_SECONDS = 0.12;
 
 interface PathSettingsReader {
   getPathSettings: () => AppPathSettings;
@@ -255,8 +257,7 @@ export class MixedCutWorkflowService {
         preset: input.preset,
         performanceProfile: input.performanceProfile,
         startSeconds: segment.startSeconds,
-        durationSeconds: segment.durationSeconds,
-        loopVideo: input.task.mixedCutChapterMode !== "fill-with-bgm"
+        durationSeconds: segment.durationSeconds
       });
       return outputPath;
     });
@@ -269,6 +270,7 @@ export class MixedCutWorkflowService {
     concatSegments({
       segmentPaths,
       outputPath: silentVideoPath,
+      performanceProfile: input.performanceProfile,
       targetDurationSeconds,
       workingDirectory: segmentDirectory
     });
@@ -619,17 +621,6 @@ function buildMixedCutTimelineSegments(input: {
     throw new Error("混剪素材为空，请先选择包含视频或图片的数字文件夹。");
   }
 
-  if (input.task.mixedCutChapterMode !== "fill-with-bgm") {
-    return input.shots.map((shot, index) => ({
-      shot,
-      startSeconds: resolveSegmentStartSeconds(shot, input.batchIndex, index),
-      durationSeconds: Math.min(
-        SEGMENT_DURATION_SECONDS,
-        Math.max(SEGMENT_DURATION_SECONDS / 2, input.targetDurationSeconds / input.shots.length)
-      )
-    }));
-  }
-
   const segments: MixedCutTimelineSegment[] = [];
   const mediaDurationCache = new Map<string, number>();
   let accumulatedSeconds = 0;
@@ -654,7 +645,7 @@ function buildMixedCutTimelineSegments(input: {
         segments.length,
         mediaDurationCache
       );
-      const durationSeconds = resolveAudioModeSegmentDurationSeconds(
+      const durationSeconds = resolveTimelineSegmentDurationSeconds(
         shot,
         startSeconds,
         remainingSeconds,
@@ -677,7 +668,7 @@ function buildMixedCutTimelineSegments(input: {
   return segments;
 }
 
-function resolveAudioModeSegmentDurationSeconds(
+function resolveTimelineSegmentDurationSeconds(
   shot: MixedCutShot,
   startSeconds: number,
   remainingSeconds: number,
@@ -689,10 +680,13 @@ function resolveAudioModeSegmentDurationSeconds(
 
   const mediaDurationSeconds = getCachedMediaDurationSeconds(shot.absolutePath, mediaDurationCache);
   const availableSeconds =
-    mediaDurationSeconds > startSeconds + 0.35
+    mediaDurationSeconds > startSeconds + MIN_VIDEO_SEGMENT_SECONDS
       ? mediaDurationSeconds - startSeconds
       : mediaDurationSeconds;
-  return Math.max(0.35, Math.min(SEGMENT_DURATION_SECONDS, availableSeconds, remainingSeconds));
+  return Math.max(
+    Math.min(MIN_VIDEO_SEGMENT_SECONDS, remainingSeconds),
+    Math.min(SEGMENT_DURATION_SECONDS, availableSeconds, remainingSeconds)
+  );
 }
 
 function resolveSegmentStartSeconds(
@@ -706,12 +700,19 @@ function resolveSegmentStartSeconds(
   }
 
   const mediaDurationSeconds = getCachedMediaDurationSeconds(shot.absolutePath, mediaDurationCache);
+  const safeHeadOffset =
+    mediaDurationSeconds > SAFE_VIDEO_HEAD_OFFSET_SECONDS + MIN_VIDEO_SEGMENT_SECONDS
+      ? SAFE_VIDEO_HEAD_OFFSET_SECONDS
+      : 0;
   if (mediaDurationSeconds <= 1.2) {
-    return 0;
+    return safeHeadOffset;
   }
 
   const offset = videoStartOffset(batchIndex, segmentIndex);
-  return Math.min(offset, Math.max(0, mediaDurationSeconds - 0.8));
+  return Math.min(
+    Math.max(safeHeadOffset, offset),
+    Math.max(safeHeadOffset, mediaDurationSeconds - 0.8)
+  );
 }
 
 function getCachedMediaDurationSeconds(filePath: string, cache: Map<string, number>): number {
@@ -736,7 +737,6 @@ function renderSegment(input: {
   performanceProfile: RuntimePerformanceProfile;
   startSeconds: number;
   durationSeconds: number;
-  loopVideo: boolean;
 }): void {
   const ffmpegPath = requireFfmpegPath();
   const extension = path.extname(input.sourcePath).toLowerCase();
@@ -745,14 +745,13 @@ function renderSegment(input: {
     `scale=${input.preset.width}:${input.preset.height}:force_original_aspect_ratio=decrease`,
     `pad=${input.preset.width}:${input.preset.height}:(ow-iw)/2:(oh-ih)/2`,
     "setsar=1",
-    "fps=30"
+    "fps=30",
+    "format=yuv420p",
+    "setpts=PTS-STARTPTS"
   ].join(",");
-
   const args = [
     "-y",
-    ...(isImage
-      ? ["-loop", "1"]
-      : [...(input.loopVideo ? ["-stream_loop", "-1"] : []), "-ss", input.startSeconds.toFixed(2)]),
+    ...(isImage ? ["-loop", "1"] : ["-ss", input.startSeconds.toFixed(2)]),
     "-t",
     input.durationSeconds.toFixed(2),
     "-i",
@@ -770,6 +769,8 @@ function renderSegment(input: {
     String(input.performanceProfile.ffmpegThreads),
     "-pix_fmt",
     "yuv420p",
+    "-movflags",
+    "+faststart",
     input.outputPath
   ];
 
@@ -785,6 +786,7 @@ function renderSegment(input: {
 function concatSegments(input: {
   segmentPaths: string[];
   outputPath: string;
+  performanceProfile: RuntimePerformanceProfile;
   targetDurationSeconds: number;
   workingDirectory: string;
 }): void {
@@ -801,6 +803,8 @@ function concatSegments(input: {
     ffmpegPath,
     [
       "-y",
+      "-fflags",
+      "+genpts",
       "-f",
       "concat",
       "-safe",
@@ -809,8 +813,17 @@ function concatSegments(input: {
       concatListPath,
       "-t",
       input.targetDurationSeconds.toFixed(2),
-      "-c",
-      "copy",
+      "-vf",
+      "fps=30,format=yuv420p,setpts=PTS-STARTPTS",
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      input.performanceProfile.ffmpegPreset,
+      "-crf",
+      String(22 + input.performanceProfile.crfOffset),
+      "-threads",
+      String(input.performanceProfile.ffmpegThreads),
       "-movflags",
       "+faststart",
       input.outputPath

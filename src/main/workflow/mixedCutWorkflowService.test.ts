@@ -1,8 +1,10 @@
 // @vitest-environment node
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import ffmpegStaticPath from "ffmpeg-static";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAppPaths, getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "../storage/database";
@@ -245,6 +247,52 @@ describe("MixedCutWorkflowService", () => {
     expect(record.segments.every((segment) => segment.durationSeconds <= 2.4)).toBe(true);
   }, 25_000);
 
+  it("fills time with additional video segments instead of looping a black first frame", () => {
+    const task = repository.createTask({
+      title: "No black flash mixed cut",
+      sourceScript: ""
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "",
+      mixedCutTargetCount: 1,
+      mixedCutChapterMode: "fixed-material-count",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const sourceVideoPath = path.join(
+      taskDirectory,
+      "source",
+      "mixed-materials",
+      "1",
+      "black-head.mp4"
+    );
+    fs.mkdirSync(path.dirname(sourceVideoPath), { recursive: true });
+    createBlackHeadVideo(sourceVideoPath);
+    repository.addMediaAsset(
+      task.id,
+      "mixed-cut-material",
+      "source/mixed-materials/1/black-head.mp4"
+    );
+
+    new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const editDecisionPath = path.join(
+      taskDirectory,
+      "post",
+      "edit-decisions-mixed-cut-1-portrait-9-16.json"
+    );
+    const outputPath = path.join(taskDirectory, "post", "mixed-cut-batch-1-portrait-9-16.mp4");
+    const record = JSON.parse(fs.readFileSync(editDecisionPath, "utf8")) as {
+      segments: Array<{ startSeconds: number }>;
+    };
+
+    expect(record.segments.length).toBeGreaterThan(1);
+    expect(record.segments.every((segment) => segment.startSeconds >= 0.12)).toBe(true);
+    expect(hasNearlyBlackFrames(outputPath)).toBe(false);
+  }, 30_000);
+
   it("requires audio when filling visuals for a voiceover", () => {
     const task = repository.createTask({
       title: "Missing audio mixed cut",
@@ -398,6 +446,63 @@ function createSilentWav(outputPath: string, durationSeconds: number): void {
   buffer.write("data", 36);
   buffer.writeUInt32LE(dataSize, 40);
   fs.writeFileSync(outputPath, buffer);
+}
+
+function createBlackHeadVideo(outputPath: string): void {
+  const ffmpegPath = requireTestFfmpegPath();
+  const result = spawnSync(
+    ffmpegPath,
+    [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=black:s=64x64:r=30:d=0.08",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=red:s=64x64:r=30:d=1.00",
+      "-filter_complex",
+      "[0:v][1:v]concat=n=2:v=1:a=0,format=yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "18",
+      outputPath
+    ],
+    { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 }
+  );
+  expect(result.status).toBe(0);
+  expect(fs.existsSync(outputPath)).toBe(true);
+}
+
+function hasNearlyBlackFrames(filePath: string): boolean {
+  const result = spawnSync(
+    requireTestFfmpegPath(),
+    [
+      "-hide_banner",
+      "-i",
+      filePath,
+      "-vf",
+      "blackframe=amount=95:threshold=32,metadata=print:file=-",
+      "-an",
+      "-f",
+      "null",
+      "-"
+    ],
+    { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 }
+  );
+  const output = `${result.stderr || ""}\n${result.stdout || ""}`;
+  return /pblack:(?:9[5-9]|100)\b/.test(output);
+}
+
+function requireTestFfmpegPath(): string {
+  if (!ffmpegStaticPath) {
+    throw new Error("ffmpeg-static is required for mixed-cut tests.");
+  }
+  return ffmpegStaticPath;
 }
 
 const SINGLE_PIXEL_PNG_BASE64 =
