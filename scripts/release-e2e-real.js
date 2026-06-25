@@ -380,11 +380,28 @@ async function downloadMaterial(materialRoot, material) {
 
 async function prepareMaterials(testRoot) {
   const materialRoot = path.join(testRoot, "materials");
+  const productImage = await downloadMaterial(materialRoot, MATERIALS.productImage);
+  const referenceImage = await downloadMaterial(materialRoot, MATERIALS.referenceImage);
+  const sampleVideo = createSpeechSampleVideo(materialRoot, MATERIALS.sampleVideo.fileName);
   return {
-    productImage: await downloadMaterial(materialRoot, MATERIALS.productImage),
-    referenceImage: await downloadMaterial(materialRoot, MATERIALS.referenceImage),
-    sampleVideo: createSpeechSampleVideo(materialRoot, MATERIALS.sampleVideo.fileName)
+    productImage,
+    referenceImage,
+    sampleVideo,
+    mixedCutRoot: createGroupedMixedCutMaterials(materialRoot, sampleVideo, productImage)
   };
+}
+
+function createGroupedMixedCutMaterials(materialRoot, sampleVideo, productImage) {
+  const mixedCutRoot = path.join(materialRoot, "mixed-cut-groups");
+  fs.rmSync(mixedCutRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(mixedCutRoot, "1"), { recursive: true });
+  fs.mkdirSync(path.join(mixedCutRoot, "2"), { recursive: true });
+  fs.mkdirSync(path.join(mixedCutRoot, "3"), { recursive: true });
+  fs.copyFileSync(sampleVideo, path.join(mixedCutRoot, "1", "hook-a.mp4"));
+  fs.copyFileSync(sampleVideo, path.join(mixedCutRoot, "1", "hook-b.mp4"));
+  fs.copyFileSync(productImage, path.join(mixedCutRoot, "2", "proof.jpg"));
+  fs.copyFileSync(sampleVideo, path.join(mixedCutRoot, "3", "cta.mp4"));
+  return mixedCutRoot;
 }
 
 function createSpeechSampleVideo(materialRoot, fileName) {
@@ -700,10 +717,7 @@ async function runMode(runtime, services, materials, exportRoot, avatarLook, mod
     await services.sourceAssetService.analyzeSourceVisuals(task.id);
   }
   if (mode.importMixedMaterials) {
-    services.sourceAssetService.importMixedCutMaterials(task.id, [
-      materials.sampleVideo,
-      materials.productImage
-    ]);
+    services.sourceAssetService.importMixedCutMaterialDirectory(task.id, materials.mixedCutRoot);
     await services.sourceAssetService.analyzeSourceVisuals(task.id);
   }
   if (mode.importDedupSourceVideo) {

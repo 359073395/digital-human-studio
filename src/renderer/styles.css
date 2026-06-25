@@ -1488,6 +1488,24 @@ label {
   border-bottom: 0;
 }
 
+.mixed-cut-group-rate {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 52px;
+  gap: 8px;
+  align-items: center;
+}
+
+.mixed-cut-group-rate input {
+  min-width: 0;
+}
+
+.mixed-cut-group-rate output {
+  color: #33403b;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
 .avatar-picker-block {
   display: grid;
   grid-column: 1 / -1;

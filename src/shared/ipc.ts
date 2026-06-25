@@ -7,6 +7,7 @@ import type {
   GeneratedPresenterImageSelections,
   GenerationStepId,
   MediaAsset,
+  MixedCutGroupSetting,
   OutputPresetId,
   PersonalIpProfile,
   SubtitleStyle,
@@ -164,6 +165,7 @@ export interface UpdateTaskInput {
   mixedCutDubbingDirectory?: string;
   mixedCutChapterMode?: VideoTask["mixedCutChapterMode"];
   mixedCutReuseRate?: number;
+  mixedCutGroupSettings?: MixedCutGroupSetting[];
   mixedCutRemoveOriginalAudio?: boolean;
   mixedCutEnableTransitions?: boolean;
   mixedCutBgmVolume?: number;

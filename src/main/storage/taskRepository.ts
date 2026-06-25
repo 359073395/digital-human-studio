@@ -23,6 +23,7 @@ import {
   type GenerationStepId,
   type GeneratedPresenterImageSelections,
   type MixedCutChapterMode,
+  type MixedCutGroupSetting,
   type MediaAsset,
   type OutputPresetId,
   type OutputVariant,
@@ -65,6 +66,7 @@ interface TaskRow {
   mixed_cut_dubbing_directory: string;
   mixed_cut_chapter_mode: MixedCutChapterMode;
   mixed_cut_reuse_rate: number;
+  mixed_cut_group_settings: string;
   mixed_cut_remove_original_audio: number;
   mixed_cut_enable_transitions: number;
   mixed_cut_bgm_volume: number;
@@ -180,6 +182,7 @@ export class TaskRepository {
     const mixedCutDubbingDirectory = "";
     const mixedCutChapterMode: MixedCutChapterMode = "fill-with-bgm";
     const mixedCutReuseRate = 35;
+    const mixedCutGroupSettings: MixedCutGroupSetting[] = [];
     const mixedCutRemoveOriginalAudio = false;
     const mixedCutEnableTransitions = false;
     const mixedCutBgmVolume = 70;
@@ -226,6 +229,7 @@ export class TaskRepository {
             mixed_cut_dubbing_directory,
             mixed_cut_chapter_mode,
             mixed_cut_reuse_rate,
+            mixed_cut_group_settings,
             mixed_cut_remove_original_audio,
             mixed_cut_enable_transitions,
             mixed_cut_bgm_volume,
@@ -244,7 +248,7 @@ export class TaskRepository {
             publishing_package,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -272,6 +276,7 @@ export class TaskRepository {
           mixedCutDubbingDirectory,
           mixedCutChapterMode,
           mixedCutReuseRate,
+          JSON.stringify(mixedCutGroupSettings),
           mixedCutRemoveOriginalAudio ? 1 : 0,
           mixedCutEnableTransitions ? 1 : 0,
           mixedCutBgmVolume,
@@ -433,6 +438,9 @@ export class TaskRepository {
       input.mixedCutReuseRate ?? existing.mixedCutReuseRate,
       35
     );
+    const mixedCutGroupSettings = normalizeMixedCutGroupSettings(
+      input.mixedCutGroupSettings ?? existing.mixedCutGroupSettings
+    );
     const mixedCutRemoveOriginalAudio =
       input.mixedCutRemoveOriginalAudio ?? existing.mixedCutRemoveOriginalAudio;
     const mixedCutEnableTransitions =
@@ -499,6 +507,7 @@ export class TaskRepository {
                mixed_cut_dubbing_directory = ?,
                mixed_cut_chapter_mode = ?,
                mixed_cut_reuse_rate = ?,
+               mixed_cut_group_settings = ?,
                mixed_cut_remove_original_audio = ?,
                mixed_cut_enable_transitions = ?,
                mixed_cut_bgm_volume = ?,
@@ -540,6 +549,7 @@ export class TaskRepository {
           mixedCutDubbingDirectory,
           mixedCutChapterMode,
           mixedCutReuseRate,
+          JSON.stringify(mixedCutGroupSettings),
           mixedCutRemoveOriginalAudio ? 1 : 0,
           mixedCutEnableTransitions ? 1 : 0,
           mixedCutBgmVolume,
@@ -857,6 +867,7 @@ export class TaskRepository {
       mixedCutDubbingDirectory: row.mixed_cut_dubbing_directory ?? "",
       mixedCutChapterMode: normalizeMixedCutChapterMode(row.mixed_cut_chapter_mode),
       mixedCutReuseRate: normalizePercent(row.mixed_cut_reuse_rate, 35),
+      mixedCutGroupSettings: parseMixedCutGroupSettings(row.mixed_cut_group_settings),
       mixedCutRemoveOriginalAudio: Boolean(row.mixed_cut_remove_original_audio),
       mixedCutEnableTransitions: Boolean(row.mixed_cut_enable_transitions),
       mixedCutBgmVolume: normalizePercent(row.mixed_cut_bgm_volume, 70),
@@ -1030,6 +1041,16 @@ function parseGeneratedPresenterImageSelections(
   }
 }
 
+function parseMixedCutGroupSettings(value: string | null | undefined): MixedCutGroupSetting[] {
+  try {
+    return normalizeMixedCutGroupSettings(
+      value ? (JSON.parse(value) as MixedCutGroupSetting[]) : []
+    );
+  } catch {
+    return [];
+  }
+}
+
 function normalizeOutputPresetIds(value: OutputPresetId[]): OutputPresetId[] {
   const unique = Array.from(new Set(value.filter(isOutputPresetId)));
   return unique.length > 0 ? unique : defaultOutputPresetIds();
@@ -1068,6 +1089,33 @@ function normalizeMixedCutChapterMode(value: unknown): MixedCutChapterMode {
   }
 
   return "fill-with-bgm";
+}
+
+function normalizeMixedCutGroupSettings(
+  value: MixedCutGroupSetting[] | undefined
+): MixedCutGroupSetting[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const byGroup = new Map<string, MixedCutGroupSetting>();
+  for (const setting of value) {
+    if (!setting || typeof setting !== "object") {
+      continue;
+    }
+
+    const groupId = String(setting.groupId ?? "").trim();
+    if (!/^\d+$/.test(groupId)) {
+      continue;
+    }
+
+    byGroup.set(groupId, {
+      groupId,
+      reuseRate: normalizePercent(setting.reuseRate, 35)
+    });
+  }
+
+  return [...byGroup.values()].sort((left, right) => Number(left.groupId) - Number(right.groupId));
 }
 
 function normalizePercent(value: unknown, fallback: number): number {

@@ -195,6 +195,13 @@ const MIGRATIONS = [
       ALTER TABLE video_tasks ADD COLUMN mixed_cut_enable_transitions INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE video_tasks ADD COLUMN mixed_cut_bgm_volume INTEGER NOT NULL DEFAULT 70;
     `
+  },
+  {
+    id: 15,
+    name: "add-mixed-cut-group-settings",
+    sql: `
+      ALTER TABLE video_tasks ADD COLUMN mixed_cut_group_settings TEXT NOT NULL DEFAULT '[]';
+    `
   }
 ] as const;
 

@@ -354,12 +354,13 @@ describe("SourceAssetService", () => {
     const task = repository.createTask({ title: "Mixed folder" });
     const firstFolder = path.join(tempDir, "first-folder");
     const secondFolder = path.join(tempDir, "second-folder");
-    fs.mkdirSync(path.join(firstFolder, "nested"), { recursive: true });
-    fs.mkdirSync(secondFolder, { recursive: true });
-    fs.writeFileSync(path.join(firstFolder, "clip-a.mp4"), Buffer.from("video-a"));
-    fs.writeFileSync(path.join(firstFolder, "nested", "clip-b.jpg"), Buffer.from("image-b"));
+    fs.mkdirSync(path.join(firstFolder, "1"), { recursive: true });
+    fs.mkdirSync(path.join(firstFolder, "2"), { recursive: true });
+    fs.mkdirSync(path.join(secondFolder, "10"), { recursive: true });
+    fs.writeFileSync(path.join(firstFolder, "1", "clip-a.mp4"), Buffer.from("video-a"));
+    fs.writeFileSync(path.join(firstFolder, "2", "clip-b.jpg"), Buffer.from("image-b"));
     fs.writeFileSync(path.join(firstFolder, "ignore.txt"), "ignore", "utf8");
-    fs.writeFileSync(path.join(secondFolder, "clip-c.webp"), Buffer.from("image-c"));
+    fs.writeFileSync(path.join(secondFolder, "10", "clip-c.webp"), Buffer.from("image-c"));
 
     const firstSync = service.importMixedCutMaterialDirectory(task.id, firstFolder);
     const secondSync = service.importMixedCutMaterialDirectory(task.id, secondFolder);
@@ -374,7 +375,10 @@ describe("SourceAssetService", () => {
     expect(firstAssets).toHaveLength(2);
     expect(secondSync.mixedCutMaterialDirectory).toBe(path.resolve(secondFolder));
     expect(secondAssets).toHaveLength(1);
+    expect(firstSync.mixedCutGroupSettings?.map((setting) => setting.groupId)).toEqual(["1", "2"]);
+    expect(secondSync.mixedCutGroupSettings?.map((setting) => setting.groupId)).toEqual(["10"]);
     expect(secondAssets[0]?.relativePath).toContain("clip-c");
+    expect(secondAssets[0]?.relativePath).toContain("mixed-materials/10/");
     expect(
       fs.existsSync(
         path.join(getTaskDirectory(appPaths, task.id), ...secondAssets[0]!.relativePath.split("/"))

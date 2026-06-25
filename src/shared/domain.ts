@@ -33,6 +33,11 @@ export type TextWeight = "regular" | "bold";
 
 export type MixedCutChapterMode = "fill-with-bgm" | "fixed-material-count" | "minimum-duration";
 
+export interface MixedCutGroupSetting {
+  groupId: string;
+  reuseRate: number;
+}
+
 export type MediaAssetKind =
   | "source-audio"
   | "source-video"
@@ -276,6 +281,7 @@ export interface VideoTask {
   mixedCutDubbingDirectory: string;
   mixedCutChapterMode: MixedCutChapterMode;
   mixedCutReuseRate: number;
+  mixedCutGroupSettings?: MixedCutGroupSetting[];
   mixedCutRemoveOriginalAudio: boolean;
   mixedCutEnableTransitions: boolean;
   mixedCutBgmVolume: number;

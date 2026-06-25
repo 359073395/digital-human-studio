@@ -41,12 +41,26 @@ describe("MixedCutWorkflowService", () => {
       selectedOutputPresets: ["portrait-9-16", "landscape-16-9"]
     });
 
-    const sourceDirectory = path.join(getTaskDirectory(appPaths, task.id), "source");
-    fs.mkdirSync(sourceDirectory, { recursive: true });
-    for (let index = 1; index <= 5; index += 1) {
-      const materialPath = path.join(sourceDirectory, `sample-${index}.png`);
+    const sourceDirectory = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "source",
+      "mixed-materials"
+    );
+    const groupedMaterials = [
+      ["1", "sample-1.png"],
+      ["1", "sample-2.png"],
+      ["2", "sample-3.png"],
+      ["3", "sample-4.png"]
+    ];
+    for (const [groupId, fileName] of groupedMaterials) {
+      const materialPath = path.join(sourceDirectory, groupId, fileName);
+      fs.mkdirSync(path.dirname(materialPath), { recursive: true });
       fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
-      repository.addMediaAsset(task.id, "mixed-cut-material", `source/sample-${index}.png`);
+      repository.addMediaAsset(
+        task.id,
+        "mixed-cut-material",
+        `source/mixed-materials/${groupId}/${fileName}`
+      );
     }
 
     const completed = new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
@@ -99,10 +113,16 @@ describe("MixedCutWorkflowService", () => {
       selectedOutputPresets: ["portrait-9-16"]
     });
 
-    const materialPath = path.join(getTaskDirectory(appPaths, task.id), "source", "long.png");
+    const materialPath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "source",
+      "mixed-materials",
+      "1",
+      "long.png"
+    );
     fs.mkdirSync(path.dirname(materialPath), { recursive: true });
     fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
-    repository.addMediaAsset(task.id, "mixed-cut-material", "source/long.png");
+    repository.addMediaAsset(task.id, "mixed-cut-material", "source/mixed-materials/1/long.png");
 
     new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
     const subtitlePath = path.join(
@@ -130,12 +150,20 @@ describe("MixedCutWorkflowService", () => {
       selectedOutputPresets: ["portrait-9-16"]
     });
 
-    const sourceDirectory = path.join(getTaskDirectory(appPaths, task.id), "source");
-    fs.mkdirSync(sourceDirectory, { recursive: true });
+    const sourceDirectory = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "source",
+      "mixed-materials"
+    );
     for (let index = 1; index <= 3; index += 1) {
-      const materialPath = path.join(sourceDirectory, `limited-${index}.png`);
+      const materialPath = path.join(sourceDirectory, String(index), `limited-${index}.png`);
+      fs.mkdirSync(path.dirname(materialPath), { recursive: true });
       fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
-      repository.addMediaAsset(task.id, "mixed-cut-material", `source/limited-${index}.png`);
+      repository.addMediaAsset(
+        task.id,
+        "mixed-cut-material",
+        `source/mixed-materials/${index}/limited-${index}.png`
+      );
     }
 
     new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);

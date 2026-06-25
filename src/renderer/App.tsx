@@ -34,6 +34,7 @@ import {
   type CoverStyle,
   type FrameTitleStyle,
   type MediaAsset,
+  type MixedCutGroupSetting,
   type OriginalityScoreReport,
   type OutputPresetId,
   type PersonalIpProfile,
@@ -51,7 +52,10 @@ import type {
   StartHeyGenOAuthResult,
   UpdateTaskInput
 } from "../shared/ipc";
-import { calculateMixedCutBatchPlan, type MixedCutBatchPlan } from "../shared/mixedCutPlanning";
+import {
+  calculateGroupedMixedCutBatchPlan,
+  type GroupedMixedCutBatchPlan
+} from "../shared/mixedCutPlanning";
 import {
   getProductionModeWorkflow,
   type ProductionModeWorkflow
@@ -118,6 +122,7 @@ const fallbackTask: VideoTask = {
   mixedCutDubbingDirectory: "",
   mixedCutChapterMode: "fill-with-bgm",
   mixedCutReuseRate: 35,
+  mixedCutGroupSettings: [],
   mixedCutRemoveOriginalAudio: false,
   mixedCutEnableTransitions: false,
   mixedCutBgmVolume: 70,
@@ -193,6 +198,7 @@ type EditableTaskPatch = Partial<
     | "mixedCutDubbingDirectory"
     | "mixedCutChapterMode"
     | "mixedCutReuseRate"
+    | "mixedCutGroupSettings"
     | "mixedCutRemoveOriginalAudio"
     | "mixedCutEnableTransitions"
     | "mixedCutBgmVolume"
@@ -360,17 +366,30 @@ export function App() {
   const mixedCutMaterialAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-material"
   );
-  const mixedCutVisualMaterialCount = mixedCutMaterialAssets.filter((asset) =>
-    isVisualMixedCutAsset(asset.relativePath)
-  ).length;
+  const mixedCutGroupRows = useMemo(
+    () =>
+      buildMixedCutGroupRows(
+        mixedCutMaterialAssets,
+        selectedTask.mixedCutGroupSettings,
+        selectedTask.mixedCutReuseRate
+      ),
+    [mixedCutMaterialAssets, selectedTask.mixedCutGroupSettings, selectedTask.mixedCutReuseRate]
+  );
+  const mixedCutVisualMaterialCount = mixedCutGroupRows.reduce(
+    (count, group) => count + group.shotCount,
+    0
+  );
   const mixedCutAudioMaterialCount = mixedCutMaterialAssets.length - mixedCutVisualMaterialCount;
   const mixedCutBatchPlan = useMemo(
     () =>
-      calculateMixedCutBatchPlan({
-        materialCount: mixedCutVisualMaterialCount,
-        reuseRate: selectedTask.mixedCutReuseRate
+      calculateGroupedMixedCutBatchPlan({
+        groups: mixedCutGroupRows.map((group) => ({
+          groupId: group.groupId,
+          shotCount: group.shotCount,
+          reuseRate: group.reuseRate
+        }))
       }),
-    [mixedCutVisualMaterialCount, selectedTask.mixedCutReuseRate]
+    [mixedCutGroupRows]
   );
   const mixedCutOutputAssets = currentTaskMediaAssets.filter((asset) =>
     ["mixed-cut-video", "edit-decision-record"].includes(asset.kind)
@@ -990,6 +1009,7 @@ export function App() {
         mixedCutDubbingDirectory: taskForRun.mixedCutDubbingDirectory,
         mixedCutChapterMode: taskForRun.mixedCutChapterMode,
         mixedCutReuseRate: taskForRun.mixedCutReuseRate,
+        mixedCutGroupSettings: taskForRun.mixedCutGroupSettings,
         mixedCutRemoveOriginalAudio: taskForRun.mixedCutRemoveOriginalAudio,
         mixedCutEnableTransitions: taskForRun.mixedCutEnableTransitions,
         mixedCutBgmVolume: taskForRun.mixedCutBgmVolume,
@@ -2971,26 +2991,59 @@ export function App() {
                           <table className="mixed-cut-chapter-table">
                             <thead>
                               <tr>
-                                <th>章节</th>
-                                <th>素材数 & 组合</th>
-                                <th>模式</th>
+                                <th>文件夹</th>
+                                <th>片段数</th>
                                 <th>重复率</th>
+                                <th>单片上限</th>
+                                <th>状态</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {mixedCutChapterRows(
-                                mixedCutVisualMaterialCount,
-                                mixedCutBatchPlan.targetCount,
-                                selectedTask.mixedCutChapterMode,
-                                selectedTask.mixedCutReuseRate
-                              ).map((row) => (
-                                <tr key={row.index}>
-                                  <td>{row.index}</td>
-                                  <td>{row.materialLabel}</td>
-                                  <td>{row.modeLabel}</td>
-                                  <td>{row.reuseRate}%</td>
+                              {mixedCutGroupRows.length > 0 ? (
+                                mixedCutBatchPlan.groups.map((row) => (
+                                  <tr key={row.groupId}>
+                                    <td>{row.groupId}</td>
+                                    <td>{row.shotCount}</td>
+                                    <td>
+                                      <div className="mixed-cut-group-rate">
+                                        <input
+                                          min={0}
+                                          max={100}
+                                          type="range"
+                                          value={row.reuseRate}
+                                          onChange={(event) =>
+                                            void updateCurrentTask({
+                                              mixedCutGroupSettings: mixedCutGroupRows.map(
+                                                (group) => ({
+                                                  groupId: group.groupId,
+                                                  reuseRate:
+                                                    group.groupId === row.groupId
+                                                      ? clampUiNumber(
+                                                          event.target.value,
+                                                          0,
+                                                          100,
+                                                          row.reuseRate
+                                                        )
+                                                      : group.reuseRate
+                                                })
+                                              )
+                                            })
+                                          }
+                                        />
+                                        <output>{row.reuseRate}%</output>
+                                      </div>
+                                    </td>
+                                    <td>{row.maxUsesPerShot}</td>
+                                    <td>{row.shotCount > 0 ? "可用" : "缺素材"}</td>
+                                  </tr>
+                                ))
+                              ) : (
+                                <tr>
+                                  <td colSpan={5}>
+                                    请选择包含 1、2、3 等数字文件夹的混剪素材根目录。
+                                  </td>
                                 </tr>
-                              ))}
+                              )}
                             </tbody>
                           </table>
                         </div>
@@ -4854,10 +4907,7 @@ function buildModeRecommendationReport({
   const finishedOutputCount =
     countAssets("mixed-cut-video", "dedup-processed-video", "finished-video", "avatar-video") +
     task.outputVariants.filter((variant) => Boolean(variant.finishedVideoPath)).length;
-  const mixedCutPlan = calculateMixedCutBatchPlan({
-    materialCount: mixedCutVisualMaterialCount,
-    reuseRate: task.mixedCutReuseRate
-  });
+  const mixedCutPlan = getMixedCutBatchPlanForTask(task);
 
   const makeRecommendation = (
     mode: VideoGenerationMode,
@@ -5983,77 +6033,96 @@ function clampUiNumber(value: string, min: number, max: number, fallback: number
   return Math.min(max, Math.max(min, Math.round(numericValue)));
 }
 
-function getMixedCutBatchPlanForTask(task: VideoTask): MixedCutBatchPlan {
-  return calculateMixedCutBatchPlan({
-    materialCount: getTaskScopedMediaAssets(task).filter(
-      (asset) => asset.kind === "mixed-cut-material" && isVisualMixedCutAsset(asset.relativePath)
-    ).length,
-    reuseRate: task.mixedCutReuseRate
+interface MixedCutGroupRow {
+  groupId: string;
+  shotCount: number;
+  reuseRate: number;
+}
+
+function getMixedCutBatchPlanForTask(task: VideoTask): GroupedMixedCutBatchPlan {
+  const groups = buildMixedCutGroupRows(
+    getTaskScopedMediaAssets(task).filter((asset) => asset.kind === "mixed-cut-material"),
+    task.mixedCutGroupSettings,
+    task.mixedCutReuseRate
+  );
+
+  return calculateGroupedMixedCutBatchPlan({
+    groups: groups.map((group) => ({
+      groupId: group.groupId,
+      shotCount: group.shotCount,
+      reuseRate: group.reuseRate
+    }))
   });
 }
 
-function mixedCutRecommendation(materialCount: number, plan: MixedCutBatchPlan): string {
+function mixedCutRecommendation(materialCount: number, plan: GroupedMixedCutBatchPlan): string {
   if (materialCount <= 0) {
     return "请先上传混剪素材";
   }
 
-  if (materialCount < 3) {
-    return "素材较少，建议先增加视频/图片";
+  if (plan.groupCount <= 0) {
+    return "请先选择数字分组素材文件夹";
   }
 
-  return `按素材组合和 ${plan.reuseRate}% 重复率，预计可生成 ${plan.targetCount} 条`;
+  return `按 ${plan.groupCount} 个分组和各组重复率，预计可生成 ${plan.targetCount} 条`;
 }
 
-function mixedCutPlanDetail(plan: MixedCutBatchPlan): string {
-  if (plan.materialCount <= 0) {
+function mixedCutPlanDetail(plan: GroupedMixedCutBatchPlan): string {
+  if (plan.totalShotCount <= 0) {
     return "选择素材文件夹后自动计算";
   }
 
   const combinationLabel =
     plan.combinationCount >= 10_000 ? "10000+" : String(plan.combinationCount);
-  return `每条约 ${plan.materialsPerVideo} 个素材 · 组合 ${combinationLabel} · 重复率限制 ${plan.reuseLimitedCount} 条`;
+  return `${plan.groupCount} 个分组 · ${plan.totalShotCount} 个片段 · 组合 ${combinationLabel} · 限制 ${plan.reuseLimitedCount} 条`;
+}
+
+function buildMixedCutGroupRows(
+  assets: MediaAsset[],
+  settings: MixedCutGroupSetting[] | undefined,
+  defaultReuseRate: number
+): MixedCutGroupRow[] {
+  const reuseByGroup = new Map(
+    (settings ?? []).map((setting) => [setting.groupId, setting.reuseRate] as const)
+  );
+  const countByGroup = new Map<string, number>();
+  for (const setting of settings ?? []) {
+    if (/^\d+$/.test(setting.groupId)) {
+      countByGroup.set(setting.groupId, 0);
+    }
+  }
+
+  for (const asset of assets) {
+    if (!isVisualMixedCutAsset(asset.relativePath)) {
+      continue;
+    }
+
+    const groupId = mixedCutGroupIdFromRelativePath(asset.relativePath);
+    if (!groupId) {
+      continue;
+    }
+
+    countByGroup.set(groupId, (countByGroup.get(groupId) ?? 0) + 1);
+  }
+
+  return [...countByGroup.entries()]
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([groupId, shotCount]) => ({
+      groupId,
+      shotCount,
+      reuseRate: clampUiNumber(String(reuseByGroup.get(groupId) ?? defaultReuseRate), 0, 100, 35)
+    }));
+}
+
+function mixedCutGroupIdFromRelativePath(relativePath: string): string {
+  const parts = relativePath.split("/");
+  const markerIndex = parts.indexOf("mixed-materials");
+  const groupId = markerIndex >= 0 ? parts[markerIndex + 1] : undefined;
+  return groupId && /^\d+$/.test(groupId) ? groupId : "";
 }
 
 function isVisualMixedCutAsset(relativePath: string): boolean {
   return /\.(mp4|mov|m4v|webm|mkv|avi|png|jpe?g|webp)$/i.test(relativePath);
-}
-
-function mixedCutChapterRows(
-  visualMaterialCount: number,
-  targetCount: number,
-  chapterMode: VideoTask["mixedCutChapterMode"],
-  reuseRate: number
-): Array<{
-  index: number;
-  materialLabel: string;
-  modeLabel: string;
-  reuseRate: number;
-}> {
-  const rowCount = Math.min(8, Math.max(1, targetCount));
-  const modeLabel = mixedCutChapterModeLabel(chapterMode);
-
-  return Array.from({ length: rowCount }, (_value, index) => {
-    const materialCount =
-      visualMaterialCount > 0 ? Math.max(1, visualMaterialCount - (index % 3)) : 0;
-    return {
-      index: index + 1,
-      materialLabel: materialCount > 0 ? `${materialCount} 个素材 · 导出时计算` : "未同步素材",
-      modeLabel,
-      reuseRate
-    };
-  });
-}
-
-function mixedCutChapterModeLabel(mode: VideoTask["mixedCutChapterMode"]): string {
-  switch (mode) {
-    case "fixed-material-count":
-      return "固定素材数";
-    case "minimum-duration":
-      return "至少 X 秒";
-    case "fill-with-bgm":
-    default:
-      return "为配音填充画面";
-  }
 }
 
 function assetFileName(relativePath: string): string {

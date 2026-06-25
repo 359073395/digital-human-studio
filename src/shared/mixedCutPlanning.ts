@@ -9,6 +9,33 @@ export interface MixedCutBatchPlan {
   reuseRate: number;
 }
 
+export interface MixedCutGroupMaterialInput {
+  groupId: string;
+  shotCount: number;
+  reuseRate: number;
+}
+
+export interface MixedCutGroupPlanSummary {
+  groupId: string;
+  shotCount: number;
+  reuseRate: number;
+  maxUsesPerShot: number;
+  capacity: number;
+}
+
+export interface GroupedMixedCutBatchPlan {
+  targetCount: number;
+  groupCount: number;
+  totalShotCount: number;
+  materialCount: number;
+  materialsPerVideo: number;
+  combinationCount: number;
+  reuseLimitedCount: number;
+  reuseRate: number;
+  groups: MixedCutGroupPlanSummary[];
+  warnings: string[];
+}
+
 export function calculateMixedCutBatchPlan(input: {
   materialCount: number;
   reuseRate: number;
@@ -48,6 +75,74 @@ export function calculateMixedCutBatchPlan(input: {
   };
 }
 
+export function calculateGroupedMixedCutBatchPlan(input: {
+  groups: MixedCutGroupMaterialInput[];
+  maxTargetCount?: number;
+}): GroupedMixedCutBatchPlan {
+  const maxTargetCount = Math.max(1, Math.floor(input.maxTargetCount ?? MIXED_CUT_MAX_BATCH_COUNT));
+  const groups = normalizeGroupInputs(input.groups).map((group) => {
+    const maxUsesPerShot = Math.max(1, Math.floor((maxTargetCount * group.reuseRate) / 100));
+    return {
+      ...group,
+      maxUsesPerShot,
+      capacity: group.shotCount * maxUsesPerShot
+    };
+  });
+  const totalShotCount = groups.reduce((total, group) => total + group.shotCount, 0);
+  const warnings: string[] = [];
+
+  if (groups.length === 0 || totalShotCount === 0) {
+    return {
+      targetCount: 0,
+      groupCount: groups.length,
+      totalShotCount,
+      materialCount: totalShotCount,
+      materialsPerVideo: groups.length,
+      combinationCount: 0,
+      reuseLimitedCount: 0,
+      reuseRate: averageReuseRate(groups),
+      groups,
+      warnings: ["mixed-cut material must be grouped in numeric folders before rendering."]
+    };
+  }
+
+  const emptyGroup = groups.find((group) => group.shotCount <= 0);
+  if (emptyGroup) {
+    warnings.push(`group ${emptyGroup.groupId} has no usable visual clips.`);
+  }
+
+  const combinationCount = boundedProduct(
+    groups.map((group) => Math.max(0, group.shotCount)),
+    10_000
+  );
+  const reuseLimitedCount = groups.reduce(
+    (minimum, group) => Math.min(minimum, group.capacity),
+    Number.POSITIVE_INFINITY
+  );
+  const targetCount = Math.min(
+    maxTargetCount,
+    combinationCount,
+    Number.isFinite(reuseLimitedCount) ? reuseLimitedCount : 0
+  );
+
+  if (targetCount < maxTargetCount) {
+    warnings.push("target count is limited by grouped materials, uniqueness, or reuse settings.");
+  }
+
+  return {
+    targetCount: Math.max(0, Math.floor(targetCount)),
+    groupCount: groups.length,
+    totalShotCount,
+    materialCount: totalShotCount,
+    materialsPerVideo: groups.length,
+    combinationCount,
+    reuseLimitedCount: Math.max(0, Math.floor(reuseLimitedCount || 0)),
+    reuseRate: averageReuseRate(groups),
+    groups,
+    warnings
+  };
+}
+
 function recommendedMaterialsPerVideo(materialCount: number): number {
   if (materialCount <= 1) {
     return 1;
@@ -79,6 +174,55 @@ function boundedCombination(n: number, k: number, cap: number): number {
   }
 
   return Math.max(1, Math.floor(value));
+}
+
+function boundedProduct(values: number[], cap: number): number {
+  if (values.length === 0 || values.some((value) => value <= 0)) {
+    return 0;
+  }
+
+  let product = 1;
+  for (const value of values) {
+    product *= value;
+    if (product >= cap) {
+      return cap;
+    }
+  }
+
+  return Math.max(1, Math.floor(product));
+}
+
+function normalizeGroupInputs(groups: MixedCutGroupMaterialInput[]): MixedCutGroupPlanSummary[] {
+  const byGroup = new Map<string, MixedCutGroupMaterialInput>();
+  for (const group of groups) {
+    const groupId = String(group.groupId ?? "").trim();
+    if (!/^\d+$/.test(groupId)) {
+      continue;
+    }
+
+    const existing = byGroup.get(groupId);
+    byGroup.set(groupId, {
+      groupId,
+      shotCount: Math.max(0, Math.floor((existing?.shotCount ?? 0) + group.shotCount)),
+      reuseRate: clampNumber(group.reuseRate, 0, 100)
+    });
+  }
+
+  return [...byGroup.values()]
+    .sort((left, right) => Number(left.groupId) - Number(right.groupId))
+    .map((group) => ({
+      ...group,
+      maxUsesPerShot: 1,
+      capacity: group.shotCount
+    }));
+}
+
+function averageReuseRate(groups: Array<{ reuseRate: number }>): number {
+  if (groups.length === 0) {
+    return 0;
+  }
+
+  return Math.round(groups.reduce((sum, group) => sum + group.reuseRate, 0) / groups.length);
 }
 
 function clampNumber(value: number, min: number, max: number): number {

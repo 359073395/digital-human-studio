@@ -12,6 +12,13 @@ import { TaskRepository } from "../storage/taskRepository";
 const DIRECT_MEDIA_CONTENT_TYPES = ["video/", "audio/", "application/octet-stream"];
 const SOURCE_VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"]);
 const SOURCE_AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".ogg"]);
+const MIXED_VISUAL_EXTENSIONS = new Set([
+  ...SOURCE_VIDEO_EXTENSIONS,
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp"
+]);
 const MIXED_MATERIAL_EXTENSIONS = new Set([
   ...SOURCE_VIDEO_EXTENSIONS,
   ...SOURCE_AUDIO_EXTENSIONS,
@@ -294,11 +301,23 @@ export class SourceAssetService {
       throw new Error("请选择有效的混剪素材文件夹。");
     }
 
-    const filePaths = listSupportedFiles(resolvedDirectory, MIXED_MATERIAL_EXTENSIONS);
-    if (filePaths.length === 0) {
+    const groups = listGroupedMixedCutFiles(resolvedDirectory);
+    if (groups.length === 0) {
+      throw new Error(
+        "混剪素材需要按数字文件夹整理，例如 1、2、3；每个数字文件夹内放该镜头组的 1-5 秒视频或图片素材。"
+      );
+    }
+
+    const fileCount = groups.reduce((count, group) => count + group.filePaths.length, 0);
+    if (fileCount === 0) {
       return this.taskRepository.updateTask({
         taskId: task.id,
-        mixedCutMaterialDirectory: resolvedDirectory
+        mixedCutMaterialDirectory: resolvedDirectory,
+        mixedCutGroupSettings: mergeMixedCutGroupSettings(
+          task.mixedCutGroupSettings,
+          groups.map((group) => group.groupId),
+          task.mixedCutReuseRate
+        )
       });
     }
 
@@ -310,18 +329,25 @@ export class SourceAssetService {
     fs.rmSync(materialDirectory, { recursive: true, force: true });
     this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-material");
 
-    for (const [index, filePath] of filePaths.entries()) {
-      const extension = validateExtension(filePath, MIXED_MATERIAL_EXTENSIONS);
-      const relativePath = `source/mixed-materials/material-${index + 1}-${sanitizeBaseName(
-        path.basename(filePath, extension)
-      )}${extension}`;
-      copyTaskFile(this.paths, taskId, filePath, relativePath);
-      this.taskRepository.addMediaAsset(taskId, "mixed-cut-material", relativePath);
+    for (const group of groups) {
+      for (const [index, filePath] of group.filePaths.entries()) {
+        const extension = validateExtension(filePath, MIXED_VISUAL_EXTENSIONS);
+        const relativePath = `source/mixed-materials/${group.groupId}/shot-${index + 1}-${sanitizeBaseName(
+          path.basename(filePath, extension)
+        )}${extension}`;
+        copyTaskFile(this.paths, taskId, filePath, relativePath);
+        this.taskRepository.addMediaAsset(taskId, "mixed-cut-material", relativePath);
+      }
     }
 
     this.taskRepository.updateTask({
       taskId: task.id,
-      mixedCutMaterialDirectory: resolvedDirectory
+      mixedCutMaterialDirectory: resolvedDirectory,
+      mixedCutGroupSettings: mergeMixedCutGroupSettings(
+        task.mixedCutGroupSettings,
+        groups.map((group) => group.groupId),
+        task.mixedCutReuseRate
+      )
     });
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
@@ -560,6 +586,53 @@ function listSupportedFiles(directoryPath: string, allowed: Set<string>): string
   }
 
   return results.sort((left, right) => left.localeCompare(right));
+}
+
+function listGroupedMixedCutFiles(
+  directoryPath: string
+): Array<{ groupId: string; filePaths: string[] }> {
+  return fs
+    .readdirSync(directoryPath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+    .sort((left, right) => Number(left.name) - Number(right.name))
+    .map((entry) => {
+      const groupDirectory = path.join(directoryPath, entry.name);
+      return {
+        groupId: entry.name,
+        filePaths: listSupportedFiles(groupDirectory, MIXED_VISUAL_EXTENSIONS)
+      };
+    });
+}
+
+function mergeMixedCutGroupSettings(
+  currentSettings:
+    | Array<{
+        groupId: string;
+        reuseRate: number;
+      }>
+    | undefined,
+  groupIds: string[],
+  fallbackReuseRate: number
+): Array<{ groupId: string; reuseRate: number }> {
+  const currentByGroup = new Map(
+    (currentSettings ?? []).map((setting) => [setting.groupId, setting.reuseRate] as const)
+  );
+
+  return [...new Set(groupIds)]
+    .filter((groupId) => /^\d+$/.test(groupId))
+    .sort((left, right) => Number(left) - Number(right))
+    .map((groupId) => ({
+      groupId,
+      reuseRate: clampPercent(currentByGroup.get(groupId) ?? fallbackReuseRate, fallbackReuseRate)
+    }));
+}
+
+function clampPercent(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return Math.min(100, Math.max(0, Math.round(fallback)));
+  }
+
+  return Math.min(100, Math.max(0, Math.round(value)));
 }
 
 function extractFirstHttpUrl(value: string): string {

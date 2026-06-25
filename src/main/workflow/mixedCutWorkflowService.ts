@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import ffmpegStaticPath from "ffmpeg-static";
@@ -9,7 +10,10 @@ import {
   type PublishingPackage,
   type VideoTask
 } from "../../shared/domain";
-import { calculateMixedCutBatchPlan } from "../../shared/mixedCutPlanning";
+import {
+  calculateGroupedMixedCutBatchPlan,
+  type GroupedMixedCutBatchPlan
+} from "../../shared/mixedCutPlanning";
 import type { AppPathSettings } from "../../shared/appSettings";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
@@ -31,6 +35,9 @@ interface MixedCutEditDecisionRecord {
   generatedAt: string;
   targetCount: number;
   materialCount: number;
+  groupCount: number;
+  combinationSignature: string;
+  groupedPlan: GroupedMixedCutBatchPlan;
   outputVideo: string;
   subtitleFile: string;
   coverFile: string;
@@ -38,12 +45,38 @@ interface MixedCutEditDecisionRecord {
   segments: Array<{
     order: number;
     sourceAssetId: string;
+    shotId: string;
+    groupId: string;
+    useCount: number;
+    maxUses: number;
     sourcePath: string;
     role: string;
     startSeconds: number;
     durationSeconds: number;
     transform: string;
   }>;
+}
+
+interface MixedCutShot {
+  id: string;
+  asset: MediaAsset;
+  groupId: string;
+  relativePath: string;
+  absolutePath: string;
+}
+
+interface MixedCutShotGroup {
+  groupId: string;
+  reuseRate: number;
+  maxUsesPerShot: number;
+  shots: MixedCutShot[];
+}
+
+interface MixedCutCombination {
+  batchIndex: number;
+  signature: string;
+  shots: MixedCutShot[];
+  usageAfterSelection: Map<string, number>;
 }
 
 export class MixedCutWorkflowService {
@@ -64,28 +97,40 @@ export class MixedCutWorkflowService {
         throw new Error("当前任务不是混剪视频模式。");
       }
 
-      const sourceAssets = findMixedCutVisualAssets(task);
-      if (sourceAssets.length === 0) {
-        throw new Error("请先上传至少一个视频或图片素材，再生成混剪视频。");
-      }
-
       if (!task.finalScript.trim()) {
         throw new Error("请先生成或填写混剪视频文案。");
       }
 
-      const targetCount = calculateMixedCutBatchPlan({
-        materialCount: sourceAssets.length,
-        reuseRate: task.mixedCutReuseRate
-      }).targetCount;
       const taskDirectory = getTaskDirectory(this.paths, taskId);
+      const shotGroups = buildMixedCutShotGroups(task, taskDirectory);
+      const groupedPlan = calculateGroupedMixedCutBatchPlan({
+        groups: shotGroups.map((group) => ({
+          groupId: group.groupId,
+          shotCount: group.shots.length,
+          reuseRate: group.reuseRate
+        }))
+      });
+      if (groupedPlan.targetCount <= 0) {
+        throw new Error(
+          "混剪素材不足：请确认素材根目录下有 1、2、3 等数字文件夹，且每个文件夹至少包含一个可用视频或图片。"
+        );
+      }
+      applyPlanLimitsToShotGroups(shotGroups, groupedPlan);
+      const combinations = createUniqueMixedCutCombinations(shotGroups, groupedPlan.targetCount);
+      const targetCount = combinations.length;
       const generatedRecords: MixedCutEditDecisionRecord[] = [];
 
       for (let batchIndex = 1; batchIndex <= targetCount; batchIndex += 1) {
+        const combination = combinations[batchIndex - 1];
+        if (!combination) {
+          throw new Error(`混剪组合 ${batchIndex} 计算失败，请降低重复率或增加素材。`);
+        }
         for (const presetId of task.selectedOutputPresets) {
           const preset = requireOutputPreset(presetId);
           const record = this.renderMixedCutVariant({
             batchIndex,
-            sourceAssets,
+            combination,
+            groupedPlan,
             task,
             taskDirectory,
             preset,
@@ -130,19 +175,20 @@ export class MixedCutWorkflowService {
 
   private renderMixedCutVariant(input: {
     task: VideoTask;
-    sourceAssets: MediaAsset[];
+    combination: MixedCutCombination;
+    groupedPlan: GroupedMixedCutBatchPlan;
     taskDirectory: string;
     preset: OutputPreset;
     batchIndex: number;
     targetCount: number;
   }): MixedCutEditDecisionRecord {
     const targetDurationSeconds = estimateScriptDurationSeconds(input.task.finalScript);
-    const selectedAssets = selectAssetsForBatch(
-      input.sourceAssets,
-      input.batchIndex,
-      targetDurationSeconds
+    const selectedShots = input.combination.shots;
+    const segmentDurationSeconds = Math.max(
+      SEGMENT_DURATION_SECONDS / 2,
+      targetDurationSeconds / Math.max(1, selectedShots.length)
     );
-    const warnings = createBatchWarnings(input.sourceAssets.length, input.targetCount);
+    const warnings = createBatchWarnings(input.groupedPlan, input.targetCount);
     const segmentDirectory = path.join(
       input.taskDirectory,
       "post",
@@ -152,8 +198,9 @@ export class MixedCutWorkflowService {
     fs.rmSync(segmentDirectory, { recursive: true, force: true });
     fs.mkdirSync(segmentDirectory, { recursive: true });
 
-    const segmentPaths = selectedAssets.map((asset, index) => {
-      const sourcePath = absoluteTaskPath(this.paths, input.task.id, asset.relativePath);
+    const segmentPaths = selectedShots.map((shot, index) => {
+      const sourcePath = shot.absolutePath;
+      const asset = shot.asset;
       if (!fs.existsSync(sourcePath)) {
         throw new Error(`混剪素材不存在：${asset.relativePath}`);
       }
@@ -163,7 +210,7 @@ export class MixedCutWorkflowService {
         outputPath,
         preset: input.preset,
         startSeconds: videoStartOffset(input.batchIndex, index),
-        durationSeconds: SEGMENT_DURATION_SECONDS
+        durationSeconds: segmentDurationSeconds
       });
       return outputPath;
     });
@@ -199,18 +246,27 @@ export class MixedCutWorkflowService {
       presetId: input.preset.id,
       generatedAt: new Date().toISOString(),
       targetCount: input.targetCount,
-      materialCount: input.sourceAssets.length,
+      materialCount: input.groupedPlan.totalShotCount,
+      groupCount: input.groupedPlan.groupCount,
+      combinationSignature: input.combination.signature,
+      groupedPlan: input.groupedPlan,
       outputVideo,
       subtitleFile,
       coverFile,
       warnings,
-      segments: selectedAssets.map((asset, index) => ({
+      segments: selectedShots.map((shot, index) => ({
         order: index + 1,
-        sourceAssetId: asset.id,
-        sourcePath: asset.relativePath,
+        sourceAssetId: shot.asset.id,
+        shotId: shot.id,
+        groupId: shot.groupId,
+        useCount: input.combination.usageAfterSelection.get(shot.id) ?? 0,
+        maxUses:
+          input.groupedPlan.groups.find((group) => group.groupId === shot.groupId)
+            ?.maxUsesPerShot ?? 1,
+        sourcePath: shot.relativePath,
         role: segmentRole(index),
         startSeconds: videoStartOffset(input.batchIndex, index),
-        durationSeconds: SEGMENT_DURATION_SECONDS,
+        durationSeconds: segmentDurationSeconds,
         transform: `${input.preset.aspectRatio} scale/pad, segment-level reorder`
       }))
     };
@@ -241,27 +297,185 @@ export class MixedCutWorkflowService {
   }
 }
 
-function findMixedCutVisualAssets(task: VideoTask): MediaAsset[] {
-  return task.mediaAssets.filter((asset) => {
-    if (asset.kind !== "mixed-cut-material") {
-      return false;
+function buildMixedCutShotGroups(task: VideoTask, taskDirectory: string): MixedCutShotGroup[] {
+  const settings = new Map(
+    (task.mixedCutGroupSettings ?? []).map((setting) => [setting.groupId, setting.reuseRate])
+  );
+  const grouped = new Map<string, MixedCutShot[]>();
+
+  for (const asset of task.mediaAssets) {
+    if (asset.kind !== "mixed-cut-material" || !isVisualMixedCutAsset(asset.relativePath)) {
+      continue;
     }
 
-    const extension = path.extname(asset.relativePath).toLowerCase();
-    return VIDEO_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension);
-  });
+    const groupId = mixedCutGroupIdFromRelativePath(asset.relativePath);
+    if (!groupId) {
+      continue;
+    }
+
+    const absolutePath = absoluteTaskPathFromDirectory(taskDirectory, asset.relativePath);
+    const shot: MixedCutShot = {
+      id: createMixedCutShotId(groupId, asset.relativePath, absolutePath),
+      asset,
+      groupId,
+      relativePath: asset.relativePath,
+      absolutePath
+    };
+    const shots = grouped.get(groupId) ?? [];
+    shots.push(shot);
+    grouped.set(groupId, shots);
+  }
+
+  const groupIds = new Set([...settings.keys(), ...grouped.keys()]);
+  const groups = [...groupIds]
+    .sort((left, right) => Number(left) - Number(right))
+    .map((groupId) => ({
+      groupId,
+      reuseRate: settings.get(groupId) ?? task.mixedCutReuseRate,
+      maxUsesPerShot: 1,
+      shots: (grouped.get(groupId) ?? []).sort((left, right) =>
+        left.relativePath.localeCompare(right.relativePath)
+      )
+    }));
+
+  if (groups.length === 0) {
+    throw new Error("混剪素材需要按数字文件夹整理：请选择包含 1、2、3 等子文件夹的素材根目录。");
+  }
+
+  return groups;
 }
 
-function selectAssetsForBatch(
-  assets: MediaAsset[],
-  batchIndex: number,
-  targetDurationSeconds: number
-): MediaAsset[] {
-  const segmentCount = Math.max(3, Math.ceil(targetDurationSeconds / SEGMENT_DURATION_SECONDS));
-  return Array.from({ length: segmentCount }, (_value, index) => {
-    const offset = (batchIndex - 1) * 2 + index;
-    return assets[offset % assets.length];
-  });
+function applyPlanLimitsToShotGroups(
+  shotGroups: MixedCutShotGroup[],
+  plan: GroupedMixedCutBatchPlan
+): void {
+  const summaryByGroup = new Map(plan.groups.map((group) => [group.groupId, group]));
+  for (const group of shotGroups) {
+    group.maxUsesPerShot = summaryByGroup.get(group.groupId)?.maxUsesPerShot ?? 1;
+  }
+}
+
+function createUniqueMixedCutCombinations(
+  shotGroups: MixedCutShotGroup[],
+  targetCount: number
+): MixedCutCombination[] {
+  const usageCounts = new Map<string, number>();
+  const usedSignatures = new Set<string>();
+  const combinations: MixedCutCombination[] = [];
+
+  for (let batchIndex = 1; batchIndex <= targetCount; batchIndex += 1) {
+    const selected = findNextCombination(shotGroups, usageCounts, usedSignatures, batchIndex);
+    if (!selected) {
+      break;
+    }
+
+    for (const shot of selected) {
+      usageCounts.set(shot.id, (usageCounts.get(shot.id) ?? 0) + 1);
+    }
+
+    const signature = createCombinationSignature(selected);
+    usedSignatures.add(signature);
+    combinations.push({
+      batchIndex,
+      signature,
+      shots: selected,
+      usageAfterSelection: new Map(usageCounts)
+    });
+  }
+
+  if (combinations.length === 0) {
+    throw new Error("素材组合不足：请增加每个数字文件夹里的片段，或提高该组重复率。");
+  }
+
+  return combinations;
+}
+
+function findNextCombination(
+  shotGroups: MixedCutShotGroup[],
+  usageCounts: Map<string, number>,
+  usedSignatures: Set<string>,
+  batchIndex: number
+): MixedCutShot[] | null {
+  const selected: MixedCutShot[] = [];
+  let visitedNodes = 0;
+  const maxVisitedNodes = 50_000;
+
+  const visit = (groupIndex: number): MixedCutShot[] | null => {
+    visitedNodes += 1;
+    if (visitedNodes > maxVisitedNodes) {
+      return null;
+    }
+
+    if (groupIndex >= shotGroups.length) {
+      const signature = createCombinationSignature(selected);
+      return usedSignatures.has(signature) ? null : [...selected];
+    }
+
+    const group = shotGroups[groupIndex];
+    const orderedShots = rotateShots(group.shots, batchIndex + groupIndex);
+    for (const shot of orderedShots) {
+      const currentUse = usageCounts.get(shot.id) ?? 0;
+      if (currentUse >= group.maxUsesPerShot) {
+        continue;
+      }
+
+      selected.push(shot);
+      const result = visit(groupIndex + 1);
+      if (result) {
+        return result;
+      }
+      selected.pop();
+    }
+
+    return null;
+  };
+
+  return visit(0);
+}
+
+function rotateShots(shots: MixedCutShot[], offset: number): MixedCutShot[] {
+  if (shots.length <= 1) {
+    return shots;
+  }
+
+  const start = offset % shots.length;
+  return [...shots.slice(start), ...shots.slice(0, start)];
+}
+
+function createCombinationSignature(shots: MixedCutShot[]): string {
+  return crypto
+    .createHash("sha1")
+    .update(shots.map((shot) => `${shot.groupId}:${shot.id}`).join("|"))
+    .digest("hex");
+}
+
+function createMixedCutShotId(groupId: string, relativePath: string, absolutePath: string): string {
+  const hash = crypto.createHash("sha1");
+  hash.update(groupId);
+  hash.update("|");
+  hash.update(relativePath);
+  if (fs.existsSync(absolutePath)) {
+    const stat = fs.statSync(absolutePath);
+    hash.update(`|${stat.size}|${Math.floor(stat.mtimeMs)}`);
+    hash.update(fs.readFileSync(absolutePath));
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
+function mixedCutGroupIdFromRelativePath(relativePath: string): string {
+  const parts = relativePath.split("/");
+  const markerIndex = parts.indexOf("mixed-materials");
+  const groupId = markerIndex >= 0 ? parts[markerIndex + 1] : undefined;
+  return groupId && /^\d+$/.test(groupId) ? groupId : "";
+}
+
+function isVisualMixedCutAsset(relativePath: string): boolean {
+  const extension = path.extname(relativePath).toLowerCase();
+  return VIDEO_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension);
+}
+
+function absoluteTaskPathFromDirectory(taskDirectory: string, relativePath: string): string {
+  return path.join(taskDirectory, ...relativePath.split("/"));
 }
 
 function renderSegment(input: {
@@ -283,7 +497,7 @@ function renderSegment(input: {
 
   const args = [
     "-y",
-    ...(isImage ? ["-loop", "1"] : ["-ss", input.startSeconds.toFixed(2)]),
+    ...(isImage ? ["-loop", "1"] : ["-stream_loop", "-1", "-ss", input.startSeconds.toFixed(2)]),
     "-t",
     input.durationSeconds.toFixed(2),
     "-i",
@@ -543,13 +757,16 @@ function copyTaskAsset(
   fs.copyFileSync(sourcePath, targetPath);
 }
 
-function createBatchWarnings(materialCount: number, targetCount: number): string[] {
+function createBatchWarnings(plan: GroupedMixedCutBatchPlan, targetCount: number): string[] {
   const warnings: string[] = [];
-  if (materialCount < 3) {
+  if (plan.totalShotCount < 3) {
     warnings.push("素材少于 3 个，批量混剪容易出现同质化。建议补充更多素材。");
   }
-  if (targetCount > Math.max(1, materialCount * 2)) {
+  if (targetCount >= plan.combinationCount && plan.combinationCount < 10_000) {
     warnings.push("生成数量明显高于素材数量，建议后续进入视频去重处理模式做原创度评分。");
+  }
+  for (const warning of plan.warnings) {
+    warnings.push(warning);
   }
   return warnings;
 }
