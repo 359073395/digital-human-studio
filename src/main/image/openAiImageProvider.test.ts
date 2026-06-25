@@ -239,6 +239,44 @@ describe("OpenAiImageProvider", () => {
     expect(result.imageBytes.toString()).toBe("storyboard-image-after-retry");
   });
 
+  it("turns aborted storyboard image requests into readable timeout errors", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const error = new Error("aborted by runtime");
+      error.name = "AbortError";
+      throw error;
+    });
+
+    try {
+      await createProvider({ fetchImpl: fetchMock }).generateVisualStoryboardImage({
+        prompt: "Create one visual storyboard with 9 consistent panels."
+      });
+      throw new Error("Expected storyboard image generation to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("OpenAI");
+      expect((error as Error).message).not.toContain("aborted by runtime");
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("turns aborted product presenter image requests into readable timeout errors", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const error = new Error("aborted by runtime");
+      error.name = "AbortError";
+      throw error;
+    });
+
+    await expect(
+      createProvider({ fetchImpl: fetchMock }).generateProductPresenterImage({
+        task: createTask(),
+        preset: OUTPUT_PRESETS[0],
+        productImagePath
+      })
+    ).rejects.toThrow(/OpenAI/);
+  });
+
   it("is unavailable when the image provider is disabled or missing credentials", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 

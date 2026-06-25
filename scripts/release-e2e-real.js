@@ -56,7 +56,6 @@ const {
 } = require("../dist-electron/main/storyboard/storyboardWorkflowService");
 
 const PROVIDERS = ["heygen", "source-parser", "llm", "image", "video", "asr", "tts"];
-const REQUIRED_PROVIDERS = new Set(["heygen", "llm", "image"]);
 const OUTPUT_PRESETS = ["portrait-9-16", "landscape-16-9"];
 
 const MATERIALS = {
@@ -294,7 +293,7 @@ function providerEnvApiKey(providerId) {
   return undefined;
 }
 
-async function prepareConfigurations(sourceAppDataDir, target) {
+async function prepareConfigurations(sourceAppDataDir, target, cases) {
   if (!fs.existsSync(sourceAppDataDir) && !heyGenEnvCredential()) {
     throw new Error(
       `没有找到源配置目录：${sourceAppDataDir}。请先在桌面版保存 API，或通过 HEYGEN_API_KEY / HEYGEN_BEARER_TOKEN 提供凭据。`
@@ -307,7 +306,7 @@ async function prepareConfigurations(sourceAppDataDir, target) {
   }
 
   try {
-    for (const providerId of PROVIDERS) {
+    for (const providerId of providersForSelectedCases(cases)) {
       if (source) {
         await copyServiceConfiguration({ source, target, providerId });
       } else {
@@ -557,15 +556,50 @@ function createServices(runtime) {
   };
 }
 
-async function runServiceChecks(runtime) {
+function requiredProvidersForCases(cases) {
+  const providers = new Set(["llm"]);
+
+  for (const mode of cases) {
+    if (requiresHeyGen(mode)) {
+      providers.add("heygen");
+    }
+    if (mode.importProductImage || mode.storyboard) {
+      providers.add("image");
+    }
+    if (mode.importSourceVideo) {
+      providers.add("asr");
+    }
+  }
+
+  return providers;
+}
+
+function providersForSelectedCases(cases) {
+  const providers = requiredProvidersForCases(cases);
+
+  for (const mode of cases) {
+    if (mode.originalVideoUrl && !mode.originalVideoUrl.startsWith("local://")) {
+      providers.add("source-parser");
+    }
+  }
+
+  return PROVIDERS.filter((providerId) => providers.has(providerId));
+}
+
+function requiresHeyGen(mode) {
+  return mode.generationMode !== "mixed-cut" && mode.generationMode !== "video-dedup";
+}
+
+async function runServiceChecks(runtime, cases) {
   const checks = [];
-  for (const providerId of PROVIDERS) {
+  const requiredProviders = requiredProvidersForCases(cases);
+  for (const providerId of providersForSelectedCases(cases)) {
     const result = await runtime.serviceRepository.testConfiguration(providerId);
     checks.push(result);
   }
 
   const requiredFailures = checks.filter(
-    (result) => REQUIRED_PROVIDERS.has(result.providerId) && !result.ok
+    (result) => requiredProviders.has(result.providerId) && !result.ok
   );
   if (requiredFailures.length > 0) {
     throw new Error(
@@ -969,26 +1003,34 @@ async function main() {
   };
 
   try {
-    await prepareConfigurations(sourceAppDataDir, runtime);
+    await prepareConfigurations(sourceAppDataDir, runtime, cases);
     await ensureReleaseAsrConfiguration(runtime, cases);
     report.heyGenAuthMode =
       runtime.serviceRepository.getConfiguration("heygen").settings.authMode || "api-key";
     report.heyGenGenerationRoute =
       runtime.serviceRepository.getConfiguration("heygen").settings.generationRoute || "auto";
     const services = createServices(runtime);
-    report.serviceChecks = await runServiceChecks(runtime);
-    const avatarCatalog = await selectAvatar(runtime, services);
-    report.avatarCatalog = {
-      count: avatarCatalog.looks.length,
-      selected: {
-        id: avatarCatalog.selected.id,
-        groupId: avatarCatalog.selected.groupId,
-        name: avatarCatalog.selected.name,
-        hasPreviewImage: Boolean(avatarCatalog.selected.previewImageUrl),
-        hasPreviewVideo: Boolean(avatarCatalog.selected.previewVideoUrl),
-        hasDefaultVoice: Boolean(avatarCatalog.selected.defaultVoiceId)
-      }
-    };
+    report.serviceChecks = await runServiceChecks(runtime, cases);
+    const needsHeyGen = cases.some(requiresHeyGen);
+    const avatarCatalog = needsHeyGen
+      ? await selectAvatar(runtime, services)
+      : { looks: [], selected: { id: "", groupId: "", name: "" } };
+    report.avatarCatalog = needsHeyGen
+      ? {
+          count: avatarCatalog.looks.length,
+          selected: {
+            id: avatarCatalog.selected.id,
+            groupId: avatarCatalog.selected.groupId,
+            name: avatarCatalog.selected.name,
+            hasPreviewImage: Boolean(avatarCatalog.selected.previewImageUrl),
+            hasPreviewVideo: Boolean(avatarCatalog.selected.previewVideoUrl),
+            hasDefaultVoice: Boolean(avatarCatalog.selected.defaultVoiceId)
+          }
+        }
+      : {
+          count: 0,
+          skipped: "selected modes do not require HeyGen"
+        };
     const materials = await prepareMaterials(testRoot);
 
     for (const mode of cases) {

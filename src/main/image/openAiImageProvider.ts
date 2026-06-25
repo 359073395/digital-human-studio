@@ -35,6 +35,8 @@ interface OpenAiImageResponse {
   }>;
 }
 
+const IMAGE_REQUEST_TIMEOUT_MS = 120000;
+
 export class OpenAiImageProvider implements ImageProvider {
   private readonly fetchImpl: typeof fetch;
 
@@ -67,13 +69,18 @@ export class OpenAiImageProvider implements ImageProvider {
       path.basename(input.productImagePath)
     );
 
-    const response = await this.fetchImpl(`${normalizeBaseUrl(baseUrl)}/images/edits`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`
+    const response = await fetchWithTimeout(
+      this.fetchImpl,
+      `${normalizeBaseUrl(baseUrl)}/images/edits`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`
+        },
+        body: formData
       },
-      body: formData
-    });
+      "OpenAI product presenter image request timed out. Please retry with a shorter prompt."
+    );
 
     const responseText = await response.text();
     if (!response.ok) {
@@ -100,23 +107,10 @@ export class OpenAiImageProvider implements ImageProvider {
     }
 
     const generationUrl = `${normalizeBaseUrl(baseUrl)}/images/generations`;
-    const response = await this.fetchImpl(generationUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: modelName,
-        prompt: promptPreview,
-        size: "1536x1024",
-        response_format: "b64_json"
-      })
-    });
-
-    let responseText = await response.text();
-    if (!response.ok && isTransientImageFailure(response.status, responseText)) {
-      const retryResponse = await this.fetchImpl(generationUrl, {
+    const response = await fetchWithTimeout(
+      this.fetchImpl,
+      generationUrl,
+      {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -128,7 +122,30 @@ export class OpenAiImageProvider implements ImageProvider {
           size: "1536x1024",
           response_format: "b64_json"
         })
-      });
+      },
+      "OpenAI storyboard image request timed out; using the local storyboard fallback preview."
+    );
+
+    let responseText = await response.text();
+    if (!response.ok && isTransientImageFailure(response.status, responseText)) {
+      const retryResponse = await fetchWithTimeout(
+        this.fetchImpl,
+        generationUrl,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelName,
+            prompt: promptPreview,
+            size: "1536x1024",
+            response_format: "b64_json"
+          })
+        },
+        "OpenAI storyboard image retry timed out; using the local storyboard fallback preview."
+      );
       const retryResponseText = await retryResponse.text();
       if (retryResponse.ok) {
         return readImageResult(
@@ -145,13 +162,18 @@ export class OpenAiImageProvider implements ImageProvider {
       formData.append("prompt", promptPreview);
       formData.append("size", "1536x1024");
       formData.append("response_format", "b64_json");
-      const fallbackResponse = await this.fetchImpl(generationUrl, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${apiKey}`
+      const fallbackResponse = await fetchWithTimeout(
+        this.fetchImpl,
+        generationUrl,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${apiKey}`
+          },
+          body: formData
         },
-        body: formData
-      });
+        "OpenAI storyboard image multipart request timed out; using the local storyboard fallback preview."
+      );
       responseText = await fallbackResponse.text();
       if (!fallbackResponse.ok) {
         throw new Error(
@@ -260,7 +282,12 @@ function parseImageResponse(responseText: string): OpenAiImageResponse {
 }
 
 async function downloadImage(fetchImpl: typeof fetch, url: string): Promise<Buffer> {
-  const response = await fetchImpl(url);
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    url,
+    {},
+    "OpenAI image download timed out. Please retry later."
+  );
   if (!response.ok) {
     throw new Error(`OpenAI 图片下载失败 (${response.status})。`);
   }
@@ -281,6 +308,30 @@ function extensionFromUrl(url: string): ProductPresenterImageResult["extension"]
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
+}
+
+async function fetchWithTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMessage: string
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), IMAGE_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetchImpl(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(timeoutMessage, { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function isUnsupportedContentTypeResponse(status: number, responseText: string): boolean {
