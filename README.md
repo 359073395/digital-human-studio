@@ -75,3 +75,18 @@ npm run release:ui
 ## 安全原则
 
 GitHub 只保存代码、文档、脱敏知识和可复用规则。真实 API 凭据、本地数据、用户账号、生成视频和未脱敏素材只保存在本机，不进入仓库。
+
+## Windows 内部试用安装包
+
+主软件安装包使用 `electron-builder` 生成，兼容 Windows 10/11 x64：
+
+```bash
+npm run package:win
+```
+
+输出文件：
+
+- `release/app/PaoliangVideoWorkbench-Setup-1.0.0-win-x64.exe`
+- `release/app/win-unpacked/`
+
+安装包只发给试用同事；授权码生成器和授权私钥只由管理员保管。详细流程见 `docs/windows-internal-test-package.md`。

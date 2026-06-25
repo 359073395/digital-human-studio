@@ -18,6 +18,8 @@
     "release:check": "npm run typecheck && npm run lint && npm run test && npm run build && npm run format",
     "release:e2e:real": "npm run build && node scripts/release-e2e-real.js",
     "release:ui": "npm run build && node scripts/release-ui-check.js",
+    "package:win": "npm run build && electron-builder --win nsis --x64",
+    "package:win:dir": "npm run build && electron-builder --win dir --x64",
     "configure:services": "npm run build:main && electron scripts/configure-services.js",
     "license:keygen": "node scripts/license-keygen.js",
     "license:create": "node scripts/license-create.js",
@@ -45,6 +47,7 @@
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
     "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.5.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
@@ -56,6 +59,45 @@
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
     "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.paoliang.video.workbench",
+    "productName": "跑量自媒体视频工作台",
+    "copyright": "Copyright © 2026 跑量自媒体视频工作台",
+    "asar": false,
+    "directories": {
+      "output": "release/app",
+      "buildResources": "public"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist-renderer/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/app-logo.ico",
+      "executableName": "PaoliangVideoWorkbench",
+      "artifactName": "PaoliangVideoWorkbench-Setup-${version}-win-x64.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "跑量自媒体视频工作台",
+      "uninstallDisplayName": "跑量自媒体视频工作台"
+    }
   },
   "overrides": {
     "undici": "^7.28.0"
