@@ -38,7 +38,7 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: "First proof point. Second proof point. Final call to action.",
       mixedCutTargetCount: 2,
-      mixedCutChapterMode: "minimum-duration",
+      mixedCutChapterMode: "fixed-material-count",
       selectedOutputPresets: ["portrait-9-16", "landscape-16-9"]
     });
 
@@ -111,7 +111,7 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: longScript,
       mixedCutTargetCount: 1,
-      mixedCutChapterMode: "minimum-duration",
+      mixedCutChapterMode: "fixed-material-count",
       selectedOutputPresets: ["portrait-9-16"]
     });
 
@@ -194,6 +194,57 @@ describe("MixedCutWorkflowService", () => {
     ).toBeGreaterThan(1000);
   }, 20_000);
 
+  it("fills long audio with repeated short timeline segments instead of stretching clips", () => {
+    const task = repository.createTask({
+      title: "Audio filled mixed cut",
+      sourceScript: ""
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "",
+      mixedCutTargetCount: 1,
+      mixedCutChapterMode: "fill-with-bgm",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const audioPath = path.join(taskDirectory, "source", "mixed-audio", "long-voice.wav");
+    fs.mkdirSync(path.dirname(audioPath), { recursive: true });
+    createSilentWav(audioPath, 8);
+    repository.addMediaAsset(task.id, "mixed-cut-audio", "source/mixed-audio/long-voice.wav");
+
+    const sourceDirectory = path.join(taskDirectory, "source", "mixed-materials");
+    for (const [groupId, fileName] of [
+      ["1", "loop-a.png"],
+      ["2", "loop-b.png"]
+    ]) {
+      const materialPath = path.join(sourceDirectory, groupId, fileName);
+      fs.mkdirSync(path.dirname(materialPath), { recursive: true });
+      fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+      repository.addMediaAsset(
+        task.id,
+        "mixed-cut-material",
+        `source/mixed-materials/${groupId}/${fileName}`
+      );
+    }
+
+    new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const editDecisionPath = path.join(
+      taskDirectory,
+      "post",
+      "edit-decisions-mixed-cut-1-portrait-9-16.json"
+    );
+    const record = JSON.parse(fs.readFileSync(editDecisionPath, "utf8")) as {
+      segments: Array<{ durationSeconds: number }>;
+      targetDurationSource: string;
+    };
+
+    expect(record.targetDurationSource).toBe("audio");
+    expect(record.segments.length).toBeGreaterThan(2);
+    expect(record.segments.every((segment) => segment.durationSeconds <= 2.4)).toBe(true);
+  }, 25_000);
+
   it("requires audio when filling visuals for a voiceover", () => {
     const task = repository.createTask({
       title: "Missing audio mixed cut",
@@ -225,9 +276,7 @@ describe("MixedCutWorkflowService", () => {
     const updated = new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
 
     expect(updated.steps.find((step) => step.id === "export")?.status).toBe("retry-ready");
-    expect(updated.steps.find((step) => step.id === "export")?.errorMessage).toContain(
-      "为配音填充画面"
-    );
+    expect(updated.steps.find((step) => step.id === "export")?.errorMessage).toContain("音频模式");
   });
 
   it("does not use audio duration as timing in fixed-material-count mode", () => {
@@ -289,7 +338,7 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: "Short script for auto batch planning.",
       mixedCutTargetCount: 30,
-      mixedCutChapterMode: "minimum-duration",
+      mixedCutChapterMode: "fixed-material-count",
       mixedCutReuseRate: 0,
       selectedOutputPresets: ["portrait-9-16"]
     });

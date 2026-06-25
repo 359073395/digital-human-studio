@@ -180,7 +180,7 @@ export class TaskRepository {
     const mixedCutMaterialDirectory = "";
     const mixedCutBackgroundMusicDirectory = "";
     const mixedCutDubbingDirectory = "";
-    const mixedCutChapterMode: MixedCutChapterMode = "fill-with-bgm";
+    const mixedCutChapterMode: MixedCutChapterMode = "fixed-material-count";
     const mixedCutReuseRate = 35;
     const mixedCutGroupSettings: MixedCutGroupSetting[] = [];
     const mixedCutRemoveOriginalAudio = false;
@@ -1084,11 +1084,11 @@ function normalizeMixedCutTargetCount(value: unknown): number {
 }
 
 function normalizeMixedCutChapterMode(value: unknown): MixedCutChapterMode {
-  if (value === "fixed-material-count" || value === "minimum-duration") {
-    return value;
+  if (value === "fill-with-bgm") {
+    return "fill-with-bgm";
   }
 
-  return "fill-with-bgm";
+  return "fixed-material-count";
 }
 
 function normalizeMixedCutGroupSettings(

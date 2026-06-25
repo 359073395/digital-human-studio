@@ -125,7 +125,7 @@ const fallbackTask: VideoTask = {
   mixedCutMaterialDirectory: "",
   mixedCutBackgroundMusicDirectory: "",
   mixedCutDubbingDirectory: "",
-  mixedCutChapterMode: "fill-with-bgm",
+  mixedCutChapterMode: "fixed-material-count",
   mixedCutReuseRate: 35,
   mixedCutGroupSettings: [],
   mixedCutRemoveOriginalAudio: false,
@@ -1314,8 +1314,8 @@ export function App() {
       setActionMessage(
         imported
           ? usesAudioTiming
-            ? "混剪音频已导入，本模式会按音频长度自动匹配画面时长"
-            : "混剪音频已导入，本模式会作为最终音轨使用，不会决定画面时长"
+            ? "混剪音频已导入，音频模式会按音频长度自动补足画面"
+            : "混剪音频已导入，固定素材模式会作为最终音轨使用，不会决定画面时长"
           : "未选择混剪音频"
       );
       await refreshTaskState(task.id, task);
@@ -3188,11 +3188,11 @@ export function App() {
                           >
                             {currentMixedCutAudioAsset
                               ? selectedTask.mixedCutChapterMode === "fill-with-bgm"
-                                ? "已导入音频，本模式会按音频长度填充画面"
-                                : "已导入音频，本模式只作为最终音轨使用"
+                                ? "已导入音频，音频模式会按音频长度补足画面"
+                                : "已导入音频，固定素材模式只作为最终音轨使用"
                               : selectedTask.mixedCutChapterMode === "fill-with-bgm"
-                                ? "本模式需要音频：请上传配音/音乐或在素材文件夹中放入音频"
-                                : "未导入音频，将只按画面素材生成"}
+                                ? "音频模式需要音频：请上传配音/音乐或在素材文件夹中放入音频"
+                                : "未导入音频，固定素材模式会按画面素材生成"}
                           </div>
                           <p title={currentMixedCutAudioAsset?.relativePath}>
                             {currentMixedCutAudioAsset?.relativePath
@@ -3217,7 +3217,7 @@ export function App() {
                             </div>
                           </label>
                           <p className="field-hint">
-                            只有“为配音填充画面”会用音频长度驱动画面；其他章节模式不会把音频当作画面素材。
+                            音频模式会按音频长度补画面；固定素材模式只按每个数字文件夹抽取镜头组合。
                           </p>
                         </div>
                       </div>
@@ -3241,22 +3241,20 @@ export function App() {
                             <small>{mixedCutPlanDetail(mixedCutBatchPlan)}</small>
                           </div>
                           <label>
-                            章节模式
+                            混剪模式
                             <select
                               value={selectedTask.mixedCutChapterMode}
                               onChange={(event) =>
                                 void updateCurrentTask({
                                   mixedCutChapterMode:
-                                    event.target.value === "fixed-material-count" ||
-                                    event.target.value === "minimum-duration"
+                                    event.target.value === "fill-with-bgm"
                                       ? event.target.value
-                                      : "fill-with-bgm"
+                                      : "fixed-material-count"
                                 })
                               }
                             >
-                              <option value="fill-with-bgm">为配音填充画面</option>
-                              <option value="fixed-material-count">固定素材数</option>
-                              <option value="minimum-duration">至少 X 秒</option>
+                              <option value="fixed-material-count">固定素材模式</option>
+                              <option value="fill-with-bgm">音频模式</option>
                             </select>
                           </label>
                           <label className="range-field">

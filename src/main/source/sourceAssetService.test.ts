@@ -390,6 +390,7 @@ describe("SourceAssetService", () => {
     fs.mkdirSync(path.join(firstFolder, "2"), { recursive: true });
     fs.mkdirSync(path.join(secondFolder, "10"), { recursive: true });
     fs.writeFileSync(path.join(firstFolder, "1", "clip-a.mp4"), Buffer.from("video-a"));
+    fs.writeFileSync(path.join(firstFolder, "1", "clip-a-copy.mp4"), Buffer.from("video-a"));
     fs.writeFileSync(path.join(firstFolder, "1", "voice-a.mp3"), Buffer.from("audio-a"));
     fs.writeFileSync(path.join(firstFolder, "2", "clip-b.jpg"), Buffer.from("image-b"));
     fs.writeFileSync(path.join(firstFolder, "narration.wav"), Buffer.from("audio-root"));
@@ -409,7 +410,7 @@ describe("SourceAssetService", () => {
     );
 
     expect(firstSync.mixedCutMaterialDirectory).toBe(path.resolve(firstFolder));
-    expect(firstAssets).toHaveLength(2);
+    expect(firstAssets).toHaveLength(3);
     expect(firstAudioAssets).toHaveLength(2);
     expect(firstAudioAssets.every((asset) => asset.kind === "mixed-cut-audio")).toBe(true);
     expect(

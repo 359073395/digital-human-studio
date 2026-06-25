@@ -31,7 +31,7 @@ export type SubtitlePosition = "top" | "middle" | "bottom";
 
 export type TextWeight = "regular" | "bold";
 
-export type MixedCutChapterMode = "fill-with-bgm" | "fixed-material-count" | "minimum-duration";
+export type MixedCutChapterMode = "fill-with-bgm" | "fixed-material-count";
 
 export interface MixedCutGroupSetting {
   groupId: string;

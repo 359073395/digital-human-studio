@@ -97,6 +97,12 @@ interface MixedCutCombination {
   usageAfterSelection: Map<string, number>;
 }
 
+interface MixedCutTimelineSegment {
+  shot: MixedCutShot;
+  startSeconds: number;
+  durationSeconds: number;
+}
+
 export class MixedCutWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
@@ -120,7 +126,7 @@ export class MixedCutWorkflowService {
       const mixedCutAudio = resolveMixedCutAudio(task, taskDirectory);
       if (task.mixedCutChapterMode === "fill-with-bgm" && !mixedCutAudio) {
         throw new Error(
-          "为配音填充画面模式需要先导入一条混剪配音/音乐，音频只会作为时长和音轨使用，不会作为画面素材。"
+          "音频模式需要先导入一条混剪配音/音乐，音频只会作为时长和音轨使用，不会作为画面素材。"
         );
       }
 
@@ -219,10 +225,12 @@ export class MixedCutWorkflowService {
       task: input.task
     });
     const targetDurationSeconds = targetTiming.seconds;
-    const segmentDurationSeconds = Math.max(
-      SEGMENT_DURATION_SECONDS / 2,
-      targetDurationSeconds / Math.max(1, selectedShots.length)
-    );
+    const timelineSegments = buildMixedCutTimelineSegments({
+      batchIndex: input.batchIndex,
+      shots: selectedShots,
+      task: input.task,
+      targetDurationSeconds
+    });
     const warnings = createBatchWarnings(input.groupedPlan, input.targetCount);
     const segmentDirectory = path.join(
       input.taskDirectory,
@@ -233,7 +241,8 @@ export class MixedCutWorkflowService {
     fs.rmSync(segmentDirectory, { recursive: true, force: true });
     fs.mkdirSync(segmentDirectory, { recursive: true });
 
-    const segmentPaths = selectedShots.map((shot, index) => {
+    const segmentPaths = timelineSegments.map((segment, index) => {
+      const shot = segment.shot;
       const sourcePath = shot.absolutePath;
       const asset = shot.asset;
       if (!fs.existsSync(sourcePath)) {
@@ -245,8 +254,9 @@ export class MixedCutWorkflowService {
         outputPath,
         preset: input.preset,
         performanceProfile: input.performanceProfile,
-        startSeconds: videoStartOffset(input.batchIndex, index),
-        durationSeconds: segmentDurationSeconds
+        startSeconds: segment.startSeconds,
+        durationSeconds: segment.durationSeconds,
+        loopVideo: input.task.mixedCutChapterMode !== "fill-with-bgm"
       });
       return outputPath;
     });
@@ -315,19 +325,19 @@ export class MixedCutWorkflowService {
         label: input.performanceProfile.label,
         ffmpegThreads: input.performanceProfile.ffmpegThreads
       },
-      segments: selectedShots.map((shot, index) => ({
+      segments: timelineSegments.map((segment, index) => ({
         order: index + 1,
-        sourceAssetId: shot.asset.id,
-        shotId: shot.id,
-        groupId: shot.groupId,
-        useCount: input.combination.usageAfterSelection.get(shot.id) ?? 0,
+        sourceAssetId: segment.shot.asset.id,
+        shotId: segment.shot.id,
+        groupId: segment.shot.groupId,
+        useCount: input.combination.usageAfterSelection.get(segment.shot.id) ?? 0,
         maxUses:
-          input.groupedPlan.groups.find((group) => group.groupId === shot.groupId)
+          input.groupedPlan.groups.find((group) => group.groupId === segment.shot.groupId)
             ?.maxUsesPerShot ?? 1,
-        sourcePath: shot.relativePath,
+        sourcePath: segment.shot.relativePath,
         role: segmentRole(index),
-        startSeconds: videoStartOffset(input.batchIndex, index),
-        durationSeconds: segmentDurationSeconds,
+        startSeconds: segment.startSeconds,
+        durationSeconds: segment.durationSeconds,
         transform: `${input.preset.aspectRatio} scale/pad, segment-level reorder`
       }))
     };
@@ -535,6 +545,10 @@ function isVisualMixedCutAsset(relativePath: string): boolean {
   return VIDEO_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension);
 }
 
+function isImageMixedCutAsset(relativePath: string): boolean {
+  return IMAGE_EXTENSIONS.has(path.extname(relativePath).toLowerCase());
+}
+
 function isAudioMixedCutAsset(relativePath: string): boolean {
   return AUDIO_EXTENSIONS.has(path.extname(relativePath).toLowerCase());
 }
@@ -567,7 +581,7 @@ function resolveMixedCutTargetTiming(input: {
 }): { seconds: number; source: MixedCutEditDecisionRecord["targetDurationSource"] } {
   if (input.task.mixedCutChapterMode === "fill-with-bgm") {
     if (!input.audio) {
-      throw new Error("为配音填充画面模式需要先导入一条混剪配音/音乐。");
+      throw new Error("音频模式需要先导入一条混剪配音/音乐。");
     }
 
     return {
@@ -577,16 +591,138 @@ function resolveMixedCutTargetTiming(input: {
   }
 
   if (input.task.mixedCutChapterMode === "fixed-material-count") {
+    const materialDurationSeconds = clampMaterialTargetDuration(
+      input.selectedShotCount * SEGMENT_DURATION_SECONDS
+    );
+    const scriptDurationSeconds = input.task.finalScript.trim()
+      ? estimateScriptDurationSeconds(input.task.finalScript)
+      : 0;
     return {
-      seconds: clampMaterialTargetDuration(input.selectedShotCount * SEGMENT_DURATION_SECONDS),
-      source: "material"
+      seconds: Math.max(materialDurationSeconds, scriptDurationSeconds),
+      source: scriptDurationSeconds > materialDurationSeconds ? "script" : "material"
     };
   }
 
   return {
-    seconds: estimateScriptDurationSeconds(input.task.finalScript),
-    source: "script"
+    seconds: clampMaterialTargetDuration(input.selectedShotCount * SEGMENT_DURATION_SECONDS),
+    source: "material"
   };
+}
+
+function buildMixedCutTimelineSegments(input: {
+  task: VideoTask;
+  shots: MixedCutShot[];
+  targetDurationSeconds: number;
+  batchIndex: number;
+}): MixedCutTimelineSegment[] {
+  if (input.shots.length === 0) {
+    throw new Error("混剪素材为空，请先选择包含视频或图片的数字文件夹。");
+  }
+
+  if (input.task.mixedCutChapterMode !== "fill-with-bgm") {
+    return input.shots.map((shot, index) => ({
+      shot,
+      startSeconds: resolveSegmentStartSeconds(shot, input.batchIndex, index),
+      durationSeconds: Math.min(
+        SEGMENT_DURATION_SECONDS,
+        Math.max(SEGMENT_DURATION_SECONDS / 2, input.targetDurationSeconds / input.shots.length)
+      )
+    }));
+  }
+
+  const segments: MixedCutTimelineSegment[] = [];
+  const mediaDurationCache = new Map<string, number>();
+  let accumulatedSeconds = 0;
+  let round = 0;
+  const maxSegments = Math.max(
+    100,
+    input.shots.length * 80,
+    Math.ceil(input.targetDurationSeconds / 0.35) + input.shots.length
+  );
+
+  while (accumulatedSeconds < input.targetDurationSeconds - 0.05 && segments.length < maxSegments) {
+    const orderedShots = rotateShots(input.shots, input.batchIndex + round);
+    for (const shot of orderedShots) {
+      if (accumulatedSeconds >= input.targetDurationSeconds - 0.05) {
+        break;
+      }
+
+      const remainingSeconds = input.targetDurationSeconds - accumulatedSeconds;
+      const startSeconds = resolveSegmentStartSeconds(
+        shot,
+        input.batchIndex + round,
+        segments.length,
+        mediaDurationCache
+      );
+      const durationSeconds = resolveAudioModeSegmentDurationSeconds(
+        shot,
+        startSeconds,
+        remainingSeconds,
+        mediaDurationCache
+      );
+      segments.push({
+        shot,
+        startSeconds,
+        durationSeconds
+      });
+      accumulatedSeconds += durationSeconds;
+    }
+    round += 1;
+  }
+
+  if (accumulatedSeconds < input.targetDurationSeconds - 0.05) {
+    throw new Error("音频太长或画面素材太少，无法顺畅填满音频；请增加更多镜头素材。");
+  }
+
+  return segments;
+}
+
+function resolveAudioModeSegmentDurationSeconds(
+  shot: MixedCutShot,
+  startSeconds: number,
+  remainingSeconds: number,
+  mediaDurationCache: Map<string, number>
+): number {
+  if (isImageMixedCutAsset(shot.relativePath)) {
+    return Math.min(SEGMENT_DURATION_SECONDS, remainingSeconds);
+  }
+
+  const mediaDurationSeconds = getCachedMediaDurationSeconds(shot.absolutePath, mediaDurationCache);
+  const availableSeconds =
+    mediaDurationSeconds > startSeconds + 0.35
+      ? mediaDurationSeconds - startSeconds
+      : mediaDurationSeconds;
+  return Math.max(0.35, Math.min(SEGMENT_DURATION_SECONDS, availableSeconds, remainingSeconds));
+}
+
+function resolveSegmentStartSeconds(
+  shot: MixedCutShot,
+  batchIndex: number,
+  segmentIndex: number,
+  mediaDurationCache = new Map<string, number>()
+): number {
+  if (isImageMixedCutAsset(shot.relativePath)) {
+    return 0;
+  }
+
+  const mediaDurationSeconds = getCachedMediaDurationSeconds(shot.absolutePath, mediaDurationCache);
+  if (mediaDurationSeconds <= 1.2) {
+    return 0;
+  }
+
+  const offset = videoStartOffset(batchIndex, segmentIndex);
+  return Math.min(offset, Math.max(0, mediaDurationSeconds - 0.8));
+}
+
+function getCachedMediaDurationSeconds(filePath: string, cache: Map<string, number>): number {
+  const cached = cache.get(filePath);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const duration = getMediaDurationSeconds(filePath);
+  cache.set(filePath, duration);
+  return duration;
 }
 
 function absoluteTaskPathFromDirectory(taskDirectory: string, relativePath: string): string {
@@ -600,6 +736,7 @@ function renderSegment(input: {
   performanceProfile: RuntimePerformanceProfile;
   startSeconds: number;
   durationSeconds: number;
+  loopVideo: boolean;
 }): void {
   const ffmpegPath = requireFfmpegPath();
   const extension = path.extname(input.sourcePath).toLowerCase();
@@ -613,7 +750,9 @@ function renderSegment(input: {
 
   const args = [
     "-y",
-    ...(isImage ? ["-loop", "1"] : ["-stream_loop", "-1", "-ss", input.startSeconds.toFixed(2)]),
+    ...(isImage
+      ? ["-loop", "1"]
+      : [...(input.loopVideo ? ["-stream_loop", "-1"] : []), "-ss", input.startSeconds.toFixed(2)]),
     "-t",
     input.durationSeconds.toFixed(2),
     "-i",
