@@ -377,6 +377,10 @@ export function App() {
   const mixedCutMaterialAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-material"
   );
+  const mixedCutAudioAssets = currentTaskMediaAssets.filter(
+    (asset) => asset.kind === "mixed-cut-audio"
+  );
+  const latestMixedCutAudioAsset = [...mixedCutAudioAssets].reverse()[0];
   const mixedCutGroupRows = useMemo(
     () =>
       buildMixedCutGroupRows(
@@ -390,7 +394,7 @@ export function App() {
     (count, group) => count + group.shotCount,
     0
   );
-  const mixedCutAudioMaterialCount = mixedCutMaterialAssets.length - mixedCutVisualMaterialCount;
+  const mixedCutAudioMaterialCount = mixedCutAudioAssets.length;
   const mixedCutBatchPlan = useMemo(
     () =>
       calculateGroupedMixedCutBatchPlan({
@@ -1269,6 +1273,29 @@ export function App() {
       await refreshTaskState(task.id, task);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "混剪素材文件夹同步失败");
+    } finally {
+      setIsWorkflowRunning(false);
+    }
+  }
+
+  async function uploadMixedCutAudio() {
+    const api = requireDesktopRuntime("上传混剪配音或音乐");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setActionMessage("正在选择混剪配音或音乐...");
+
+    try {
+      const task = await api.uploadMixedCutAudio(selectedTask.id);
+      const imported = task.mediaAssets.some((asset) => asset.kind === "mixed-cut-audio");
+      setActionMessage(
+        imported ? "混剪音频已导入，生成时会按音频长度自动匹配画面时长" : "未选择混剪音频"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "混剪音频导入失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -2987,9 +3014,30 @@ export function App() {
 
                         <div className="mixed-cut-library-card">
                           <div className="mixed-cut-card-heading">
-                            <strong>音频/BGM</strong>
-                            <span>跟随素材库</span>
+                            <strong>音频/配音</strong>
+                            <button
+                              type="button"
+                              disabled={isWorkflowRunning}
+                              onClick={() => void uploadMixedCutAudio()}
+                            >
+                              <Upload size={16} />
+                              上传音频
+                            </button>
                           </div>
+                          <div
+                            className={`mixed-cut-sync-state ${
+                              latestMixedCutAudioAsset ? "ok" : "pending"
+                            }`}
+                          >
+                            {latestMixedCutAudioAsset
+                              ? "已导入音频，成片时长将按音频长度匹配"
+                              : "未上传音频，将按文案估算成片时长"}
+                          </div>
+                          <p title={latestMixedCutAudioAsset?.relativePath}>
+                            {latestMixedCutAudioAsset?.relativePath
+                              ? latestMixedCutAudioAsset.relativePath.split("/").at(-1)
+                              : "支持 mp3 / wav / m4a / aac / ogg"}
+                          </p>
                           <label className="range-field">
                             BGM 音量
                             <div>
@@ -3008,7 +3056,7 @@ export function App() {
                             </div>
                           </label>
                           <p className="field-hint">
-                            去除原音、转场和重复率在右侧组合参数中统一设置。
+                            如果上传的是旁白或成品配音，系统会以音频时长为准生成对应长度的画面。
                           </p>
                         </div>
                       </div>
@@ -6144,6 +6192,7 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
     "product-image": "商品图",
     "reference-image": "人物图",
     "mixed-cut-material": "混剪素材",
+    "mixed-cut-audio": "混剪音频",
     "mixed-cut-video": "混剪基础视频",
     "dedup-source-video": "待去重视频",
     "dedup-processed-video": "去重处理视频",
@@ -6206,6 +6255,7 @@ function countKnowledgeContextSources(task: VideoTask): {
     "product-image",
     "reference-image",
     "mixed-cut-material",
+    "mixed-cut-audio",
     "mixed-cut-video",
     "dedup-source-video",
     "dedup-processed-video",

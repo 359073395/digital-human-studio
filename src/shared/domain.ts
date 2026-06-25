@@ -50,6 +50,7 @@ export type MediaAssetKind =
   | "product-image"
   | "reference-image"
   | "mixed-cut-material"
+  | "mixed-cut-audio"
   | "mixed-cut-video"
   | "dedup-source-video"
   | "dedup-processed-video"

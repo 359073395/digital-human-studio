@@ -349,6 +349,32 @@ describe("SourceAssetService", () => {
     }
   });
 
+  it("imports mixed-cut audio as a separate current task asset", () => {
+    const service = new SourceAssetService(repository, appPaths);
+    const task = repository.createTask({ title: "Mixed audio" });
+    const firstAudioPath = path.join(tempDir, "voice-1.mp3");
+    const secondAudioPath = path.join(tempDir, "voice-2.wav");
+    fs.writeFileSync(firstAudioPath, Buffer.from("audio-one"));
+    fs.writeFileSync(secondAudioPath, Buffer.from("audio-two"));
+
+    service.importMixedCutAudio(task.id, firstAudioPath);
+    const updated = service.importMixedCutAudio(task.id, secondAudioPath);
+    const assets = updated.mediaAssets.filter((asset) => asset.kind === "mixed-cut-audio");
+
+    expect(updated.steps.find((step) => step.id === "source")?.status).toBe("complete");
+    expect(assets).toHaveLength(1);
+    expect(assets[0]?.relativePath).toContain("source/mixed-audio/mixed-cut-audio-");
+    expect(assets[0]?.relativePath).toContain("voice-2.wav");
+    expect(
+      fs.existsSync(
+        path.join(
+          getTaskDirectory(appPaths, task.id),
+          ...(assets[0]?.relativePath ?? "").split("/")
+        )
+      )
+    ).toBe(true);
+  });
+
   it("syncs mixed-cut materials from a folder and replaces previous folder assets", () => {
     const service = new SourceAssetService(repository, appPaths);
     const task = repository.createTask({ title: "Mixed folder" });

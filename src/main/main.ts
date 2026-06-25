@@ -498,6 +498,32 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     return sourceAssetService.importMixedCutMaterialDirectory(taskId, result.filePaths[0]);
   });
 
+  protectedHandle(IPC_CHANNELS.uploadMixedCutAudio, async (_event, taskId: string) => {
+    const audioDialogOptions: OpenDialogOptions = {
+      title: "选择混剪配音或音乐",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "音频",
+          extensions: ["mp3", "wav", "m4a", "aac", "ogg"]
+        }
+      ]
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, audioDialogOptions)
+      : await dialog.showOpenDialog(audioDialogOptions);
+
+    if (result.canceled || !result.filePaths[0]) {
+      const task = taskRepository.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} was not found.`);
+      }
+      return task;
+    }
+
+    return sourceAssetService.importMixedCutAudio(taskId, result.filePaths[0]);
+  });
+
   protectedHandle(IPC_CHANNELS.setMixedCutTargetCount, (_event, input) =>
     taskRepository.updateTask({
       taskId: input.taskId,

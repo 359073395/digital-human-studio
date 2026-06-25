@@ -5226,3 +5226,111 @@ select:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Adaptive workspace fixes: keep every mode inside the window, no horizontal dragging. */
+html,
+body,
+#root,
+.app-shell {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, clamp(360px, 38vw, 560px));
+  min-width: 0;
+  overflow: hidden;
+}
+
+@media (min-width: 1101px) {
+  .workspace[data-mode="mixed-cut"],
+  .workspace[data-mode="video-dedup"] {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, clamp(340px, 32vw, 480px));
+  }
+}
+
+.editor-pane,
+.preview-pane {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.mode-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  min-width: 0;
+}
+
+.mode-tabs button,
+.compact-block,
+.video-analysis-center,
+.source-ingest-card,
+.mode-source-script-card,
+.mode-script-card,
+.mode-material-card,
+.mixed-cut-workspace-card,
+.mixed-cut-library-panel,
+.mixed-cut-library-card,
+.mixed-cut-chapter-panel,
+.mixed-cut-control-grid,
+.preview-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mixed-cut-workspace-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mixed-cut-library-panel {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.mixed-cut-control-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.mixed-cut-card-heading,
+.mixed-cut-panel-topline,
+.source-action-row {
+  flex-wrap: wrap;
+}
+
+.mixed-cut-table-wrap {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.mixed-cut-chapter-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.mixed-cut-chapter-table th,
+.mixed-cut-chapter-table td {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.mixed-cut-group-rate {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+textarea,
+input,
+select {
+  max-width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .workspace,
+  .workspace[data-mode="mixed-cut"],
+  .workspace[data-mode="video-dedup"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .preview-pane {
+    min-height: 520px;
+  }
+}

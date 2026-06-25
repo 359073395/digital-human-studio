@@ -294,6 +294,18 @@ export class SourceAssetService {
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
+  importMixedCutAudio(taskId: string, filePath: string): VideoTask {
+    this.requireTask(taskId);
+    const extension = validateExtension(filePath, SOURCE_AUDIO_EXTENSIONS);
+    const relativePath = `source/mixed-audio/mixed-cut-audio-${Date.now()}-${sanitizeBaseName(
+      path.basename(filePath, extension)
+    )}${extension}`;
+    copyTaskFile(this.paths, taskId, filePath, relativePath);
+    this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-audio");
+    this.taskRepository.addMediaAsset(taskId, "mixed-cut-audio", relativePath);
+    return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+  }
+
   importMixedCutMaterialDirectory(taskId: string, directoryPath: string): VideoTask {
     const task = this.requireTask(taskId);
     const resolvedDirectory = path.resolve(directoryPath);

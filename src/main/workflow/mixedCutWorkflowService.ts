@@ -24,8 +24,10 @@ import { TaskRepository } from "../storage/taskRepository";
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"]);
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".ogg"]);
 const MIN_TARGET_DURATION_SECONDS = 12;
 const MAX_TARGET_DURATION_SECONDS = 180;
+const MAX_AUDIO_TARGET_DURATION_SECONDS = 600;
 const SEGMENT_DURATION_SECONDS = 2.4;
 
 interface PathSettingsReader {
@@ -49,6 +51,9 @@ interface MixedCutEditDecisionRecord {
   outputVideo: string;
   subtitleFile: string;
   coverFile: string;
+  audioSourcePath?: string;
+  targetDurationSeconds: number;
+  targetDurationSource: "audio" | "script";
   warnings: string[];
   performance: {
     mode: RuntimePerformanceProfile["mode"];
@@ -111,11 +116,12 @@ export class MixedCutWorkflowService {
         throw new Error("当前任务不是混剪视频模式。");
       }
 
-      if (!task.finalScript.trim()) {
-        throw new Error("请先生成或填写混剪视频文案。");
+      const taskDirectory = getTaskDirectory(this.paths, taskId);
+      const mixedCutAudio = resolveMixedCutAudio(task, taskDirectory);
+      if (!task.finalScript.trim() && !mixedCutAudio) {
+        throw new Error("请先生成或填写混剪视频文案，或上传一条混剪配音/音乐。");
       }
 
-      const taskDirectory = getTaskDirectory(this.paths, taskId);
       const shotGroups = buildMixedCutShotGroups(task, taskDirectory);
       const groupedPlan = calculateGroupedMixedCutBatchPlan({
         groups: shotGroups.map((group) => ({
@@ -201,7 +207,12 @@ export class MixedCutWorkflowService {
     batchIndex: number;
     targetCount: number;
   }): MixedCutEditDecisionRecord {
-    const targetDurationSeconds = estimateScriptDurationSeconds(input.task.finalScript);
+    const mixedCutAudio = resolveMixedCutAudio(input.task, input.taskDirectory);
+    const targetDurationSeconds = mixedCutAudio
+      ? clampAudioTargetDuration(getMediaDurationSeconds(mixedCutAudio.absolutePath))
+      : estimateScriptDurationSeconds(input.task.finalScript);
+    const subtitleScript =
+      input.task.finalScript.trim() || input.task.sourceScript.trim() || input.task.title;
     const selectedShots = input.combination.shots;
     const segmentDurationSeconds = Math.max(
       SEGMENT_DURATION_SECONDS / 2,
@@ -236,12 +247,26 @@ export class MixedCutWorkflowService {
     });
 
     const outputVideo = `post/mixed-cut-batch-${input.batchIndex}-${input.preset.id}.mp4`;
+    const outputVideoPath = absoluteTaskPath(this.paths, input.task.id, outputVideo);
+    const silentVideoPath = mixedCutAudio
+      ? path.join(segmentDirectory, "mixed-cut-silent-video.mp4")
+      : outputVideoPath;
     concatSegments({
       segmentPaths,
-      outputPath: absoluteTaskPath(this.paths, input.task.id, outputVideo),
+      outputPath: silentVideoPath,
       targetDurationSeconds,
       workingDirectory: segmentDirectory
     });
+    if (mixedCutAudio) {
+      muxAudio({
+        audioPath: mixedCutAudio.absolutePath,
+        outputPath: outputVideoPath,
+        performanceProfile: input.performanceProfile,
+        targetDurationSeconds,
+        videoPath: silentVideoPath,
+        volumePercent: input.task.mixedCutBgmVolume
+      });
+    }
     if (input.performanceProfile.cleanupIntermediateFiles) {
       fs.rmSync(segmentDirectory, { recursive: true, force: true });
     }
@@ -254,7 +279,7 @@ export class MixedCutWorkflowService {
       this.paths,
       input.task.id,
       subtitleFile,
-      createTimedTextSrt(input.task.finalScript, targetDurationSeconds)
+      createTimedTextSrt(subtitleScript, targetDurationSeconds)
     );
     writeTaskFile(
       this.paths,
@@ -276,6 +301,9 @@ export class MixedCutWorkflowService {
       outputVideo,
       subtitleFile,
       coverFile,
+      audioSourcePath: mixedCutAudio?.relativePath,
+      targetDurationSeconds,
+      targetDurationSource: mixedCutAudio ? "audio" : "script",
       warnings,
       performance: {
         mode: input.performanceProfile.mode,
@@ -502,6 +530,31 @@ function isVisualMixedCutAsset(relativePath: string): boolean {
   return VIDEO_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension);
 }
 
+function isAudioMixedCutAsset(relativePath: string): boolean {
+  return AUDIO_EXTENSIONS.has(path.extname(relativePath).toLowerCase());
+}
+
+function resolveMixedCutAudio(
+  task: VideoTask,
+  taskDirectory: string
+): { asset: MediaAsset; relativePath: string; absolutePath: string } | null {
+  const asset = [...task.mediaAssets]
+    .reverse()
+    .find(
+      (candidate) =>
+        candidate.kind === "mixed-cut-audio" && isAudioMixedCutAsset(candidate.relativePath)
+    );
+  if (!asset) {
+    return null;
+  }
+
+  return {
+    asset,
+    relativePath: asset.relativePath,
+    absolutePath: absoluteTaskPathFromDirectory(taskDirectory, asset.relativePath)
+  };
+}
+
 function absoluteTaskPathFromDirectory(taskDirectory: string, relativePath: string): string {
   return path.join(taskDirectory, ...relativePath.split("/"));
 }
@@ -597,6 +650,85 @@ function concatSegments(input: {
   );
 
   assertFfmpegSuccess(result, input.outputPath, "混剪基础视频生成失败");
+}
+
+function muxAudio(input: {
+  audioPath: string;
+  outputPath: string;
+  performanceProfile: RuntimePerformanceProfile;
+  targetDurationSeconds: number;
+  videoPath: string;
+  volumePercent: number;
+}): void {
+  const ffmpegPath = requireFfmpegPath();
+  fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
+  const volume = Math.max(0, Math.min(100, input.volumePercent)) / 100;
+  const result = spawnSync(
+    ffmpegPath,
+    [
+      "-y",
+      "-i",
+      input.videoPath,
+      "-stream_loop",
+      "-1",
+      "-i",
+      input.audioPath,
+      "-t",
+      input.targetDurationSeconds.toFixed(2),
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-filter:a",
+      `volume=${volume.toFixed(2)}`,
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-threads",
+      String(input.performanceProfile.ffmpegThreads),
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      input.outputPath
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 10 * 60 * 1000
+    }
+  );
+
+  assertFfmpegSuccess(result, input.outputPath, "混剪音频合成失败");
+}
+
+function getMediaDurationSeconds(filePath: string): number {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`混剪音频不存在：${filePath}`);
+  }
+
+  const result = spawnSync(requireFfmpegPath(), ["-hide_banner", "-i", filePath], {
+    encoding: "utf8",
+    maxBuffer: 2 * 1024 * 1024,
+    timeout: 30_000
+  });
+  const output = `${result.stderr || ""}\n${result.stdout || ""}`;
+  const match = output.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (!match) {
+    throw new Error("无法读取混剪音频时长，请换用 mp3、wav 或 m4a 音频。");
+  }
+
+  return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+}
+
+function clampAudioTargetDuration(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error("混剪音频时长无效，请换用可正常播放的音频文件。");
+  }
+
+  return Math.min(MAX_AUDIO_TARGET_DURATION_SECONDS, Math.max(1, Number(seconds.toFixed(2))));
 }
 
 function assertFfmpegSuccess(

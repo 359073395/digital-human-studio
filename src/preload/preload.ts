@@ -48,6 +48,7 @@ const IPC_CHANNELS = {
   uploadSourceVideo: "source:upload-source-video",
   uploadMixedCutMaterial: "source:upload-mixed-cut-material",
   chooseMixedCutMaterialDirectory: "source:choose-mixed-cut-material-directory",
+  uploadMixedCutAudio: "source:upload-mixed-cut-audio",
   setMixedCutTargetCount: "mixed-cut:set-target-count",
   renderMixedCutBatch: "mixed-cut:render-batch",
   importDedupSourceVideo: "dedup:import-source-video",
@@ -114,6 +115,8 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.uploadMixedCutMaterial, taskId) as Promise<VideoTask>,
   chooseMixedCutMaterialDirectory: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.chooseMixedCutMaterialDirectory, taskId) as Promise<VideoTask>,
+  uploadMixedCutAudio: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.uploadMixedCutAudio, taskId) as Promise<VideoTask>,
   setMixedCutTargetCount: (input: SetMixedCutTargetCountInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.setMixedCutTargetCount, input) as Promise<VideoTask>,
   renderMixedCutBatch: (taskId: string) =>

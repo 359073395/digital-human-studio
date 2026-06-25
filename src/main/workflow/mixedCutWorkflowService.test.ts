@@ -136,6 +136,61 @@ describe("MixedCutWorkflowService", () => {
     expect(subtitle).not.toContain("00:00:12,000");
   }, 25_000);
 
+  it("uses uploaded mixed-cut audio duration as the target video duration", () => {
+    const task = repository.createTask({
+      title: "Audio timed mixed cut",
+      sourceScript: ""
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "",
+      mixedCutTargetCount: 1,
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const audioPath = path.join(taskDirectory, "source", "mixed-audio", "voice.wav");
+    fs.mkdirSync(path.dirname(audioPath), { recursive: true });
+    createSilentWav(audioPath, 3);
+    repository.addMediaAsset(task.id, "mixed-cut-audio", "source/mixed-audio/voice.wav");
+
+    const sourceDirectory = path.join(taskDirectory, "source", "mixed-materials");
+    for (const [groupId, fileName] of [
+      ["1", "audio-a.png"],
+      ["2", "audio-b.png"]
+    ]) {
+      const materialPath = path.join(sourceDirectory, groupId, fileName);
+      fs.mkdirSync(path.dirname(materialPath), { recursive: true });
+      fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+      repository.addMediaAsset(
+        task.id,
+        "mixed-cut-material",
+        `source/mixed-materials/${groupId}/${fileName}`
+      );
+    }
+
+    new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const editDecisionPath = path.join(
+      taskDirectory,
+      "post",
+      "edit-decisions-mixed-cut-1-portrait-9-16.json"
+    );
+    const record = JSON.parse(fs.readFileSync(editDecisionPath, "utf8")) as {
+      audioSourcePath?: string;
+      targetDurationSeconds: number;
+      targetDurationSource: string;
+    };
+
+    expect(record.audioSourcePath).toBe("source/mixed-audio/voice.wav");
+    expect(record.targetDurationSource).toBe("audio");
+    expect(record.targetDurationSeconds).toBeGreaterThanOrEqual(2.9);
+    expect(record.targetDurationSeconds).toBeLessThanOrEqual(3.1);
+    expect(
+      fs.statSync(path.join(taskDirectory, "post", "mixed-cut-batch-1-portrait-9-16.mp4")).size
+    ).toBeGreaterThan(1000);
+  }, 20_000);
+
   it("calculates batch count from material count and reuse rate instead of manual input", () => {
     const task = repository.createTask({
       title: "Auto planned mixed cut",
@@ -182,6 +237,30 @@ describe("MixedCutWorkflowService", () => {
     expect(manifest).toContain('"mixedCutTargetCount": 1');
   }, 20_000);
 });
+
+function createSilentWav(outputPath: string, durationSeconds: number): void {
+  const sampleRate = 8_000;
+  const channelCount = 1;
+  const bitsPerSample = 16;
+  const sampleCount = Math.floor(sampleRate * durationSeconds);
+  const dataSize = sampleCount * channelCount * (bitsPerSample / 8);
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(channelCount, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * channelCount * (bitsPerSample / 8), 28);
+  buffer.writeUInt16LE(channelCount * (bitsPerSample / 8), 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataSize, 40);
+  fs.writeFileSync(outputPath, buffer);
+}
 
 const SINGLE_PIXEL_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";

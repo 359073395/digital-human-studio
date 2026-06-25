@@ -35,6 +35,7 @@ const TASK_CONTEXT_ASSET_KINDS = new Set<MediaAsset["kind"]>([
   "product-image",
   "reference-image",
   "mixed-cut-material",
+  "mixed-cut-audio",
   "mixed-cut-video",
   "dedup-source-video",
   "dedup-processed-video",
