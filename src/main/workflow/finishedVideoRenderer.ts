@@ -3,6 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import ffmpegStaticPath from "ffmpeg-static";
 import type { FrameTitleStyle, OutputPreset, SubtitleStyle, VideoTask } from "../../shared/domain";
+import {
+  DEFAULT_RUNTIME_PERFORMANCE_PROFILE,
+  type RuntimePerformanceProfile
+} from "../../shared/performanceProfile";
 
 export interface FinishedVideoRenderInput {
   task: VideoTask;
@@ -11,6 +15,7 @@ export interface FinishedVideoRenderInput {
   sourceVideoPath: string;
   subtitlePath?: string;
   outputPath: string;
+  performanceProfile?: RuntimePerformanceProfile;
 }
 
 export interface FinishedVideoRenderer {
@@ -36,6 +41,7 @@ export class FfmpegFinishedVideoRenderer implements FinishedVideoRenderer {
       "setsar=1",
       `ass=${escapeFilterPath(path.relative(input.taskDirectory, overlayPath))}`
     ].join(",");
+    const performanceProfile = input.performanceProfile ?? DEFAULT_RUNTIME_PERFORMANCE_PROFILE;
 
     const result = spawnSync(
       ffmpegPath,
@@ -52,9 +58,11 @@ export class FfmpegFinishedVideoRenderer implements FinishedVideoRenderer {
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast",
+        performanceProfile.ffmpegPreset,
         "-crf",
-        "20",
+        String(20 + performanceProfile.crfOffset),
+        "-threads",
+        String(performanceProfile.ffmpegThreads),
         "-pix_fmt",
         "yuv420p",
         "-c:a",

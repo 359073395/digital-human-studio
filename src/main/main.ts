@@ -64,6 +64,7 @@ import { MockWorkflowRunner } from "./workflow/mockWorkflowRunner";
 import { RealWorkflowRunner } from "./workflow/realWorkflowRunner";
 import { detectRuntimePerformanceProfile } from "./workflow/runtimePerformanceProfile";
 import { VideoDedupWorkflowService } from "./workflow/videoDedupWorkflowService";
+import { runWorkflowInWorker } from "./workflow/workflowWorkerRunner";
 import type { RuntimePerformanceProfile } from "../shared/performanceProfile";
 
 const APP_DISPLAY_NAME = "跑量自媒体视频工作台";
@@ -245,7 +246,8 @@ function createRepositories(): MainRepositories {
     taskRepository,
     appPaths,
     undefined,
-    appSettingsRepository
+    appSettingsRepository,
+    { getPerformanceProfile: () => performanceProfile }
   );
   const mixedCutWorkflowService = new MixedCutWorkflowService(
     taskRepository,
@@ -300,13 +302,11 @@ function registerIpcHandlers(repositories: MainRepositories): void {
     heyGenAvatarCatalog,
     mockWorkflowRunner,
     presenterImageWorkflowService,
-    realWorkflowRunner,
     scriptWorkflowService,
     serviceConfigurationRepository,
     sourceAssetService,
     storyboardWorkflowService,
     taskRepository,
-    mixedCutWorkflowService,
     videoDedupWorkflowService,
     licenseService,
     updateService,
@@ -555,7 +555,11 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   );
 
   protectedHandle(IPC_CHANNELS.renderMixedCutBatch, (_event, taskId: string) =>
-    mixedCutWorkflowService.prepareMixedCut(taskId)
+    runWorkflowInWorker({
+      appDataDir: appPaths.appDataDir,
+      kind: "mixed-cut",
+      taskId
+    })
   );
 
   protectedHandle(IPC_CHANNELS.importDedupSourceVideo, async (_event, taskId: string) => {
@@ -585,7 +589,11 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   });
 
   protectedHandle(IPC_CHANNELS.runVideoDedup, (_event, taskId: string) =>
-    videoDedupWorkflowService.runVideoDedup(taskId)
+    runWorkflowInWorker({
+      appDataDir: appPaths.appDataDir,
+      kind: "dedup",
+      taskId
+    })
   );
 
   protectedHandle(IPC_CHANNELS.runOriginalityScore, (_event, taskId: string) =>
@@ -763,7 +771,11 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   );
 
   protectedHandle(IPC_CHANNELS.runRealWorkflow, (_event, taskId: string) =>
-    realWorkflowRunner.runTask(taskId)
+    runWorkflowInWorker({
+      appDataDir: appPaths.appDataDir,
+      kind: "real-run",
+      taskId
+    })
   );
 
   protectedHandle(IPC_CHANNELS.retryMockWorkflowStep, (_event, input: RetryWorkflowStepInput) =>

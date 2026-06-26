@@ -9,6 +9,10 @@ import {
   type PublishingPackage,
   type VideoTask
 } from "../../shared/domain";
+import {
+  DEFAULT_RUNTIME_PERFORMANCE_PROFILE,
+  type RuntimePerformanceProfile
+} from "../../shared/performanceProfile";
 import { getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { TaskRepository } from "../storage/taskRepository";
 import { FfmpegFinishedVideoRenderer, type FinishedVideoRenderer } from "./finishedVideoRenderer";
@@ -17,12 +21,17 @@ interface PathSettingsReader {
   getPathSettings: () => AppPathSettings;
 }
 
+interface PerformanceProfileReader {
+  getPerformanceProfile: () => RuntimePerformanceProfile;
+}
+
 export class ExportWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
     private readonly paths: AppPaths,
     private readonly finishedVideoRenderer: FinishedVideoRenderer = new FfmpegFinishedVideoRenderer(),
-    private readonly pathSettingsReader?: PathSettingsReader
+    private readonly pathSettingsReader?: PathSettingsReader,
+    private readonly performanceProfileReader?: PerformanceProfileReader
   ) {}
 
   exportTask(taskId: string): VideoTask {
@@ -31,6 +40,9 @@ export class ExportWorkflowService {
     try {
       const task = this.requireTask(taskId);
       const publishingPackage = createPublishingPackage(task);
+      const performanceProfile =
+        this.performanceProfileReader?.getPerformanceProfile() ??
+        DEFAULT_RUNTIME_PERFORMANCE_PROFILE;
 
       for (const presetId of task.selectedOutputPresets) {
         const preset = requireOutputPreset(presetId);
@@ -49,7 +61,8 @@ export class ExportWorkflowService {
           taskDirectory: getTaskDirectory(this.paths, taskId),
           sourceVideoPath: renderSourceVideoPath,
           subtitlePath: findSubtitlePath(this.paths, taskId, this.requireTask(taskId), preset),
-          outputPath: absolutePath
+          outputPath: absolutePath,
+          performanceProfile
         });
         this.taskRepository.addMediaAsset(taskId, "finished-video", relativePath);
 

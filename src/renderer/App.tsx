@@ -620,6 +620,44 @@ export function App() {
   }, [isWorkflowRunning, selectedTaskId]);
 
   useEffect(() => {
+    const api = window.digitalHumanStudio;
+    if (!api || !isWorkflowRunning || !selectedTaskId) {
+      return;
+    }
+
+    let cancelled = false;
+    const refreshRunningTask = async () => {
+      try {
+        const [summaries, task] = await Promise.all([api.listTasks(), api.getTask(selectedTaskId)]);
+        if (cancelled) {
+          return;
+        }
+
+        setTaskSummaries(summaries);
+        if (task) {
+          setSelectedTask(task);
+          const runningStep = task.steps.find((step) => step.status === "running");
+          if (runningStep) {
+            setWorkflowProgressLabel(`正在处理：${runningStep.label}`);
+          }
+        }
+      } catch {
+        // Keep the visible progress animation alive even if a brief database read is busy.
+      }
+    };
+
+    void refreshRunningTask();
+    const timer = window.setInterval(() => {
+      void refreshRunningTask();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isWorkflowRunning, selectedTaskId]);
+
+  useEffect(() => {
     if (!window.digitalHumanStudio) {
       return;
     }
@@ -1106,7 +1144,7 @@ export function App() {
           ? withApiTroubleshootingHint(failedStep.errorMessage || `${failedStep.label}未完成`)
           : `视频、封面和字幕文件已输出到：${
               task.publishingPackage.exportDirectory ?? task.exportDirectory ?? "内部导出目录"
-            }；当前版本暂未把字幕烧录进 MP4`
+            }`
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
