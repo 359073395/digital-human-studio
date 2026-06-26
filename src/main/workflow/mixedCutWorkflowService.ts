@@ -52,11 +52,11 @@ interface MixedCutEditDecisionRecord {
   combinationSignature: string;
   groupedPlan: GroupedMixedCutBatchPlan;
   outputVideo: string;
-  subtitleFile: string;
+  subtitleFile?: string;
   coverFile: string;
   audioSourcePath?: string;
   targetDurationSeconds: number;
-  targetDurationSource: "audio" | "script" | "material";
+  targetDurationSource: "audio" | "material";
   warnings: string[];
   performance: {
     mode: RuntimePerformanceProfile["mode"];
@@ -229,8 +229,6 @@ export class MixedCutWorkflowService {
     targetCount: number;
   }): MixedCutEditDecisionRecord {
     const mixedCutAudio = selectMixedCutAudioForBatch(input.audioAssets, input.batchIndex);
-    const subtitleScript =
-      input.task.finalScript.trim() || input.task.sourceScript.trim() || input.task.title;
     const selectedShots = input.combination.shots;
     const targetTiming = resolveMixedCutTargetTiming({
       audio: mixedCutAudio,
@@ -300,16 +298,22 @@ export class MixedCutWorkflowService {
       fs.rmSync(segmentDirectory, { recursive: true, force: true });
     }
 
-    const subtitleFile = `subtitles/mixed-cut-batch-${input.batchIndex}-${input.preset.id}.srt`;
+    const subtitleFile = input.task.subtitleStyle.enabled
+      ? `subtitles/mixed-cut-batch-${input.batchIndex}-${input.preset.id}.srt`
+      : undefined;
     const coverFile = `post/mixed-cut-cover-${input.batchIndex}-${input.preset.id}.svg`;
     const editDecisionFile = `post/edit-decisions-mixed-cut-${input.batchIndex}-${input.preset.id}.json`;
 
-    writeTaskFile(
-      this.paths,
-      input.task.id,
-      subtitleFile,
-      createTimedTextSrt(subtitleScript, targetDurationSeconds)
-    );
+    if (subtitleFile) {
+      const subtitleScript =
+        input.task.finalScript.trim() || input.task.sourceScript.trim() || input.task.title;
+      writeTaskFile(
+        this.paths,
+        input.task.id,
+        subtitleFile,
+        createTimedTextSrt(subtitleScript, targetDurationSeconds)
+      );
+    }
     writeTaskFile(
       this.paths,
       input.task.id,
@@ -358,7 +362,9 @@ export class MixedCutWorkflowService {
 
     writeTaskFile(this.paths, input.task.id, editDecisionFile, JSON.stringify(record, null, 2));
     this.taskRepository.addMediaAsset(input.task.id, "mixed-cut-video", outputVideo);
-    this.taskRepository.addMediaAsset(input.task.id, "subtitle-file", subtitleFile);
+    if (subtitleFile) {
+      this.taskRepository.addMediaAsset(input.task.id, "subtitle-file", subtitleFile);
+    }
     this.taskRepository.addMediaAsset(input.task.id, "cover-image", coverFile);
     this.taskRepository.addMediaAsset(input.task.id, "edit-decision-record", editDecisionFile);
 
@@ -609,15 +615,9 @@ function resolveMixedCutTargetTiming(input: {
   }
 
   if (input.task.mixedCutChapterMode === "fixed-material-count") {
-    const materialDurationSeconds = clampMaterialTargetDuration(
-      input.selectedShotCount * SEGMENT_DURATION_SECONDS
-    );
-    const scriptDurationSeconds = input.task.finalScript.trim()
-      ? estimateScriptDurationSeconds(input.task.finalScript)
-      : 0;
     return {
-      seconds: Math.max(materialDurationSeconds, scriptDurationSeconds),
-      source: scriptDurationSeconds > materialDurationSeconds ? "script" : "material"
+      seconds: clampMaterialTargetDuration(input.selectedShotCount * SEGMENT_DURATION_SECONDS),
+      source: "material"
     };
   }
 
@@ -1024,8 +1024,8 @@ function createTimedTextSrt(script: string, targetDurationSeconds: number): stri
     .map((line) => line.trim())
     .filter(Boolean)
     .join(" ");
-  const chunks = chunkText(text, 34);
-  const duration = Math.max(2, targetDurationSeconds / Math.max(1, chunks.length));
+  const chunks = limitSubtitleChunksToDuration(chunkText(text, 34), targetDurationSeconds);
+  const duration = targetDurationSeconds / Math.max(1, chunks.length);
 
   return chunks
     .map((chunk, index) => {
@@ -1041,21 +1041,15 @@ function createTimedTextSrt(script: string, targetDurationSeconds: number): stri
     .join("\n\n");
 }
 
-function estimateScriptDurationSeconds(script: string): number {
-  const text = script.replace(/\s+/g, " ").trim();
-  if (!text) {
-    return MIN_TARGET_DURATION_SECONDS;
+function limitSubtitleChunksToDuration(chunks: string[], targetDurationSeconds: number): string[] {
+  const maxChunks = Math.max(1, Math.floor(Math.max(1, targetDurationSeconds) / 1.2));
+  if (chunks.length <= maxChunks) {
+    return chunks;
   }
 
-  const cjkCharacters = (text.match(/[\u3400-\u9fff]/g) ?? []).length;
-  const latinWords = (text.replace(/[\u3400-\u9fff]/g, " ").match(/[A-Za-z0-9]+/g) ?? []).length;
-  const punctuationPauses = (text.match(/[。！？!?.,，；;]/g) ?? []).length * 0.28;
-  const estimatedSeconds = cjkCharacters / 4 + latinWords / 2.5 + punctuationPauses + 2;
-
-  return Math.min(
-    MAX_TARGET_DURATION_SECONDS,
-    Math.max(MIN_TARGET_DURATION_SECONDS, Math.ceil(estimatedSeconds))
-  );
+  const visibleChunks = chunks.slice(0, maxChunks);
+  visibleChunks[visibleChunks.length - 1] = `${visibleChunks[visibleChunks.length - 1]}...`;
+  return visibleChunks;
 }
 
 function chunkText(value: string, maxLength: number): string[] {
@@ -1151,12 +1145,14 @@ function copyBatchToExportDirectory(
       record.outputVideo,
       path.join(targetDirectory, "videos", path.basename(record.outputVideo))
     );
-    copyTaskAsset(
-      paths,
-      taskId,
-      record.subtitleFile,
-      path.join(targetDirectory, "subtitles", path.basename(record.subtitleFile))
-    );
+    if (record.subtitleFile) {
+      copyTaskAsset(
+        paths,
+        taskId,
+        record.subtitleFile,
+        path.join(targetDirectory, "subtitles", path.basename(record.subtitleFile))
+      );
+    }
     copyTaskAsset(
       paths,
       taskId,

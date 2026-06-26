@@ -99,7 +99,7 @@ describe("MixedCutWorkflowService", () => {
     }
   }, 35_000);
 
-  it("extends subtitle timing for long AI scripts instead of truncating at 12 seconds", () => {
+  it("ignores stale scripts when fixed material mode decides video duration", () => {
     const task = repository.createTask({
       title: "Long mixed cut",
       sourceScript: "Source script."
@@ -129,6 +129,15 @@ describe("MixedCutWorkflowService", () => {
     repository.addMediaAsset(task.id, "mixed-cut-material", "source/mixed-materials/1/long.png");
 
     new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const editDecisionPath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "post",
+      "edit-decisions-mixed-cut-1-portrait-9-16.json"
+    );
+    const record = JSON.parse(fs.readFileSync(editDecisionPath, "utf8")) as {
+      targetDurationSeconds: number;
+      targetDurationSource: string;
+    };
     const subtitlePath = path.join(
       getTaskDirectory(appPaths, task.id),
       "subtitles",
@@ -136,9 +145,67 @@ describe("MixedCutWorkflowService", () => {
     );
     const subtitle = fs.readFileSync(subtitlePath, "utf8");
 
+    expect(record.targetDurationSource).toBe("material");
+    expect(record.targetDurationSeconds).toBeLessThan(10);
     expect(subtitle).toContain("-->");
     expect(subtitle).not.toContain("00:00:12,000");
   }, 25_000);
+
+  it("does not create subtitle assets when subtitles are disabled", () => {
+    const task = repository.createTask({
+      title: "No subtitle mixed cut",
+      sourceScript: "This stale script should not force subtitles."
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "Old AI script from another mode.",
+      mixedCutTargetCount: 1,
+      mixedCutChapterMode: "fixed-material-count",
+      selectedOutputPresets: ["portrait-9-16"],
+      subtitleStyle: {
+        ...task.subtitleStyle,
+        enabled: false
+      }
+    });
+
+    const materialPath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      "source",
+      "mixed-materials",
+      "1",
+      "no-subtitle.png"
+    );
+    fs.mkdirSync(path.dirname(materialPath), { recursive: true });
+    fs.writeFileSync(materialPath, Buffer.from(SINGLE_PIXEL_PNG_BASE64, "base64"));
+    repository.addMediaAsset(
+      task.id,
+      "mixed-cut-material",
+      "source/mixed-materials/1/no-subtitle.png"
+    );
+
+    const completed = new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const subtitlePath = path.join(
+      taskDirectory,
+      "subtitles",
+      "mixed-cut-batch-1-portrait-9-16.srt"
+    );
+    const editDecisionPath = path.join(
+      taskDirectory,
+      "post",
+      "edit-decisions-mixed-cut-1-portrait-9-16.json"
+    );
+    const record = JSON.parse(fs.readFileSync(editDecisionPath, "utf8")) as {
+      subtitleFile?: string;
+      targetDurationSource: string;
+    };
+
+    expect(completed.mediaAssets.some((asset) => asset.kind === "subtitle-file")).toBe(false);
+    expect(fs.existsSync(subtitlePath)).toBe(false);
+    expect(record.subtitleFile).toBeUndefined();
+    expect(record.targetDurationSource).toBe("material");
+  }, 20_000);
 
   it("uses uploaded mixed-cut audio duration as the target video duration", () => {
     const task = repository.createTask({

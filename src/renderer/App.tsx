@@ -1198,7 +1198,10 @@ export function App() {
     setIsWorkflowRunning(true);
     setWorkflowProgressLabel(`正在生成：${generationModeLabel(taskForRun.generationMode)}`);
     setWorkflowProgressPercent(6);
-    setActionMessage("正在输出视频、封面和字幕文件...");
+    const outputAssetLabel = taskForRun.subtitleStyle.enabled
+      ? "视频、封面和字幕文件"
+      : "视频和封面";
+    setActionMessage(`正在输出${outputAssetLabel}...`);
 
     try {
       const preflightMessage = await checkOutputServiceConfiguration(api, taskForRun);
@@ -1263,7 +1266,7 @@ export function App() {
       setActionMessage(
         failedStep
           ? withApiTroubleshootingHint(failedStep.errorMessage || `${failedStep.label}未完成`)
-          : `视频、封面和字幕文件已输出到：${
+          : `${outputAssetLabel}已输出到：${
               task.publishingPackage.exportDirectory ?? task.exportDirectory ?? "内部导出目录"
             }`
       );
@@ -4197,8 +4200,9 @@ export function App() {
             <div className="task-dialog-heading">
               <h2>确认输出</h2>
               <p>
-                请先在预览中设置字幕、画面标题和封面。确认后将输出带字幕与标题样式的成片
-                MP4、封面、字幕文件和发布资料包。
+                {outputConfirmTask.subtitleStyle.enabled
+                  ? "请先在预览中设置字幕、画面标题和封面。确认后将输出带字幕与标题样式的成片 MP4、封面、字幕文件和发布资料包。"
+                  : "请先在预览中设置画面标题和封面。当前未开启字幕，确认后将输出成片 MP4、封面和发布资料包。"}
               </p>
             </div>
             <div className="delete-task-name">{outputConfirmTask.title}</div>
