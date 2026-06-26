@@ -1,11 +1,14 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { safeStorage } from "electron";
 import type { SecretCipher } from "./credentialStore";
 
 const LOCAL_CREDENTIAL_PREFIX = "dhs-local-v1:";
 const LOCAL_KEY_FILE_NAME = "local-key.json";
+const requireFromCurrentFile = createRequire(__filename);
+
+type ElectronSafeStorage = typeof import("electron").safeStorage;
 
 interface LocalCredentialKeyFile {
   algorithm: "aes-256-gcm";
@@ -16,7 +19,15 @@ export class SafeStorageCipher implements SecretCipher {
   constructor(private readonly appDataDir?: string) {}
 
   isAvailable(): boolean {
-    return Boolean(this.appDataDir) || safeStorage.isEncryptionAvailable();
+    if (this.appDataDir) {
+      return true;
+    }
+
+    try {
+      return getElectronSafeStorage().isEncryptionAvailable();
+    } catch {
+      return false;
+    }
   }
 
   async encrypt(value: string): Promise<string> {
@@ -24,7 +35,7 @@ export class SafeStorageCipher implements SecretCipher {
       return encryptWithLocalKey(value, this.appDataDir);
     }
 
-    return safeStorage.encryptString(value).toString("base64");
+    return getElectronSafeStorage().encryptString(value).toString("base64");
   }
 
   async decrypt(encryptedValue: string): Promise<string> {
@@ -36,8 +47,38 @@ export class SafeStorageCipher implements SecretCipher {
       return decryptWithLocalKey(encryptedValue, this.appDataDir);
     }
 
-    return safeStorage.decryptString(Buffer.from(encryptedValue, "base64"));
+    return getElectronSafeStorage().decryptString(Buffer.from(encryptedValue, "base64"));
   }
+}
+
+let electronSafeStorageOverride: ElectronSafeStorage | null = null;
+let cachedElectronSafeStorage: ElectronSafeStorage | null = null;
+
+export function setElectronSafeStorageForTests(safeStorage: ElectronSafeStorage | null): void {
+  electronSafeStorageOverride = safeStorage;
+  cachedElectronSafeStorage = null;
+}
+
+function getElectronSafeStorage(): ElectronSafeStorage {
+  if (electronSafeStorageOverride) {
+    return electronSafeStorageOverride;
+  }
+
+  if (cachedElectronSafeStorage) {
+    return cachedElectronSafeStorage;
+  }
+
+  const electronModule = requireFromCurrentFile("electron") as {
+    safeStorage?: ElectronSafeStorage;
+  };
+  if (!electronModule.safeStorage) {
+    throw new Error(
+      "当前运行环境无法访问 Electron 安全存储。请在设置里重新保存 API Key 后再重试。"
+    );
+  }
+
+  cachedElectronSafeStorage = electronModule.safeStorage;
+  return cachedElectronSafeStorage;
 }
 
 function encryptWithLocalKey(value: string, appDataDir: string): string {

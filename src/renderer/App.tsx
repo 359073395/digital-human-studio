@@ -359,8 +359,10 @@ export function App() {
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
   const taskStepProgressPercent = useMemo(() => calculateTaskProgressPercent(steps), [steps]);
+  const runningTaskStepProgressPercent =
+    taskStepProgressPercent >= 100 ? 0 : taskStepProgressPercent;
   const visibleProgressPercent = isWorkflowRunning
-    ? Math.max(taskStepProgressPercent, workflowProgressPercent)
+    ? Math.min(96, Math.max(runningTaskStepProgressPercent, workflowProgressPercent))
     : taskStepProgressPercent;
   const visibleProgressLabel = isWorkflowRunning
     ? workflowProgressLabel ||
@@ -1252,10 +1254,12 @@ export function App() {
         personalIpProfile: taskForRun.personalIpProfile
       });
       const task = await api.runRealWorkflow(taskForRun.id);
-      setWorkflowProgressPercent(100);
       const failedStep = task.steps.find(
         (step) => step.status === "retry-ready" || step.status === "failed"
       );
+      if (!failedStep) {
+        setWorkflowProgressPercent(100);
+      }
       setActionMessage(
         failedStep
           ? withApiTroubleshootingHint(failedStep.errorMessage || `${failedStep.label}未完成`)
@@ -2763,7 +2767,7 @@ export function App() {
         {taskError ? <p className="task-error">{taskError}</p> : null}
       </section>
 
-      {taskSummaries.length > 0 ? (
+      {taskSummaries.length > 0 && isWorkflowRunning ? (
         <TaskProgressBar
           completeCount={completeCount}
           isRunning={isWorkflowRunning}

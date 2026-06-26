@@ -11,11 +11,7 @@ const safeStorageMock = vi.hoisted(() => ({
   isEncryptionAvailable: vi.fn()
 }));
 
-vi.mock("electron", () => ({
-  safeStorage: safeStorageMock
-}));
-
-import { SafeStorageCipher } from "./safeStorageCipher";
+import { SafeStorageCipher, setElectronSafeStorageForTests } from "./safeStorageCipher";
 
 let tempDir: string;
 
@@ -24,9 +20,13 @@ beforeEach(() => {
   safeStorageMock.decryptString.mockReset();
   safeStorageMock.encryptString.mockReset();
   safeStorageMock.isEncryptionAvailable.mockReset();
+  setElectronSafeStorageForTests(
+    safeStorageMock as unknown as Parameters<typeof setElectronSafeStorageForTests>[0]
+  );
 });
 
 afterEach(() => {
+  setElectronSafeStorageForTests(null);
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
