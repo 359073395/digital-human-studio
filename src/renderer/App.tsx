@@ -93,6 +93,18 @@ type MixedCutReuseDraftState = {
   reuseRate: number;
   groupReuseRates: Record<string, number>;
 };
+type MixedCutBgmVolumeDraftState = {
+  taskId: string;
+  volume: number;
+};
+type MixedCutMaterialGroupSelection = {
+  taskId: string;
+  groupId: string;
+};
+type MixedCutFolderAssetGroup = {
+  groupId: string;
+  assets: MediaAsset[];
+};
 type TaskNameDialog =
   | {
       mode: "create";
@@ -331,6 +343,11 @@ export function App() {
   const [activePreviewMode, setActivePreviewMode] = useState<PreviewMode>("finished");
   const [mixedCutReuseDraftState, setMixedCutReuseDraftState] =
     useState<MixedCutReuseDraftState | null>(null);
+  const [mixedCutBgmVolumeDraftState, setMixedCutBgmVolumeDraftState] =
+    useState<MixedCutBgmVolumeDraftState | null>(null);
+  const [mixedCutMaterialGroupSelection, setMixedCutMaterialGroupSelection] =
+    useState<MixedCutMaterialGroupSelection | null>(null);
+  const [isMixedCutPlanCalculating, setIsMixedCutPlanCalculating] = useState(false);
   const [storyboardPanelCount, setStoryboardPanelCount] =
     useState<VisualStoryboardPanelCount>("auto");
   const [storyScriptPackage, setStoryScriptPackage] = useState<StoryScriptPackage | null>(null);
@@ -402,6 +419,17 @@ export function App() {
   const mixedCutMaterialAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-material"
   );
+  const mixedCutMaterialFolderGroups = useMemo(
+    () => buildMixedCutMaterialFolderGroups(mixedCutMaterialAssets),
+    [mixedCutMaterialAssets]
+  );
+  const selectedMixedCutMaterialGroupId =
+    mixedCutMaterialGroupSelection?.taskId === selectedTask.id &&
+    mixedCutMaterialFolderGroups.some(
+      (group) => group.groupId === mixedCutMaterialGroupSelection.groupId
+    )
+      ? mixedCutMaterialGroupSelection.groupId
+      : (mixedCutMaterialFolderGroups[0]?.groupId ?? "");
   const mixedCutAudioAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-audio"
   );
@@ -423,6 +451,10 @@ export function App() {
   const mixedCutReuseDraft = mixedCutDraftForTask?.reuseRate ?? selectedTask.mixedCutReuseRate;
   const mixedCutGroupReuseDrafts =
     mixedCutDraftForTask?.groupReuseRates ?? selectedTaskGroupReuseRates;
+  const mixedCutBgmVolumeDraft =
+    mixedCutBgmVolumeDraftState?.taskId === selectedTask.id
+      ? mixedCutBgmVolumeDraftState.volume
+      : selectedTask.mixedCutBgmVolume;
   const mixedCutGroupRows = useMemo(
     () =>
       buildMixedCutGroupRows(
@@ -653,6 +685,18 @@ export function App() {
 
     return () => window.clearInterval(timer);
   }, [isWorkflowRunning, selectedTaskId]);
+
+  useEffect(() => {
+    if (!isMixedCutPlanCalculating) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setIsMixedCutPlanCalculating(false);
+    }, 320);
+
+    return () => window.clearTimeout(timer);
+  }, [isMixedCutPlanCalculating, mixedCutBatchPlan]);
 
   useEffect(() => {
     const api = window.digitalHumanStudio;
@@ -986,6 +1030,13 @@ export function App() {
       reuseRate: group.reuseRate
     }));
     await updateCurrentTask({ mixedCutGroupSettings: nextSettings });
+  }
+
+  async function commitMixedCutBgmVolume() {
+    const nextVolume = Math.min(100, Math.max(0, Math.round(mixedCutBgmVolumeDraft)));
+    if (nextVolume !== selectedTask.mixedCutBgmVolume) {
+      await updateCurrentTask({ mixedCutBgmVolume: nextVolume });
+    }
   }
 
   function openCreateTaskDialog() {
@@ -3402,13 +3453,17 @@ export function App() {
                             <span>画面素材 {mixedCutVisualMaterialCount}</span>
                             <span>音频素材 {mixedCutAudioMaterialCount}</span>
                           </div>
-                          <AssetList
-                            assets={mixedCutMaterialAssets}
+                          <MixedCutMaterialFolderManager
                             disabled={isWorkflowRunning}
-                            emptyLabel="还没有读取到视频或图片素材"
+                            groups={mixedCutMaterialFolderGroups}
                             onRemove={(asset) => void removeTaskMediaAsset(asset)}
-                            removeTitle="从本任务移除该画面素材"
-                            title="已读取画面素材"
+                            onSelectGroup={(groupId) =>
+                              setMixedCutMaterialGroupSelection({
+                                taskId: selectedTask.id,
+                                groupId
+                              })
+                            }
+                            selectedGroupId={selectedMixedCutMaterialGroupId}
                           />
                         </div>
 
@@ -3453,14 +3508,17 @@ export function App() {
                                 min={0}
                                 max={100}
                                 type="range"
-                                value={selectedTask.mixedCutBgmVolume}
+                                value={mixedCutBgmVolumeDraft}
+                                onBlur={() => void commitMixedCutBgmVolume()}
                                 onChange={(event) =>
-                                  void updateCurrentTask({
-                                    mixedCutBgmVolume: clampUiNumber(event.target.value, 0, 100, 70)
+                                  setMixedCutBgmVolumeDraftState({
+                                    taskId: selectedTask.id,
+                                    volume: clampUiNumber(event.target.value, 0, 100, 70)
                                   })
                                 }
+                                onPointerUp={() => void commitMixedCutBgmVolume()}
                               />
-                              <output>{selectedTask.mixedCutBgmVolume}</output>
+                              <output>{mixedCutBgmVolumeDraft}</output>
                             </div>
                           </label>
                           <p className="field-hint">
@@ -3473,19 +3531,34 @@ export function App() {
                         <div className="mixed-cut-panel-topline">
                           <strong>章节与组合</strong>
                           <span>
-                            {mixedCutRecommendation(mixedCutVisualMaterialCount, mixedCutBatchPlan)}
+                            {isMixedCutPlanCalculating
+                              ? "正在计算可生成数量..."
+                              : mixedCutRecommendation(
+                                  mixedCutVisualMaterialCount,
+                                  mixedCutBatchPlan
+                                )}
                           </span>
                         </div>
 
                         <div className="mixed-cut-control-grid">
-                          <div className="mixed-cut-plan-card">
+                          <div
+                            className={`mixed-cut-plan-card ${
+                              isMixedCutPlanCalculating ? "calculating" : ""
+                            }`}
+                          >
                             <span>智能估算数量</span>
                             <strong>
-                              {mixedCutBatchPlan.targetCount
-                                ? `${mixedCutBatchPlan.targetCount} 条`
-                                : "待计算"}
+                              {isMixedCutPlanCalculating
+                                ? "正在计算..."
+                                : mixedCutBatchPlan.targetCount
+                                  ? `${mixedCutBatchPlan.targetCount} 条`
+                                  : "待计算"}
                             </strong>
-                            <small>{mixedCutPlanDetail(mixedCutBatchPlan)}</small>
+                            <small>
+                              {isMixedCutPlanCalculating
+                                ? "重复度变化后正在重新估算组合容量"
+                                : mixedCutPlanDetail(mixedCutBatchPlan)}
+                            </small>
                           </div>
                           <label>
                             混剪模式
@@ -3530,36 +3603,39 @@ export function App() {
                                       ])
                                     )
                                   });
+                                  setIsMixedCutPlanCalculating(true);
                                 }}
                                 onPointerUp={() => void commitMixedCutReuseRate()}
                               />
                               <output>{mixedCutReuseDraft}</output>
                             </div>
                           </label>
-                          <label className="compact-checkbox mixed-cut-switch">
-                            <input
-                              checked={selectedTask.mixedCutRemoveOriginalAudio}
-                              type="checkbox"
-                              onChange={(event) =>
-                                void updateCurrentTask({
-                                  mixedCutRemoveOriginalAudio: event.target.checked
-                                })
-                              }
-                            />
-                            去除视频素材原音
-                          </label>
-                          <label className="compact-checkbox mixed-cut-switch">
-                            <input
-                              checked={selectedTask.mixedCutEnableTransitions}
-                              type="checkbox"
-                              onChange={(event) =>
-                                void updateCurrentTask({
-                                  mixedCutEnableTransitions: event.target.checked
-                                })
-                              }
-                            />
-                            转场
-                          </label>
+                          <div className="mixed-cut-switch-group" aria-label="混剪快速设置">
+                            <label className="compact-checkbox mixed-cut-switch">
+                              <input
+                                checked={selectedTask.mixedCutRemoveOriginalAudio}
+                                type="checkbox"
+                                onChange={(event) =>
+                                  void updateCurrentTask({
+                                    mixedCutRemoveOriginalAudio: event.target.checked
+                                  })
+                                }
+                              />
+                              去原音
+                            </label>
+                            <label className="compact-checkbox mixed-cut-switch">
+                              <input
+                                checked={selectedTask.mixedCutEnableTransitions}
+                                type="checkbox"
+                                onChange={(event) =>
+                                  void updateCurrentTask({
+                                    mixedCutEnableTransitions: event.target.checked
+                                  })
+                                }
+                              />
+                              转场
+                            </label>
+                          </div>
                         </div>
 
                         <div className="mixed-cut-table-wrap">
@@ -3587,7 +3663,7 @@ export function App() {
                                           type="range"
                                           value={row.reuseRate}
                                           onBlur={() => void commitMixedCutGroupReuseRates()}
-                                          onChange={(event) =>
+                                          onChange={(event) => {
                                             setMixedCutReuseDraftState((current) => ({
                                               taskId: selectedTask.id,
                                               reuseRate:
@@ -3605,8 +3681,9 @@ export function App() {
                                                   row.reuseRate
                                                 )
                                               }
-                                            }))
-                                          }
+                                            }));
+                                            setIsMixedCutPlanCalculating(true);
+                                          }}
                                           onPointerUp={() => void commitMixedCutGroupReuseRates()}
                                         />
                                         <output>{row.reuseRate}%</output>
@@ -5118,6 +5195,77 @@ function AssetList({
         </ul>
       ) : (
         <p>{emptyLabel}</p>
+      )}
+    </div>
+  );
+}
+
+function MixedCutMaterialFolderManager({
+  disabled,
+  groups,
+  onRemove,
+  onSelectGroup,
+  selectedGroupId
+}: {
+  disabled: boolean;
+  groups: MixedCutFolderAssetGroup[];
+  onRemove: (asset: MediaAsset) => void;
+  onSelectGroup: (groupId: string) => void;
+  selectedGroupId: string;
+}) {
+  const selectedGroup =
+    groups.find((group) => group.groupId === selectedGroupId) ?? groups[0] ?? null;
+
+  return (
+    <div className="mixed-cut-folder-manager">
+      <div className="asset-list-heading">
+        <strong>画面素材文件夹</strong>
+        <span>{groups.length} 个文件夹</span>
+      </div>
+      {groups.length > 0 ? (
+        <>
+          <div className="mixed-cut-folder-tabs" aria-label="混剪素材文件夹">
+            {groups.map((group) => (
+              <button
+                className={group.groupId === selectedGroup?.groupId ? "active" : ""}
+                key={group.groupId}
+                type="button"
+                onClick={() => onSelectGroup(group.groupId)}
+              >
+                <strong>{group.groupId}</strong>
+                <span>{group.assets.length}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mixed-cut-folder-assets">
+            <div className="asset-list-heading">
+              <strong>{selectedGroup?.groupId ?? "-"} 文件夹素材</strong>
+              <span>{selectedGroup?.assets.length ?? 0} 个</span>
+            </div>
+            {selectedGroup && selectedGroup.assets.length > 0 ? (
+              <ul>
+                {selectedGroup.assets.map((asset) => (
+                  <li key={asset.id}>
+                    <span>{assetFileName(asset.relativePath)}</span>
+                    <button
+                      type="button"
+                      className="asset-list-remove"
+                      disabled={disabled}
+                      title="从本任务移除该画面素材"
+                      onClick={() => onRemove(asset)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>当前文件夹还没有可用视频或图片素材。</p>
+            )}
+          </div>
+        </>
+      ) : (
+        <p>还没有读取到视频或图片素材。</p>
       )}
     </div>
   );
@@ -7087,6 +7235,32 @@ function buildMixedCutGroupRows(
       groupId,
       shotCount,
       reuseRate: clampUiNumber(String(reuseByGroup.get(groupId) ?? defaultReuseRate), 0, 100, 35)
+    }));
+}
+
+function buildMixedCutMaterialFolderGroups(assets: MediaAsset[]): MixedCutFolderAssetGroup[] {
+  const grouped = new Map<string, MediaAsset[]>();
+
+  for (const asset of assets) {
+    if (!isVisualMixedCutAsset(asset.relativePath)) {
+      continue;
+    }
+
+    const groupId = mixedCutGroupIdFromRelativePath(asset.relativePath);
+    if (!groupId) {
+      continue;
+    }
+
+    const groupAssets = grouped.get(groupId) ?? [];
+    groupAssets.push(asset);
+    grouped.set(groupId, groupAssets);
+  }
+
+  return [...grouped.entries()]
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([groupId, groupAssets]) => ({
+      groupId,
+      assets: groupAssets.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
     }));
 }
 

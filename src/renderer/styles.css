@@ -1598,14 +1598,147 @@ label {
 
 .mixed-cut-control-grid {
   display: grid;
-  grid-template-columns: minmax(84px, 0.6fr) minmax(150px, 1fr) minmax(170px, 1fr) minmax(
-      88px,
-      0.6fr
+  grid-template-columns: minmax(110px, 0.7fr) minmax(140px, 0.9fr) minmax(170px, 1fr) minmax(
+      132px,
+      0.7fr
     );
   gap: 8px;
   align-items: end;
   min-width: 0;
   margin-top: 10px;
+}
+
+.mixed-cut-plan-card.calculating {
+  border-color: #cbd8cf;
+  background: linear-gradient(135deg, #f7f9f4, #edf3eb);
+}
+
+.mixed-cut-plan-card.calculating strong {
+  color: #5f746b;
+  font-size: 18px;
+}
+
+.mixed-cut-switch-group {
+  display: inline-flex;
+  align-items: center;
+  align-self: end;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mixed-cut-switch {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid #cfd8cf;
+  border-radius: 999px;
+  background: #fbfaf6;
+  color: #4f5f58;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.mixed-cut-switch input {
+  width: 14px;
+  height: 14px;
+}
+
+.mixed-cut-folder-manager {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #dce3dc;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.mixed-cut-folder-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.mixed-cut-folder-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #d7ded7;
+  border-radius: 999px;
+  background: #f6f8f4;
+  color: #53625c;
+  font-size: 12px;
+}
+
+.mixed-cut-folder-tabs button.active {
+  border-color: #8da99a;
+  background: #e8f0e8;
+  color: #2f4f42;
+}
+
+.mixed-cut-folder-tabs button strong {
+  color: inherit;
+  font-size: 12px;
+}
+
+.mixed-cut-folder-tabs button span {
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  color: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mixed-cut-folder-assets {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 6px;
+  border-top: 1px solid #e7ece6;
+}
+
+.mixed-cut-folder-assets ul {
+  display: grid;
+  gap: 4px;
+  max-height: 132px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.mixed-cut-folder-assets li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 0;
+}
+
+.mixed-cut-folder-assets li span {
+  min-width: 0;
+  overflow: hidden;
+  color: #314258;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixed-cut-folder-assets p {
+  margin: 0;
+  color: #74817a;
+  font-size: 11px;
 }
 
 .range-field div {
