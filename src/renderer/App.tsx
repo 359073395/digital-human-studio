@@ -391,13 +391,13 @@ export function App() {
       (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
     );
   const sourceMaterialAssets = currentTaskMediaAssets.filter((asset) =>
-    [
-      "source-video",
-      "source-audio",
-      "source-transcript",
-      "source-visual-analysis",
-      "generated-voiceover-audio"
-    ].includes(asset.kind)
+    ["source-video", "source-audio", "source-transcript", "source-visual-analysis"].includes(
+      asset.kind
+    )
+  );
+  const taskAudioQueueAssets = useMemo(
+    () => buildTaskAudioQueueAssets(currentTaskMediaAssets),
+    [currentTaskMediaAssets]
   );
   const mixedCutMaterialAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-material"
@@ -1473,14 +1473,15 @@ export function App() {
 
     try {
       const task = await api.generateScriptVoiceover(selectedTask.id);
-      const audioCount = task.mediaAssets.filter((asset) =>
-        ["generated-voiceover-audio", "mixed-cut-audio"].includes(asset.kind)
-      ).length;
+      const audioCount =
+        task.generationMode === "mixed-cut"
+          ? task.mediaAssets.filter((asset) => asset.kind === "mixed-cut-audio").length
+          : buildTaskAudioQueueAssets(task.mediaAssets).length;
       setWorkflowProgressPercent(100);
       setActionMessage(
         task.generationMode === "mixed-cut"
-          ? `音频已生成并加入混剪音频队列，当前可用音频 ${audioCount} 条`
-          : "音频已生成，已保存到本任务素材中"
+          ? `音频已生成并加入任务音频队列和混剪循环队列，当前可用音频 ${audioCount} 条`
+          : `音频已生成并加入任务音频队列，当前可用音频 ${audioCount} 条`
       );
       await refreshTaskState(task.id, task);
     } catch (error) {
@@ -2936,6 +2937,15 @@ export function App() {
                   </section>
                 </div>
 
+                <AssetList
+                  assets={taskAudioQueueAssets}
+                  disabled={isWorkflowRunning}
+                  emptyLabel="还没有生成或导入音频；可先生成/修改文案，再点一键生成音频。"
+                  onRemove={(asset) => void removeTaskMediaAsset(asset)}
+                  removeTitle="从任务音频队列移除"
+                  title="任务音频队列"
+                />
+
                 <TaskResourceLibrary
                   generatedPresenterCount={generatedPresenterAssets.length}
                   knowledgeCount={knowledgeAssets.length}
@@ -3042,6 +3052,18 @@ export function App() {
                         会调用统一知识库和当前任务资料；价格、禁用词和最终表达以这里为准。
                       </p>
                     </section>
+                  ) : null}
+
+                  {modeNeedsEditableScript(selectedTask.generationMode) &&
+                  selectedTask.generationMode !== "mixed-cut" ? (
+                    <AssetList
+                      assets={taskAudioQueueAssets}
+                      disabled={isWorkflowRunning}
+                      emptyLabel="还没有生成或导入音频；可先填写文案，再点一键生成音频。"
+                      onRemove={(asset) => void removeTaskMediaAsset(asset)}
+                      removeTitle="从任务音频队列移除"
+                      title="任务音频队列"
+                    />
                   ) : null}
 
                   {selectedTask.generationMode === "product-avatar" ? (
@@ -6827,7 +6849,7 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
   }
 
   const labels: Partial<Record<MediaAsset["kind"], string>> = {
-    "source-audio": "原音频",
+    "source-audio": "任务音频",
     "generated-voiceover-audio": "生成配音",
     "source-video": "原视频",
     "source-transcript": "文案",
@@ -6858,6 +6880,24 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
 
 function getTaskScopedMediaAssets(task: VideoTask): MediaAsset[] {
   return task.mediaAssets.filter((asset) => asset.taskId === task.id);
+}
+
+function buildTaskAudioQueueAssets(assets: MediaAsset[]): MediaAsset[] {
+  const audioAssets = assets.filter((asset) =>
+    ["source-audio", "generated-voiceover-audio"].includes(asset.kind)
+  );
+  const byPath = new Map<string, MediaAsset>();
+
+  for (const asset of audioAssets) {
+    const existing = byPath.get(asset.relativePath);
+    if (!existing || existing.kind !== "source-audio") {
+      byPath.set(asset.relativePath, asset);
+    }
+  }
+
+  return [...byPath.values()].sort((left, right) =>
+    left.relativePath.localeCompare(right.relativePath)
+  );
 }
 
 function hasAnalysisCenterResult(task: VideoTask): boolean {
