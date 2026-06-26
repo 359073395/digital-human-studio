@@ -35,8 +35,11 @@ export class AvatarWorkflowService {
           preset,
           imagePath: findGeneratedPresenterImagePath(this.paths, taskId, currentTask, preset)
         });
-        const persisted = await this.persistAvatarResult(taskId, preset, result);
-        if (!persisted.subtitleSaved) {
+        const shouldSaveSubtitles = currentTask.subtitleStyle.enabled;
+        const persisted = await this.persistAvatarResult(taskId, preset, result, {
+          saveSubtitles: shouldSaveSubtitles
+        });
+        if (shouldSaveSubtitles && !persisted.subtitleSaved) {
           subtitleFallbacks.push({
             preset,
             avatarVideoPath: persisted.avatarVideoPath
@@ -66,7 +69,8 @@ export class AvatarWorkflowService {
   private async persistAvatarResult(
     taskId: string,
     preset: OutputPreset,
-    result: AvatarRenderResult
+    result: AvatarRenderResult,
+    options: { saveSubtitles: boolean }
   ): Promise<{ avatarVideoPath: string; subtitleSaved: boolean }> {
     const avatarPath = `avatar/avatar-${preset.id}.mp4`;
     const absoluteAvatarPath = absoluteTaskPath(this.paths, taskId, avatarPath);
@@ -86,7 +90,7 @@ export class AvatarWorkflowService {
       }
     }
 
-    if (result.captionUrl) {
+    if (options.saveSubtitles && result.captionUrl) {
       const captionPath = `subtitles/provider-subtitles-${preset.id}.srt`;
       try {
         await downloadFile(result.captionUrl, absoluteTaskPath(this.paths, taskId, captionPath));

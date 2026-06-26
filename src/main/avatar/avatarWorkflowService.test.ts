@@ -164,6 +164,41 @@ describe("AvatarWorkflowService", () => {
     ).toContain("ASR subtitle for portrait-9-16");
   });
 
+  it("skips provider subtitles and ASR fallback when subtitles are disabled", async () => {
+    const provider = new SuccessfulAvatarProvider();
+    const subtitleProvider = new SuccessfulSubtitleFallbackProvider();
+    const service = new AvatarWorkflowService(repository, appPaths, provider, subtitleProvider);
+    const task = repository.createTask({
+      title: "Subtitle disabled avatar",
+      sourceScript: "Source script."
+    });
+    repository.updateTask({
+      taskId: task.id,
+      subtitleStyle: {
+        ...task.subtitleStyle,
+        enabled: false
+      }
+    });
+    repository.updateFinalScript(task.id, "Final script without subtitles.");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        return new Response(String(url).endsWith(".srt") ? "1\ncaption" : "video-bytes");
+      })
+    );
+
+    const updated = await service.renderHeyGenAvatar(task.id);
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+
+    expect(subtitleProvider.inputs).toHaveLength(0);
+    expect(updated.steps.find((step) => step.id === "avatar")?.status).toBe("complete");
+    expect(updated.steps.find((step) => step.id === "subtitles")?.status).toBe("complete");
+    expect(updated.mediaAssets.filter((asset) => asset.kind === "subtitle-file")).toHaveLength(0);
+    expect(
+      fs.existsSync(path.join(taskDirectory, "subtitles", "provider-subtitles-portrait-9-16.srt"))
+    ).toBe(false);
+  });
+
   it("runs ASR fallback when provider subtitle download fails", async () => {
     const avatarProvider = new SuccessfulAvatarProvider();
     const subtitleProvider = new SuccessfulSubtitleFallbackProvider();

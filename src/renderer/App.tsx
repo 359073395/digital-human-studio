@@ -36,6 +36,7 @@ import {
   type DedupStrategy,
   type FrameTitleStyle,
   type MediaAsset,
+  type MixedCutChapterMode,
   type MixedCutGroupSetting,
   type OriginalityScoreReport,
   type OutputPresetId,
@@ -3041,6 +3042,21 @@ export function App() {
                   </div>
                   <h3>{generationModeLabel(selectedTask.generationMode)}资料</h3>
 
+                  <GenerationQuickSettings
+                    disabled={isWorkflowRunning}
+                    mixedCutAudioCount={mixedCutAudioAssets.length}
+                    mixedCutTargetCount={mixedCutBatchPlan.targetCount}
+                    mixedCutVisualMaterialCount={mixedCutVisualMaterialCount}
+                    onGenerateVoiceover={() => void generateScriptVoiceover()}
+                    onMixedCutModeChange={(mode) =>
+                      void updateCurrentTask({ mixedCutChapterMode: mode })
+                    }
+                    onSubtitleToggle={(enabled) => updateSubtitleStyle({ enabled })}
+                    onUploadMixedCutAudio={() => void uploadMixedCutAudio()}
+                    task={selectedTask}
+                    taskAudioCount={taskAudioQueueAssets.length}
+                  />
+
                   {modeNeedsEditableScript(selectedTask.generationMode) ? (
                     <section className="mode-source-script-card">
                       <div className="section-title">
@@ -5279,6 +5295,130 @@ function MixedCutMaterialFolderManager({
   );
 }
 
+function GenerationQuickSettings({
+  disabled,
+  mixedCutAudioCount,
+  mixedCutTargetCount,
+  mixedCutVisualMaterialCount,
+  onGenerateVoiceover,
+  onMixedCutModeChange,
+  onSubtitleToggle,
+  onUploadMixedCutAudio,
+  task,
+  taskAudioCount
+}: {
+  disabled: boolean;
+  mixedCutAudioCount: number;
+  mixedCutTargetCount: number;
+  mixedCutVisualMaterialCount: number;
+  onGenerateVoiceover: () => void;
+  onMixedCutModeChange: (mode: MixedCutChapterMode) => void;
+  onSubtitleToggle: (enabled: boolean) => void;
+  onUploadMixedCutAudio: () => void;
+  task: VideoTask;
+  taskAudioCount: number;
+}) {
+  const isMixedCut = task.generationMode === "mixed-cut";
+  const subtitleEnabled = task.subtitleStyle.enabled;
+  const outputSummary = generationOutputSummary(task);
+  const durationSummary = generationDurationSummary(task, {
+    mixedCutAudioCount,
+    mixedCutTargetCount,
+    mixedCutVisualMaterialCount
+  });
+  const audioSummary = generationAudioSummary(task, {
+    mixedCutAudioCount,
+    taskAudioCount
+  });
+
+  return (
+    <section className="generation-quick-settings" aria-label="生成前设置">
+      <div className="generation-quick-header">
+        <div>
+          <strong>生成前设置</strong>
+          <span>新手先确认这四项，再点一键输出。</span>
+        </div>
+        <em>{generationModeLabel(task.generationMode)}</em>
+      </div>
+
+      <div className="generation-setting-grid">
+        <div className="generation-setting-item">
+          <span className="setting-kicker">视频时长依据</span>
+          <strong>{durationSummary.title}</strong>
+          <small>{durationSummary.detail}</small>
+          {isMixedCut ? (
+            <div className="setting-segment" role="group" aria-label="混剪模式">
+              <button
+                type="button"
+                className={task.mixedCutChapterMode === "fixed-material-count" ? "active" : ""}
+                disabled={disabled}
+                onClick={() => onMixedCutModeChange("fixed-material-count")}
+              >
+                固定素材
+              </button>
+              <button
+                type="button"
+                className={task.mixedCutChapterMode === "fill-with-bgm" ? "active" : ""}
+                disabled={disabled}
+                onClick={() => onMixedCutModeChange("fill-with-bgm")}
+              >
+                音频模式
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="generation-setting-item">
+          <span className="setting-kicker">音频来源</span>
+          <strong>{audioSummary.title}</strong>
+          <small>{audioSummary.detail}</small>
+          {isMixedCut ? (
+            <div className="setting-actions">
+              <button type="button" disabled={disabled} onClick={onUploadMixedCutAudio}>
+                <Upload size={14} />
+                上传音频
+              </button>
+              <button type="button" disabled={disabled} onClick={onGenerateVoiceover}>
+                <Volume2 size={14} />
+                AI生成音频
+              </button>
+            </div>
+          ) : modeNeedsEditableScript(task.generationMode) ? (
+            <div className="setting-actions">
+              <button type="button" disabled={disabled} onClick={onGenerateVoiceover}>
+                <Volume2 size={14} />
+                AI生成音频
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        <label className={`generation-setting-item setting-toggle ${subtitleEnabled ? "on" : ""}`}>
+          <input
+            type="checkbox"
+            checked={subtitleEnabled}
+            disabled={disabled}
+            onChange={(event) => onSubtitleToggle(event.target.checked)}
+          />
+          <span className="setting-kicker">字幕</span>
+          <strong>{subtitleEnabled ? "生成字幕" : "不生成字幕"}</strong>
+          <small>
+            {subtitleEnabled
+              ? "会输出字幕文件，并在成片阶段按预览样式合成。"
+              : "跳过字幕文件和字幕合成，只输出视频、封面和发布资料。"}
+          </small>
+        </label>
+
+        <div className="generation-setting-item">
+          <span className="setting-kicker">输出内容</span>
+          <strong>{outputSummary.title}</strong>
+          <small>{outputSummary.detail}</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function OriginalityReportCard({ report }: { report: OriginalityScoreReport | null }) {
   return (
     <div className="originality-report-card">
@@ -6545,6 +6685,14 @@ function SubtitleControls({
     <section className="style-control-panel">
       <h3>字幕</h3>
       <div className="preview-control-grid">
+        <label className="wide-control checkbox-row inline-toggle">
+          <input
+            type="checkbox"
+            checked={style.enabled}
+            onChange={(event) => onChange({ enabled: event.target.checked })}
+          />
+          生成并显示字幕
+        </label>
         <label className="range-control">
           位置 {style.verticalPercent}%
           <span className="range-row">
@@ -6873,6 +7021,117 @@ function createCoverTitle(task: VideoTask): string {
 
 function presetLabel(presetId: OutputPresetId): string {
   return OUTPUT_PRESETS.find((preset) => preset.id === presetId)?.label ?? presetId;
+}
+
+function generationDurationSummary(
+  task: VideoTask,
+  counts: {
+    mixedCutAudioCount: number;
+    mixedCutTargetCount: number;
+    mixedCutVisualMaterialCount: number;
+  }
+): { title: string; detail: string } {
+  if (task.generationMode === "mixed-cut") {
+    if (task.mixedCutChapterMode === "fill-with-bgm") {
+      return {
+        title: counts.mixedCutAudioCount > 0 ? "按音频长度补画面" : "等待音频",
+        detail:
+          counts.mixedCutAudioCount > 0
+            ? `已检测 ${counts.mixedCutAudioCount} 条音频，画面只从 ${counts.mixedCutVisualMaterialCount} 个视觉素材中抽取。`
+            : "音频模式需要先上传音频，或把文案一键生成音频。"
+      };
+    }
+
+    return {
+      title: "按素材章节组合",
+      detail:
+        counts.mixedCutTargetCount > 0
+          ? `按数字文件夹顺序抽取镜头，预计可生成 ${counts.mixedCutTargetCount} 条唯一组合。`
+          : "选择包含 1、2、3... 文件夹的素材目录后自动估算数量。"
+    };
+  }
+
+  if (task.generationMode === "video-dedup") {
+    return {
+      title: "按导入视频长度",
+      detail: "去重处理不改核心内容时长，输出处理后视频和评分报告。"
+    };
+  }
+
+  if (task.generationMode === "viral-remix") {
+    return {
+      title: "按文案和故事板",
+      detail: "先生成/修改最终文案，再用故事板和动作提示词控制画面节奏。"
+    };
+  }
+
+  return {
+    title: "按最终文案生成",
+    detail: "视频口播内容以“本次生成文案”为准；没有文案时会先调用 AI 生成。"
+  };
+}
+
+function generationAudioSummary(
+  task: VideoTask,
+  counts: {
+    mixedCutAudioCount: number;
+    taskAudioCount: number;
+  }
+): { title: string; detail: string } {
+  if (task.generationMode === "mixed-cut") {
+    return {
+      title:
+        counts.mixedCutAudioCount > 0
+          ? `混剪音频队列 ${counts.mixedCutAudioCount} 条`
+          : "未导入混剪音频",
+      detail:
+        task.mixedCutChapterMode === "fill-with-bgm"
+          ? "音频会决定画面总时长，多条音频会按批次循环使用。"
+          : "固定素材模式下音频只作为最终音轨，不决定画面长度。"
+    };
+  }
+
+  if (task.generationMode === "video-dedup") {
+    return {
+      title: "使用原视频音轨",
+      detail: "去重处理会按策略调整音频变化，不需要单独生成配音。"
+    };
+  }
+
+  return {
+    title:
+      counts.taskAudioCount > 0 ? `任务音频队列 ${counts.taskAudioCount} 条` : "默认使用服务语音",
+    detail:
+      counts.taskAudioCount > 0
+        ? "生成的音频已保存在本任务，后续可作为外部音频入口或口播检查。"
+        : "HeyGen/数字人生成默认走平台内置语音；需要配音文件时可先一键生成音频。"
+  };
+}
+
+function generationOutputSummary(task: VideoTask): { title: string; detail: string } {
+  const presets = task.selectedOutputPresets.map(presetLabel).join(" / ") || "未选择比例";
+  if (task.generationMode === "video-dedup") {
+    return {
+      title: "处理视频 + 评分报告",
+      detail: `${presets}；导出处理后 MP4、封面、原创度评分和发布资料。`
+    };
+  }
+
+  if (task.generationMode === "mixed-cut") {
+    return {
+      title: "批量 MP4 + 剪辑记录",
+      detail: `${presets}；每条视频会保存剪辑记录、封面和发布资料${
+        task.subtitleStyle.enabled ? "，并生成字幕" : ""
+      }。`
+    };
+  }
+
+  return {
+    title: task.subtitleStyle.enabled ? "视频 + 封面 + 字幕" : "视频 + 封面",
+    detail: `${presets}；导出成片 MP4、封面和发布资料包${
+      task.subtitleStyle.enabled ? "，同时生成字幕文件" : ""
+    }。`
+  };
 }
 
 function generationModeLabel(mode: VideoGenerationMode): string {
