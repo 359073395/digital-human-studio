@@ -21,6 +21,7 @@ import type {
   GenerateVisualStoryboardInput,
   HeyGenAvatarLook,
   ResolveTaskAssetUrlInput,
+  RemoveTaskMediaAssetInput,
   RetryWorkflowStepInput,
   SelectGeneratedPresenterImageInput,
   SetMixedCutTargetCountInput,
@@ -50,6 +51,8 @@ const IPC_CHANNELS = {
   uploadMixedCutMaterial: "source:upload-mixed-cut-material",
   chooseMixedCutMaterialDirectory: "source:choose-mixed-cut-material-directory",
   uploadMixedCutAudio: "source:upload-mixed-cut-audio",
+  generateScriptVoiceover: "source:generate-script-voiceover",
+  removeTaskMediaAsset: "source:remove-media-asset",
   setMixedCutTargetCount: "mixed-cut:set-target-count",
   renderMixedCutBatch: "mixed-cut:render-batch",
   importDedupSourceVideo: "dedup:import-source-video",
@@ -123,6 +126,10 @@ const api: DigitalHumanStudioAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.chooseMixedCutMaterialDirectory, taskId) as Promise<VideoTask>,
   uploadMixedCutAudio: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.uploadMixedCutAudio, taskId) as Promise<VideoTask>,
+  generateScriptVoiceover: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.generateScriptVoiceover, taskId) as Promise<VideoTask>,
+  removeTaskMediaAsset: (input: RemoveTaskMediaAssetInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.removeTaskMediaAsset, input) as Promise<VideoTask>,
   setMixedCutTargetCount: (input: SetMixedCutTargetCountInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.setMixedCutTargetCount, input) as Promise<VideoTask>,
   renderMixedCutBatch: (taskId: string) =>

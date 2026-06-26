@@ -20,7 +20,7 @@ describe("calculateMixedCutBatchPlan", () => {
 
     expect(conservativePlan.targetCount).toBeGreaterThan(1);
     expect(aggressivePlan.targetCount).toBeGreaterThan(conservativePlan.targetCount);
-    expect(aggressivePlan.targetCount).toBeLessThanOrEqual(30);
+    expect(aggressivePlan.targetCount).toBeLessThanOrEqual(100);
   });
 });
 

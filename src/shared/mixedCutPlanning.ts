@@ -1,4 +1,4 @@
-export const MIXED_CUT_MAX_BATCH_COUNT = 30;
+export const MIXED_CUT_MAX_BATCH_COUNT = 100;
 
 export interface MixedCutBatchPlan {
   targetCount: number;
@@ -81,7 +81,8 @@ export function calculateGroupedMixedCutBatchPlan(input: {
 }): GroupedMixedCutBatchPlan {
   const maxTargetCount = Math.max(1, Math.floor(input.maxTargetCount ?? MIXED_CUT_MAX_BATCH_COUNT));
   const groups = normalizeGroupInputs(input.groups).map((group) => {
-    const maxUsesPerShot = Math.max(1, Math.floor((maxTargetCount * group.reuseRate) / 100));
+    const maxUsesPerShot =
+      group.reuseRate <= 0 ? 1 : Math.max(2, Math.ceil((maxTargetCount * group.reuseRate) / 100));
     return {
       ...group,
       maxUsesPerShot,

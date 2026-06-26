@@ -41,6 +41,7 @@ export interface MixedCutGroupSetting {
 export type MediaAssetKind =
   | "source-audio"
   | "source-video"
+  | "generated-voiceover-audio"
   | "source-transcript"
   | "source-visual-analysis"
   | "knowledge-document"

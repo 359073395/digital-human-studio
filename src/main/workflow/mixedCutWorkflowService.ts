@@ -29,7 +29,8 @@ const MIN_TARGET_DURATION_SECONDS = 12;
 const MAX_TARGET_DURATION_SECONDS = 180;
 const MAX_AUDIO_TARGET_DURATION_SECONDS = 600;
 const SEGMENT_DURATION_SECONDS = 2.4;
-const MIN_VIDEO_SEGMENT_SECONDS = 0.2;
+const AUDIO_MODE_SEGMENT_DURATION_SECONDS = 4.2;
+const MIN_VIDEO_SEGMENT_SECONDS = 0.6;
 const SAFE_VIDEO_HEAD_OFFSET_SECONDS = 0.12;
 
 interface PathSettingsReader {
@@ -105,6 +106,12 @@ interface MixedCutTimelineSegment {
   durationSeconds: number;
 }
 
+interface MixedCutAudioAsset {
+  asset: MediaAsset;
+  relativePath: string;
+  absolutePath: string;
+}
+
 export class MixedCutWorkflowService {
   constructor(
     private readonly taskRepository: TaskRepository,
@@ -125,8 +132,8 @@ export class MixedCutWorkflowService {
       }
 
       const taskDirectory = getTaskDirectory(this.paths, taskId);
-      const mixedCutAudio = resolveMixedCutAudio(task, taskDirectory);
-      if (task.mixedCutChapterMode === "fill-with-bgm" && !mixedCutAudio) {
+      const mixedCutAudioAssets = resolveMixedCutAudioAssets(task, taskDirectory);
+      if (task.mixedCutChapterMode === "fill-with-bgm" && mixedCutAudioAssets.length === 0) {
         throw new Error(
           "音频模式需要先导入一条混剪配音/音乐，音频只会作为时长和音轨使用，不会作为画面素材。"
         );
@@ -161,10 +168,12 @@ export class MixedCutWorkflowService {
         for (const presetId of task.selectedOutputPresets) {
           const preset = requireOutputPreset(presetId);
           const record = this.renderMixedCutVariant({
+            audioAssets: mixedCutAudioAssets,
             batchIndex,
             combination,
             groupedPlan,
             performanceProfile,
+            shotGroups,
             task,
             taskDirectory,
             preset,
@@ -209,15 +218,17 @@ export class MixedCutWorkflowService {
 
   private renderMixedCutVariant(input: {
     task: VideoTask;
+    audioAssets: MixedCutAudioAsset[];
     combination: MixedCutCombination;
     groupedPlan: GroupedMixedCutBatchPlan;
     performanceProfile: RuntimePerformanceProfile;
+    shotGroups: MixedCutShotGroup[];
     taskDirectory: string;
     preset: OutputPreset;
     batchIndex: number;
     targetCount: number;
   }): MixedCutEditDecisionRecord {
-    const mixedCutAudio = resolveMixedCutAudio(input.task, input.taskDirectory);
+    const mixedCutAudio = selectMixedCutAudioForBatch(input.audioAssets, input.batchIndex);
     const subtitleScript =
       input.task.finalScript.trim() || input.task.sourceScript.trim() || input.task.title;
     const selectedShots = input.combination.shots;
@@ -229,6 +240,7 @@ export class MixedCutWorkflowService {
     const targetDurationSeconds = targetTiming.seconds;
     const timelineSegments = buildMixedCutTimelineSegments({
       batchIndex: input.batchIndex,
+      shotGroups: input.shotGroups,
       shots: selectedShots,
       task: input.task,
       targetDurationSeconds
@@ -555,31 +567,35 @@ function isAudioMixedCutAsset(relativePath: string): boolean {
   return AUDIO_EXTENSIONS.has(path.extname(relativePath).toLowerCase());
 }
 
-function resolveMixedCutAudio(
-  task: VideoTask,
-  taskDirectory: string
-): { asset: MediaAsset; relativePath: string; absolutePath: string } | null {
-  const asset = [...task.mediaAssets]
+function resolveMixedCutAudioAssets(task: VideoTask, taskDirectory: string): MixedCutAudioAsset[] {
+  return [...task.mediaAssets]
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
-    .find(
+    .filter(
       (candidate) =>
         candidate.kind === "mixed-cut-audio" && isAudioMixedCutAsset(candidate.relativePath)
-    );
-  if (!asset) {
+    )
+    .map((asset) => ({
+      asset,
+      relativePath: asset.relativePath,
+      absolutePath: absoluteTaskPathFromDirectory(taskDirectory, asset.relativePath)
+    }));
+}
+
+function selectMixedCutAudioForBatch(
+  audioAssets: MixedCutAudioAsset[],
+  batchIndex: number
+): MixedCutAudioAsset | null {
+  if (audioAssets.length === 0) {
     return null;
   }
 
-  return {
-    asset,
-    relativePath: asset.relativePath,
-    absolutePath: absoluteTaskPathFromDirectory(taskDirectory, asset.relativePath)
-  };
+  return audioAssets[(Math.max(1, batchIndex) - 1) % audioAssets.length] ?? audioAssets[0] ?? null;
 }
 
 function resolveMixedCutTargetTiming(input: {
   task: VideoTask;
   selectedShotCount: number;
-  audio: { absolutePath: string } | null;
+  audio: MixedCutAudioAsset | null;
 }): { seconds: number; source: MixedCutEditDecisionRecord["targetDurationSource"] } {
   if (input.task.mixedCutChapterMode === "fill-with-bgm") {
     if (!input.audio) {
@@ -614,6 +630,7 @@ function resolveMixedCutTargetTiming(input: {
 function buildMixedCutTimelineSegments(input: {
   task: VideoTask;
   shots: MixedCutShot[];
+  shotGroups: MixedCutShotGroup[];
   targetDurationSeconds: number;
   batchIndex: number;
 }): MixedCutTimelineSegment[] {
@@ -632,7 +649,12 @@ function buildMixedCutTimelineSegments(input: {
   );
 
   while (accumulatedSeconds < input.targetDurationSeconds - 0.05 && segments.length < maxSegments) {
-    const orderedShots = rotateShots(input.shots, input.batchIndex + round);
+    const orderedShots = createTimelineRoundShots({
+      baseShots: input.shots,
+      batchIndex: input.batchIndex,
+      round,
+      shotGroups: input.shotGroups
+    });
     for (const shot of orderedShots) {
       if (accumulatedSeconds >= input.targetDurationSeconds - 0.05) {
         break;
@@ -649,7 +671,8 @@ function buildMixedCutTimelineSegments(input: {
         shot,
         startSeconds,
         remainingSeconds,
-        mediaDurationCache
+        mediaDurationCache,
+        input.task
       );
       segments.push({
         shot,
@@ -668,14 +691,59 @@ function buildMixedCutTimelineSegments(input: {
   return segments;
 }
 
+function createTimelineRoundShots(input: {
+  baseShots: MixedCutShot[];
+  shotGroups: MixedCutShotGroup[];
+  batchIndex: number;
+  round: number;
+}): MixedCutShot[] {
+  if (input.shotGroups.length === 0) {
+    return input.baseShots;
+  }
+
+  const baseByGroup = new Map(input.baseShots.map((shot) => [shot.groupId, shot]));
+  return [...input.shotGroups]
+    .sort((left, right) => Number(left.groupId) - Number(right.groupId))
+    .map((group) => selectTimelineShotFromGroup(group, baseByGroup.get(group.groupId), input))
+    .filter((shot): shot is MixedCutShot => Boolean(shot));
+}
+
+function selectTimelineShotFromGroup(
+  group: MixedCutShotGroup,
+  baseShot: MixedCutShot | undefined,
+  input: { batchIndex: number; round: number }
+): MixedCutShot | null {
+  if (group.shots.length === 0) {
+    return null;
+  }
+
+  const fallbackIndex = (input.batchIndex + input.round - 1) % group.shots.length;
+  if (!baseShot) {
+    return group.shots[fallbackIndex] ?? group.shots[0] ?? null;
+  }
+
+  const baseIndex = group.shots.findIndex((shot) => shot.id === baseShot.id);
+  if (baseIndex < 0 || group.shots.length === 1) {
+    return baseShot;
+  }
+
+  return group.shots[(baseIndex + input.round) % group.shots.length] ?? baseShot;
+}
+
 function resolveTimelineSegmentDurationSeconds(
   shot: MixedCutShot,
   startSeconds: number,
   remainingSeconds: number,
-  mediaDurationCache: Map<string, number>
+  mediaDurationCache: Map<string, number>,
+  task: VideoTask
 ): number {
+  const preferredDuration =
+    task.mixedCutChapterMode === "fill-with-bgm"
+      ? AUDIO_MODE_SEGMENT_DURATION_SECONDS
+      : SEGMENT_DURATION_SECONDS;
+
   if (isImageMixedCutAsset(shot.relativePath)) {
-    return Math.min(SEGMENT_DURATION_SECONDS, remainingSeconds);
+    return Math.min(preferredDuration, remainingSeconds);
   }
 
   const mediaDurationSeconds = getCachedMediaDurationSeconds(shot.absolutePath, mediaDurationCache);
@@ -683,9 +751,13 @@ function resolveTimelineSegmentDurationSeconds(
     mediaDurationSeconds > startSeconds + MIN_VIDEO_SEGMENT_SECONDS
       ? mediaDurationSeconds - startSeconds
       : mediaDurationSeconds;
+  if (availableSeconds <= MIN_VIDEO_SEGMENT_SECONDS) {
+    return Math.min(Math.max(availableSeconds, 0.1), remainingSeconds);
+  }
+
   return Math.max(
     Math.min(MIN_VIDEO_SEGMENT_SECONDS, remainingSeconds),
-    Math.min(SEGMENT_DURATION_SECONDS, availableSeconds, remainingSeconds)
+    Math.min(preferredDuration, availableSeconds, remainingSeconds)
   );
 }
 

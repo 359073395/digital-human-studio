@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { AppPathSettings } from "../../shared/appSettings";
@@ -298,16 +299,19 @@ export class SourceAssetService {
     }
 
     if (audioFilePaths.length > 0) {
-      this.replaceMixedCutAudioAssets(taskId, audioFilePaths);
+      this.appendMixedCutAudioAssets(taskId, audioFilePaths);
     }
 
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
   importMixedCutAudio(taskId: string, filePath: string): VideoTask {
+    return this.importMixedCutAudioFiles(taskId, [filePath]);
+  }
+
+  importMixedCutAudioFiles(taskId: string, filePaths: string[]): VideoTask {
     this.requireTask(taskId);
-    validateExtension(filePath, SOURCE_AUDIO_EXTENSIONS);
-    this.replaceMixedCutAudioAssets(taskId, [filePath]);
+    this.appendMixedCutAudioAssets(taskId, filePaths);
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
@@ -430,6 +434,49 @@ export class SourceAssetService {
     }
   }
 
+  generateScriptVoiceover(taskId: string): VideoTask {
+    const task = this.requireTask(taskId);
+    const text = (task.finalScript || task.sourceScript).trim();
+    if (!text) {
+      throw new Error("请先填写原文案或生成 AI 文案，再一键生成音频。");
+    }
+
+    const timestamp = Date.now();
+    const textRelativePath = `source/generated-voiceover-${timestamp}.txt`;
+    const audioRelativePath = `source/generated-voiceover-${timestamp}.wav`;
+    writeTaskFile(this.paths, taskId, textRelativePath, text);
+    const audioPath = taskFilePath(this.paths, taskId, audioRelativePath);
+    synthesizeSpeechWithWindows(text, audioPath, task.contentLanguage);
+
+    this.taskRepository.addMediaAsset(taskId, "generated-voiceover-audio", audioRelativePath);
+    this.taskRepository.addMediaAsset(taskId, "source-audio", audioRelativePath);
+    if (task.generationMode === "mixed-cut") {
+      this.taskRepository.addMediaAsset(taskId, "mixed-cut-audio", audioRelativePath);
+    }
+
+    return this.taskRepository.updateStepStatus(taskId, "source", "complete");
+  }
+
+  removeTaskMediaAsset(taskId: string, assetId: string): VideoTask {
+    const task = this.requireTask(taskId);
+    const asset = task.mediaAssets.find((candidate) => candidate.id === assetId);
+    if (!asset) {
+      return task;
+    }
+
+    const absolutePath = path.resolve(taskFilePath(this.paths, taskId, asset.relativePath));
+    const taskDirectory = path.resolve(getTaskDirectory(this.paths, taskId));
+    const isInsideTaskDirectory =
+      absolutePath === taskDirectory || absolutePath.startsWith(`${taskDirectory}${path.sep}`);
+
+    const updated = this.taskRepository.removeMediaAsset(taskId, assetId);
+    if (isInsideTaskDirectory) {
+      removeFileIfUnused(absolutePath, updated, asset.relativePath);
+    }
+
+    return updated;
+  }
+
   private requireTask(taskId: string): VideoTask {
     const task = this.taskRepository.getTask(taskId);
     if (!task) {
@@ -472,8 +519,7 @@ export class SourceAssetService {
     return this.taskRepository.updateStepStatus(taskId, "source", "complete");
   }
 
-  private replaceMixedCutAudioAssets(taskId: string, filePaths: string[]): void {
-    this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-audio");
+  private appendMixedCutAudioAssets(taskId: string, filePaths: string[]): void {
     for (const [index, filePath] of [...filePaths]
       .sort((left, right) => left.localeCompare(right))
       .entries()) {
@@ -484,6 +530,11 @@ export class SourceAssetService {
       copyTaskFile(this.paths, taskId, filePath, relativePath);
       this.taskRepository.addMediaAsset(taskId, "mixed-cut-audio", relativePath);
     }
+  }
+
+  private replaceMixedCutAudioAssets(taskId: string, filePaths: string[]): void {
+    this.taskRepository.removeMediaAssetsByKind(taskId, "mixed-cut-audio");
+    this.appendMixedCutAudioAssets(taskId, filePaths);
   }
 }
 
@@ -736,4 +787,72 @@ function sanitizeBaseName(value: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "asset"
   );
+}
+
+function synthesizeSpeechWithWindows(
+  text: string,
+  outputPath: string,
+  contentLanguage: VideoTask["contentLanguage"]
+): void {
+  if (process.platform !== "win32") {
+    throw new Error("一键生成音频当前只支持 Windows 桌面版。");
+  }
+
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const inputTextPath = `${outputPath}.input.txt`;
+  fs.writeFileSync(inputTextPath, text, "utf8");
+  const culture = contentLanguage;
+  const script = [
+    "Add-Type -AssemblyName System.Speech",
+    "$speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer",
+    "$speaker.Rate = 0",
+    "$speaker.Volume = 100",
+    `$culture = '${culture.replace(/'/g, "''")}'`,
+    "$voice = $speaker.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -eq $culture } | Select-Object -First 1",
+    "if ($voice) { $speaker.SelectVoice($voice.VoiceInfo.Name) }",
+    `$text = Get-Content -LiteralPath '${inputTextPath.replace(/'/g, "''")}' -Raw -Encoding UTF8`,
+    `$speaker.SetOutputToWaveFile('${outputPath.replace(/'/g, "''")}')`,
+    "$speaker.Speak($text)",
+    "$speaker.Dispose()"
+  ].join("; ");
+
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
+    encoding: "utf8",
+    maxBuffer: 2 * 1024 * 1024,
+    timeout: 2 * 60 * 1000,
+    windowsHide: true
+  });
+
+  try {
+    fs.rmSync(inputTextPath, { force: true });
+  } catch {
+    // Temporary input text cleanup is best-effort.
+  }
+
+  if (result.error) {
+    throw new Error(`一键生成音频失败：${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`一键生成音频失败：${(result.stderr || result.stdout || "").slice(-800)}`);
+  }
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+    throw new Error("一键生成音频完成但输出 WAV 文件为空。");
+  }
+}
+
+function removeFileIfUnused(
+  absolutePath: string,
+  task: VideoTask,
+  removedRelativePath: string
+): void {
+  const stillUsed = task.mediaAssets.some((asset) => asset.relativePath === removedRelativePath);
+  if (stillUsed || !fs.existsSync(absolutePath)) {
+    return;
+  }
+
+  try {
+    fs.rmSync(absolutePath, { force: true });
+  } catch {
+    // Asset metadata removal should not fail just because a file is locked by a preview.
+  }
 }

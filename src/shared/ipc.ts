@@ -59,6 +59,8 @@ export interface DigitalHumanStudioAPI {
   uploadMixedCutMaterial: (taskId: string) => Promise<VideoTask>;
   chooseMixedCutMaterialDirectory: (taskId: string) => Promise<VideoTask>;
   uploadMixedCutAudio: (taskId: string) => Promise<VideoTask>;
+  generateScriptVoiceover: (taskId: string) => Promise<VideoTask>;
+  removeTaskMediaAsset: (input: RemoveTaskMediaAssetInput) => Promise<VideoTask>;
   setMixedCutTargetCount: (input: SetMixedCutTargetCountInput) => Promise<VideoTask>;
   renderMixedCutBatch: (taskId: string) => Promise<VideoTask>;
   importDedupSourceVideo: (taskId: string) => Promise<VideoTask>;
@@ -118,6 +120,8 @@ export const IPC_CHANNELS = {
   uploadMixedCutMaterial: "source:upload-mixed-cut-material",
   chooseMixedCutMaterialDirectory: "source:choose-mixed-cut-material-directory",
   uploadMixedCutAudio: "source:upload-mixed-cut-audio",
+  generateScriptVoiceover: "source:generate-script-voiceover",
+  removeTaskMediaAsset: "source:remove-media-asset",
   setMixedCutTargetCount: "mixed-cut:set-target-count",
   renderMixedCutBatch: "mixed-cut:render-batch",
   importDedupSourceVideo: "dedup:import-source-video",
@@ -225,6 +229,11 @@ export interface SelectGeneratedPresenterImageInput {
 export interface SetMixedCutTargetCountInput {
   taskId: string;
   count: number;
+}
+
+export interface RemoveTaskMediaAssetInput {
+  taskId: string;
+  assetId: MediaAsset["id"];
 }
 
 export interface StartHeyGenOAuthInput {

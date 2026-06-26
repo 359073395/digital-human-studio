@@ -857,12 +857,29 @@ button:disabled {
 }
 
 .asset-list li strong {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: #314258;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.asset-list-remove {
+  flex: 0 0 auto;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-color: #e1d5d0;
+  background: #fbf6f2;
+  color: #9a5146;
+}
+
+.asset-list-remove:hover:not(:disabled) {
+  border-color: #d49b8d;
+  background: #f8e9e3;
+  color: #7e372f;
 }
 
 .asset-list li em {
@@ -4064,6 +4081,59 @@ label,
   display: grid;
   gap: 10px;
   margin-top: 10px;
+}
+
+.preview-progress-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 0.55fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid #cfd8cf;
+  border-radius: 8px;
+  background: #f5f7f2;
+}
+
+.preview-progress-panel div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.preview-progress-panel span {
+  color: #718079;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.preview-progress-panel strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #31413b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-progress-panel b {
+  color: #506b61;
+  font-size: 13px;
+}
+
+.preview-progress-meter {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e0e5df;
+}
+
+.preview-progress-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8ca898, #557568);
+  transition: width 220ms ease;
 }
 
 .result-preview-stats {

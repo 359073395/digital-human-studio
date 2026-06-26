@@ -355,7 +355,7 @@ describe("SourceAssetService", () => {
     }
   });
 
-  it("imports mixed-cut audio as a separate current task asset", () => {
+  it("imports mixed-cut audio as a queue of reusable task assets", () => {
     const service = new SourceAssetService(repository, appPaths);
     const task = repository.createTask({ title: "Mixed audio" });
     const firstAudioPath = path.join(tempDir, "voice-1.mp3");
@@ -368,17 +368,40 @@ describe("SourceAssetService", () => {
     const assets = updated.mediaAssets.filter((asset) => asset.kind === "mixed-cut-audio");
 
     expect(updated.steps.find((step) => step.id === "source")?.status).toBe("complete");
-    expect(assets).toHaveLength(1);
+    expect(assets).toHaveLength(2);
     expect(assets[0]?.relativePath).toContain("source/mixed-audio/audio-1-");
-    expect(assets[0]?.relativePath).toContain("voice-2.wav");
+    expect(assets[0]?.relativePath).toContain("voice-1.mp3");
+    expect(assets[1]?.relativePath).toContain("voice-2.wav");
     expect(
       fs.existsSync(
         path.join(
           getTaskDirectory(appPaths, task.id),
-          ...(assets[0]?.relativePath ?? "").split("/")
+          ...(assets[1]?.relativePath ?? "").split("/")
         )
       )
     ).toBe(true);
+  });
+
+  it("removes a mixed-cut media asset without deleting files still referenced by another asset", () => {
+    const service = new SourceAssetService(repository, appPaths);
+    const task = repository.createTask({ title: "Remove asset" });
+    const audioPath = path.join(tempDir, "shared-voice.wav");
+    fs.writeFileSync(audioPath, Buffer.from("audio"));
+
+    const withAudio = service.importMixedCutAudio(task.id, audioPath);
+    const audioAsset = withAudio.mediaAssets.find((asset) => asset.kind === "mixed-cut-audio");
+    expect(audioAsset).toBeDefined();
+
+    repository.addMediaAsset(task.id, "source-audio", audioAsset!.relativePath);
+    const updated = service.removeTaskMediaAsset(task.id, audioAsset!.id);
+    const absolutePath = path.join(
+      getTaskDirectory(appPaths, task.id),
+      ...audioAsset!.relativePath.split("/")
+    );
+
+    expect(updated.mediaAssets.some((asset) => asset.id === audioAsset!.id)).toBe(false);
+    expect(updated.mediaAssets.some((asset) => asset.kind === "source-audio")).toBe(true);
+    expect(fs.existsSync(absolutePath)).toBe(true);
   });
 
   it("syncs mixed-cut materials from a folder and replaces previous folder assets", () => {

@@ -788,6 +788,22 @@ export class TaskRepository {
     return task;
   }
 
+  removeMediaAsset(taskId: string, assetId: string): VideoTask {
+    const now = new Date().toISOString();
+    runInTransaction(this.database, () => {
+      this.database
+        .prepare("DELETE FROM media_assets WHERE task_id = ? AND id = ?")
+        .run(taskId, assetId);
+      this.database.prepare("UPDATE video_tasks SET updated_at = ? WHERE id = ?").run(now, taskId);
+    });
+
+    const task = this.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} was not found after media asset removal.`);
+    }
+    return task;
+  }
+
   updateStepStatus(
     taskId: string,
     stepId: GenerationStepId,

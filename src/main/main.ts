@@ -524,7 +524,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
   protectedHandle(IPC_CHANNELS.uploadMixedCutAudio, async (_event, taskId: string) => {
     const audioDialogOptions: OpenDialogOptions = {
       title: "选择混剪配音或音乐",
-      properties: ["openFile"],
+      properties: ["openFile", "multiSelections"],
       filters: [
         {
           name: "音频",
@@ -536,7 +536,7 @@ function registerIpcHandlers(repositories: MainRepositories): void {
       ? await dialog.showOpenDialog(mainWindow, audioDialogOptions)
       : await dialog.showOpenDialog(audioDialogOptions);
 
-    if (result.canceled || !result.filePaths[0]) {
+    if (result.canceled || result.filePaths.length === 0) {
       const task = taskRepository.getTask(taskId);
       if (!task) {
         throw new Error(`Task ${taskId} was not found.`);
@@ -544,8 +544,16 @@ function registerIpcHandlers(repositories: MainRepositories): void {
       return task;
     }
 
-    return sourceAssetService.importMixedCutAudio(taskId, result.filePaths[0]);
+    return sourceAssetService.importMixedCutAudioFiles(taskId, result.filePaths);
   });
+
+  protectedHandle(IPC_CHANNELS.generateScriptVoiceover, (_event, taskId: string) =>
+    sourceAssetService.generateScriptVoiceover(taskId)
+  );
+
+  protectedHandle(IPC_CHANNELS.removeTaskMediaAsset, (_event, input) =>
+    sourceAssetService.removeTaskMediaAsset(input.taskId, input.assetId)
+  );
 
   protectedHandle(IPC_CHANNELS.setMixedCutTargetCount, (_event, input) =>
     taskRepository.updateTask({

@@ -15,6 +15,7 @@ import {
   Trash2,
   Upload,
   UserRound,
+  Volume2,
   WandSparkles
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
@@ -86,6 +87,11 @@ type OperationNotice = {
   tone: "running" | "success" | "error";
   title: string;
   detail?: string;
+};
+type MixedCutReuseDraftState = {
+  taskId: string;
+  reuseRate: number;
+  groupReuseRates: Record<string, number>;
 };
 type TaskNameDialog =
   | {
@@ -323,6 +329,8 @@ export function App() {
   const [avatarLookMessage, setAvatarLookMessage] = useState("");
   const [isAvatarLookLoading, setIsAvatarLookLoading] = useState(false);
   const [activePreviewMode, setActivePreviewMode] = useState<PreviewMode>("finished");
+  const [mixedCutReuseDraftState, setMixedCutReuseDraftState] =
+    useState<MixedCutReuseDraftState | null>(null);
   const [storyboardPanelCount, setStoryboardPanelCount] =
     useState<VisualStoryboardPanelCount>("auto");
   const [storyScriptPackage, setStoryScriptPackage] = useState<StoryScriptPackage | null>(null);
@@ -383,9 +391,13 @@ export function App() {
       (asset) => asset.id === selectedTask.generatedPresenterImageAssetId
     );
   const sourceMaterialAssets = currentTaskMediaAssets.filter((asset) =>
-    ["source-video", "source-audio", "source-transcript", "source-visual-analysis"].includes(
-      asset.kind
-    )
+    [
+      "source-video",
+      "source-audio",
+      "source-transcript",
+      "source-visual-analysis",
+      "generated-voiceover-audio"
+    ].includes(asset.kind)
   );
   const mixedCutMaterialAssets = currentTaskMediaAssets.filter(
     (asset) => asset.kind === "mixed-cut-material"
@@ -396,14 +408,37 @@ export function App() {
   const currentMixedCutAudioAsset = [...mixedCutAudioAssets].sort((left, right) =>
     left.relativePath.localeCompare(right.relativePath)
   )[0];
+  const selectedTaskGroupReuseRates = useMemo(
+    () =>
+      Object.fromEntries(
+        (selectedTask.mixedCutGroupSettings ?? []).map((setting) => [
+          setting.groupId,
+          setting.reuseRate
+        ])
+      ),
+    [selectedTask.mixedCutGroupSettings]
+  );
+  const mixedCutDraftForTask =
+    mixedCutReuseDraftState?.taskId === selectedTask.id ? mixedCutReuseDraftState : null;
+  const mixedCutReuseDraft = mixedCutDraftForTask?.reuseRate ?? selectedTask.mixedCutReuseRate;
+  const mixedCutGroupReuseDrafts =
+    mixedCutDraftForTask?.groupReuseRates ?? selectedTaskGroupReuseRates;
   const mixedCutGroupRows = useMemo(
     () =>
       buildMixedCutGroupRows(
         mixedCutMaterialAssets,
         selectedTask.mixedCutGroupSettings,
-        selectedTask.mixedCutReuseRate
-      ),
-    [mixedCutMaterialAssets, selectedTask.mixedCutGroupSettings, selectedTask.mixedCutReuseRate]
+        mixedCutReuseDraft
+      ).map((group) => ({
+        ...group,
+        reuseRate: mixedCutGroupReuseDrafts[group.groupId] ?? group.reuseRate
+      })),
+    [
+      mixedCutGroupReuseDrafts,
+      mixedCutMaterialAssets,
+      mixedCutReuseDraft,
+      selectedTask.mixedCutGroupSettings
+    ]
   );
   const mixedCutVisualMaterialCount = mixedCutGroupRows.reduce(
     (count, group) => count + group.shotCount,
@@ -934,6 +969,25 @@ export function App() {
     await refreshTaskState(task.id, task);
   }
 
+  async function commitMixedCutReuseRate() {
+    const nextReuseRate = Math.min(100, Math.max(0, Math.round(mixedCutReuseDraft)));
+    await updateCurrentTask({
+      mixedCutReuseRate: nextReuseRate,
+      mixedCutGroupSettings: mixedCutGroupRows.map((group) => ({
+        groupId: group.groupId,
+        reuseRate: group.reuseRate
+      }))
+    });
+  }
+
+  async function commitMixedCutGroupReuseRates() {
+    const nextSettings = mixedCutGroupRows.map((group) => ({
+      groupId: group.groupId,
+      reuseRate: group.reuseRate
+    }));
+    await updateCurrentTask({ mixedCutGroupSettings: nextSettings });
+  }
+
   function openCreateTaskDialog() {
     const api = requireDesktopRuntime("新建任务");
     if (!api) {
@@ -1114,13 +1168,25 @@ export function App() {
         avatarDescriptionPrompt: taskForRun.avatarDescriptionPrompt,
         motionPrompt: taskForRun.motionPrompt,
         generatedPresenterImageSelections: taskForRun.generatedPresenterImageSelections,
-        mixedCutTargetCount: getMixedCutBatchPlanForTask(taskForRun).targetCount || 1,
+        mixedCutTargetCount:
+          taskForRun.generationMode === "mixed-cut"
+            ? mixedCutBatchPlan.targetCount || 1
+            : getMixedCutBatchPlanForTask(taskForRun).targetCount || 1,
         mixedCutMaterialDirectory: taskForRun.mixedCutMaterialDirectory,
         mixedCutBackgroundMusicDirectory: taskForRun.mixedCutBackgroundMusicDirectory,
         mixedCutDubbingDirectory: taskForRun.mixedCutDubbingDirectory,
         mixedCutChapterMode: taskForRun.mixedCutChapterMode,
-        mixedCutReuseRate: taskForRun.mixedCutReuseRate,
-        mixedCutGroupSettings: taskForRun.mixedCutGroupSettings,
+        mixedCutReuseRate:
+          taskForRun.generationMode === "mixed-cut"
+            ? mixedCutReuseDraft
+            : taskForRun.mixedCutReuseRate,
+        mixedCutGroupSettings:
+          taskForRun.generationMode === "mixed-cut"
+            ? mixedCutGroupRows.map((group) => ({
+                groupId: group.groupId,
+                reuseRate: group.reuseRate
+              }))
+            : taskForRun.mixedCutGroupSettings,
         mixedCutRemoveOriginalAudio: taskForRun.mixedCutRemoveOriginalAudio,
         mixedCutEnableTransitions: taskForRun.mixedCutEnableTransitions,
         mixedCutBgmVolume: taskForRun.mixedCutBgmVolume,
@@ -1391,6 +1457,57 @@ export function App() {
       setActionMessage(error instanceof Error ? error.message : "混剪音频导入失败");
     } finally {
       setIsWorkflowRunning(false);
+    }
+  }
+
+  async function generateScriptVoiceover() {
+    const api = requireDesktopRuntime("一键生成音频文件");
+    if (!api) {
+      return;
+    }
+
+    setIsWorkflowRunning(true);
+    setWorkflowProgressLabel("正在把文案生成音频");
+    setWorkflowProgressPercent(12);
+    setActionMessage("正在根据 AI 文案/原文案生成音频文件...");
+
+    try {
+      const task = await api.generateScriptVoiceover(selectedTask.id);
+      const audioCount = task.mediaAssets.filter((asset) =>
+        ["generated-voiceover-audio", "mixed-cut-audio"].includes(asset.kind)
+      ).length;
+      setWorkflowProgressPercent(100);
+      setActionMessage(
+        task.generationMode === "mixed-cut"
+          ? `音频已生成并加入混剪音频队列，当前可用音频 ${audioCount} 条`
+          : "音频已生成，已保存到本任务素材中"
+      );
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "音频生成失败");
+    } finally {
+      setIsWorkflowRunning(false);
+      setWorkflowProgressLabel("");
+      setWorkflowProgressPercent(0);
+    }
+  }
+
+  async function removeTaskMediaAsset(asset: MediaAsset) {
+    const api = requireDesktopRuntime("删除素材");
+    if (!api) {
+      return;
+    }
+
+    setActionMessage(`正在移除素材：${assetFileName(asset.relativePath)}`);
+    try {
+      const task = await api.removeTaskMediaAsset({
+        taskId: selectedTask.id,
+        assetId: asset.id
+      });
+      setActionMessage(`已移除素材：${assetFileName(asset.relativePath)}`);
+      await refreshTaskState(task.id, task);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "素材删除失败");
     }
   }
 
@@ -2776,6 +2893,15 @@ export function App() {
                         <WandSparkles size={15} />
                         一键AI生成文案
                       </button>
+                      <button
+                        type="button"
+                        className="small-action-button"
+                        disabled={isWorkflowRunning}
+                        onClick={() => void generateScriptVoiceover()}
+                      >
+                        <Volume2 size={15} />
+                        一键生成音频
+                      </button>
                     </div>
                     <p className="field-hint">
                       生成后可直接改价格、禁用词和表达，视频会按这里的最终文案生成。
@@ -2886,6 +3012,15 @@ export function App() {
                           onClick={() => void generateScriptOnly()}
                         >
                           一键AI生成
+                        </button>
+                        <button
+                          type="button"
+                          className="small-action-button"
+                          disabled={isWorkflowRunning}
+                          onClick={() => void generateScriptVoiceover()}
+                        >
+                          <Volume2 size={15} />
+                          一键生成音频
                         </button>
                       </div>
                       <textarea
@@ -3245,6 +3380,14 @@ export function App() {
                             <span>画面素材 {mixedCutVisualMaterialCount}</span>
                             <span>音频素材 {mixedCutAudioMaterialCount}</span>
                           </div>
+                          <AssetList
+                            assets={mixedCutMaterialAssets}
+                            disabled={isWorkflowRunning}
+                            emptyLabel="还没有读取到视频或图片素材"
+                            onRemove={(asset) => void removeTaskMediaAsset(asset)}
+                            removeTitle="从本任务移除该画面素材"
+                            title="已读取画面素材"
+                          />
                         </div>
 
                         <div className="mixed-cut-library-card">
@@ -3272,11 +3415,15 @@ export function App() {
                                 ? "音频模式需要音频：请上传配音/音乐或在素材文件夹中放入音频"
                                 : "未导入音频，固定素材模式会按画面素材生成"}
                           </div>
-                          <p title={currentMixedCutAudioAsset?.relativePath}>
-                            {currentMixedCutAudioAsset?.relativePath
-                              ? currentMixedCutAudioAsset.relativePath.split("/").at(-1)
-                              : "支持 mp3 / wav / m4a / aac / ogg"}
-                          </p>
+                          <AssetList
+                            assets={mixedCutAudioAssets}
+                            disabled={isWorkflowRunning}
+                            emptyLabel="支持 mp3 / wav / m4a / aac / ogg；多条音频会按生成批次循环使用"
+                            itemBadge="循环使用"
+                            onRemove={(asset) => void removeTaskMediaAsset(asset)}
+                            removeTitle="从音频队列移除"
+                            title="音频队列"
+                          />
                           <label className="range-field">
                             BGM 音量
                             <div>
@@ -3342,14 +3489,29 @@ export function App() {
                                 min={0}
                                 max={100}
                                 type="range"
-                                value={selectedTask.mixedCutReuseRate}
-                                onChange={(event) =>
-                                  void updateCurrentTask({
-                                    mixedCutReuseRate: clampUiNumber(event.target.value, 0, 100, 35)
-                                  })
-                                }
+                                value={mixedCutReuseDraft}
+                                onBlur={() => void commitMixedCutReuseRate()}
+                                onChange={(event) => {
+                                  const nextReuseRate = clampUiNumber(
+                                    event.target.value,
+                                    0,
+                                    100,
+                                    35
+                                  );
+                                  setMixedCutReuseDraftState({
+                                    taskId: selectedTask.id,
+                                    reuseRate: nextReuseRate,
+                                    groupReuseRates: Object.fromEntries(
+                                      mixedCutGroupRows.map((group) => [
+                                        group.groupId,
+                                        nextReuseRate
+                                      ])
+                                    )
+                                  });
+                                }}
+                                onPointerUp={() => void commitMixedCutReuseRate()}
                               />
-                              <output>{selectedTask.mixedCutReuseRate}</output>
+                              <output>{mixedCutReuseDraft}</output>
                             </div>
                           </label>
                           <label className="compact-checkbox mixed-cut-switch">
@@ -3402,24 +3564,28 @@ export function App() {
                                           max={100}
                                           type="range"
                                           value={row.reuseRate}
+                                          onBlur={() => void commitMixedCutGroupReuseRates()}
                                           onChange={(event) =>
-                                            void updateCurrentTask({
-                                              mixedCutGroupSettings: mixedCutGroupRows.map(
-                                                (group) => ({
-                                                  groupId: group.groupId,
-                                                  reuseRate:
-                                                    group.groupId === row.groupId
-                                                      ? clampUiNumber(
-                                                          event.target.value,
-                                                          0,
-                                                          100,
-                                                          row.reuseRate
-                                                        )
-                                                      : group.reuseRate
-                                                })
-                                              )
-                                            })
+                                            setMixedCutReuseDraftState((current) => ({
+                                              taskId: selectedTask.id,
+                                              reuseRate:
+                                                current?.taskId === selectedTask.id
+                                                  ? current.reuseRate
+                                                  : mixedCutReuseDraft,
+                                              groupReuseRates: {
+                                                ...(current?.taskId === selectedTask.id
+                                                  ? current.groupReuseRates
+                                                  : mixedCutGroupReuseDrafts),
+                                                [row.groupId]: clampUiNumber(
+                                                  event.target.value,
+                                                  0,
+                                                  100,
+                                                  row.reuseRate
+                                                )
+                                              }
+                                            }))
                                           }
+                                          onPointerUp={() => void commitMixedCutGroupReuseRates()}
                                         />
                                         <output>{row.reuseRate}%</output>
                                       </div>
@@ -3707,6 +3873,11 @@ export function App() {
                   打开导出
                 </button>
               </div>
+              <PreviewProgressPanel
+                isRunning={isWorkflowRunning}
+                label={visibleProgressLabel}
+                percent={visibleProgressPercent}
+              />
               {selectedTask.generationMode === "mixed-cut" ? (
                 <MixedCutResultPreview
                   editDecisionCount={
@@ -4879,16 +5050,22 @@ function GeneratedPresenterHistory({
 
 function AssetList({
   assets,
+  disabled = false,
   emptyLabel,
   itemBadge,
+  onRemove,
+  removeTitle = "删除素材",
   title
 }: {
   assets: MediaAsset[];
+  disabled?: boolean;
   emptyLabel: string;
   itemBadge?: string;
+  onRemove?: (asset: MediaAsset) => void;
+  removeTitle?: string;
   title: string;
 }) {
-  const visibleAssets = [...assets].reverse().slice(0, 6);
+  const visibleAssets = [...assets].reverse().slice(0, onRemove ? 12 : 6);
 
   return (
     <div className="asset-list">
@@ -4903,6 +5080,17 @@ function AssetList({
               <span>{assetKindLabel(asset.kind)}</span>
               <strong title={asset.relativePath}>{assetFileName(asset.relativePath)}</strong>
               {itemBadge ? <em>{itemBadge}</em> : null}
+              {onRemove ? (
+                <button
+                  type="button"
+                  className="asset-list-remove"
+                  disabled={disabled}
+                  title={removeTitle}
+                  onClick={() => onRemove(asset)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -5759,6 +5947,41 @@ function TaskProgressBar({
   );
 }
 
+function PreviewProgressPanel({
+  isRunning,
+  label,
+  percent
+}: {
+  isRunning: boolean;
+  label: string;
+  percent: number;
+}) {
+  if (!isRunning) {
+    return null;
+  }
+
+  const normalizedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+
+  return (
+    <div className="preview-progress-panel" aria-live="polite">
+      <div>
+        <span>输出进度</span>
+        <strong>{label || "正在处理视频"}</strong>
+      </div>
+      <div
+        className="preview-progress-meter"
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={normalizedPercent}
+        role="progressbar"
+      >
+        <i style={{ width: `${normalizedPercent}%` }} />
+      </div>
+      <b>{normalizedPercent}%</b>
+    </div>
+  );
+}
+
 function TaskResourceLibrary({
   generatedPresenterCount,
   knowledgeCount,
@@ -6605,6 +6828,7 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
 
   const labels: Partial<Record<MediaAsset["kind"], string>> = {
     "source-audio": "原音频",
+    "generated-voiceover-audio": "生成配音",
     "source-video": "原视频",
     "source-transcript": "文案",
     "source-visual-analysis": "画面分析",
