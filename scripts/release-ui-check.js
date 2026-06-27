@@ -266,6 +266,22 @@ async function main() {
         const coverRatio = coverRect.width / coverRect.height;
         assert(Math.abs(coverRatio - 9 / 16) < 0.01, '封面预览竖屏比例错误：' + coverRatio);
 
+        await click('[data-mode-tab="preset-avatar"]');
+        const subtitleCheckbox = await waitFor('.generation-quick-settings .setting-toggle input');
+        const subtitleCheckboxRect = subtitleCheckbox.getBoundingClientRect();
+        assert(
+          subtitleCheckboxRect.width <= 20 && subtitleCheckboxRect.height <= 20,
+          '字幕开关尺寸异常：' + subtitleCheckboxRect.width + 'x' + subtitleCheckboxRect.height
+        );
+
+        await click('[data-mode-tab="mixed-cut"]');
+        const mixedCutSwitch = await waitFor('.mixed-cut-switch');
+        const mixedCutSwitchRect = mixedCutSwitch.getBoundingClientRect();
+        assert(
+          mixedCutSwitchRect.height <= 42,
+          '混剪去原音/转场开关高度异常：' + mixedCutSwitchRect.height
+        );
+
         await click('[data-testid="release-delete-task"]');
         await click('[data-testid="release-confirm-delete"]');
         await wait(500);

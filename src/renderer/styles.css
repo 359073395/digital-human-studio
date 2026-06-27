@@ -4869,13 +4869,15 @@ label,
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 74px;
+  min-height: 30px;
+  padding: 0 8px;
   white-space: normal;
 }
 
 .mixed-cut-switch input {
   flex: 0 0 auto;
-  width: auto;
+  width: 14px;
+  height: 14px;
   margin-top: 0;
 }
 
@@ -5427,6 +5429,11 @@ label,
   position: absolute;
   top: 10px;
   right: 10px;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--studio-accent, #496d66);
 }
 
 .setting-toggle.on {

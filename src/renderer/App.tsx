@@ -2798,6 +2798,7 @@ export function App() {
               {WORKSPACE_TABS.map((mode) => (
                 <button
                   className={activeWorkspaceTab === mode.id ? "active" : ""}
+                  data-mode-tab={mode.id}
                   key={mode.id}
                   type="button"
                   onClick={() => void openWorkspaceTab(mode.id)}
