@@ -66,14 +66,15 @@ function modeSpecificMethodLines(mode: VideoGenerationMode | undefined): string[
         ...viralReferenceBreakdownLines(),
         "- Mixed-cut method: analyze uploaded materials by usable visual proof, scene category, pacing role, caption role, and edit order.",
         "- The script should be a voiceover/subtitle spine that can support B-roll, screen recording, product shots, AI-generated visuals, or short digital-human inserts.",
-        "- Mixed-cut only creates batch remixes. Use video-dedup mode afterward for content-level dedup processing and originality scoring."
+        "- Mixed-cut only creates batch remixes. Use video-dedup mode afterward for fidelity-preserving optical post-processing."
       ];
 
     case "video-dedup":
       return [
         "- Video dedup method: treat dedup as a separate post-processing workflow, not as mixed-cut generation.",
-        "- Target score is an internal originality score, default 80+. Do not promise platform detection results.",
-        "- Prefer content-level rewrite: segment restructure, visual variation, subtitle/title/cover changes, audio rhythm changes, and optional V2V reconstruction.",
+        "- Keep the user-facing flow simple: import video, choose light/standard/strong processing, choose output ratio, and export.",
+        "- Internally prefer fidelity-preserving optical processing: optical offset, time-based dynamic crop, subtle rotate, lens correction, perspective perturbation, frame resampling, GOP changes, and light audio perturbation.",
+        "- For high-risk fragments, optional V2V reconstruction can be added through the video provider later.",
         "- Warn when the requested processing is only MD5, mirror, crop, speed, color, BGM, or subtitle replacement."
       ];
 
@@ -115,8 +116,8 @@ function modeSpecificStoryboardLines(mode: VideoGenerationMode | undefined): str
 
     case "video-dedup":
       return [
-        "- Video dedup storyboard should identify which parts need restructuring or replacement before scoring.",
-        "- Keep useful meaning, but change concrete expression, shot order, subtitle hierarchy, cover direction, and visual treatment."
+        "- Video dedup planning should identify whether the whole video only needs optical post-processing or whether some high-risk fragments need replacement.",
+        "- Keep useful meaning and overall viewing feel, but change optical sampling, subtitle hierarchy, cover direction, encoding structure, and optional high-risk fragments."
       ];
 
     case "personal-ip":

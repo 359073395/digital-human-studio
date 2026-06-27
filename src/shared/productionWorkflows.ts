@@ -271,14 +271,14 @@ export const PRODUCTION_MODE_WORKFLOWS: Record<VideoGenerationMode, ProductionMo
     mode: "video-dedup",
     label: "视频去重处理",
     summary:
-      "导入任意成片或混剪结果后做保真去重处理，输出处理后视频和内部重复风险/原创度评分报告。",
+      "导入任意成片或混剪结果后做保真去重处理，尽量保持观感接近，同时用光学扰动、帧重采样和编码变化输出处理后视频。",
     builtInMethods: [
-      "Originality score report",
-      "Fidelity-preserving technical dedup",
+      "Optical offset and dynamic crop dedup",
+      "Lens, perspective, and frame-resampling dedup",
       "Low-value dedup warning",
       "Local render with optional video-model rewrite"
     ],
-    defaultInputs: ["待处理 MP4", "目标原创度评分", "去重策略", "字幕/封面样式"],
+    defaultInputs: ["待处理 MP4", "处理强度", "输出比例", "封面样式"],
     stages: [
       {
         id: "dedup-source-ingest",
@@ -294,24 +294,14 @@ export const PRODUCTION_MODE_WORKFLOWS: Record<VideoGenerationMode, ProductionMo
       {
         id: "fidelity-dedup",
         label: "保真去重处理",
-        goal: "尽量保持肉眼观感，同时通过重采样、轻微像素扰动、编码结构变化、字幕标题封面变化降低重复风险。",
+        goal: "尽量保持肉眼观感，同时通过动态裁切、光学偏移、镜头畸变、轻微透视扰动、帧重采样、像素扰动、编码结构和音频轻扰动降低重复风险。",
         method:
-          "Default strategy is fidelity-strong. It changes frame sampling, slight crop/scale, color, noise, GOP, and metadata while avoiding obvious mirror/border tricks. Optional V2V can be added later through the OpenAI-compatible video provider.",
-        requiredInputs: ["待处理视频", "目标原创度评分"],
-        outputs: ["处理后 MP4", "封面", "字幕"],
+          "Default strategy is fidelity-strong. Internally apply optical offset, time-based crop/pan, subtle rotate, lens correction, perspective perturbation, frame resampling, pixel noise, GOP changes, and light audio perturbation while avoiding obvious mirror/border tricks. Optional V2V can be added later through the OpenAI-compatible video provider for high-risk fragments.",
+        requiredInputs: ["待处理视频", "处理强度", "输出比例"],
+        outputs: ["处理后 MP4", "封面"],
         providerNeeds: ["local", "video"],
-        qualityGate: "只做轻微后处理时必须提示仍有同质化风险。"
-      },
-      {
-        id: "originality-score",
-        label: "原创度评分",
-        goal: "输出 0-100 的内部原创度评分，达到 80+ 才标记为通过。",
-        method:
-          "Score segment restructure, source reuse, visual variation, subtitle/title/cover variation, audio variation, script risk, and watermark risk.",
-        requiredInputs: ["处理前视频", "处理后视频", "剪辑/处理记录"],
-        outputs: ["原创度评分报告", "建议修改项"],
-        providerNeeds: ["local", "llm"],
-        qualityGate: "评分低于目标值时必须给出原因和下一步建议，不能承诺平台官方判定。"
+        qualityGate:
+          "不能只改 MD5、镜像或单纯裁边；处理后必须能正常播放、比例正确、声音保留且无明显闪烁/黑边。"
       },
       LOCAL_POLISH_STAGE
     ]

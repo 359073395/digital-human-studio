@@ -271,7 +271,7 @@ const GENERATION_MODE_TABS: Array<{
   {
     id: "video-dedup",
     label: "视频去重处理",
-    description: "成片二次处理 + 80分质检"
+    description: "成片二次保真处理"
   }
 ];
 
@@ -296,17 +296,17 @@ const DEDUP_STRATEGY_OPTIONS: Array<{
   {
     id: "fidelity-light",
     label: "轻度",
-    detail: "画面变化小，速度最快"
+    detail: "轻微光学偏移，观感最接近"
   },
   {
     id: "fidelity-strong",
     label: "标准",
-    detail: "保真和变化更均衡"
+    detail: "动态裁切 + 光学扰动，推荐"
   },
   {
     id: "pixel-remix",
     label: "强处理",
-    detail: "变化更明显，耗时更高"
+    detail: "透视/镜头扰动更明显"
   }
 ];
 
@@ -7592,7 +7592,8 @@ function buildFlowApiGuideItems(input: {
       title: "9. 去重处理",
       providerLabel: "本地视频处理",
       modelLabel: "默认不需要模型",
-      detail: "视频去重处理使用本地 FFmpeg 做画面和音频扰动，只输出处理后 MP4 和封面。",
+      detail:
+        "视频去重处理使用本地 FFmpeg 做动态裁切、光学偏移、镜头/透视轻扰动、帧重采样和音频轻扰动，只输出处理后 MP4 和封面。",
       active: task.generationMode === "video-dedup"
     }
   ];

@@ -230,6 +230,16 @@ async function main() {
           q('[data-testid="release-task-dialog-submit"]').click();
           await wait(600);
         };
+        const waitForTaskRowCount = async (count, message) => {
+          for (let i = 0; i < 80; i += 1) {
+            const current = qa('[data-testid="release-task-row"]').length;
+            if (current === count) return;
+            await wait(100);
+          }
+          throw new Error(
+            message + '；当前任务数量：' + qa('[data-testid="release-task-row"]').length
+          );
+        };
 
         await waitForText('跑量自媒体视频工作台');
         const brandLogo = await waitFor('.brand-logo');
@@ -237,7 +247,7 @@ async function main() {
 
         await click('[data-testid="release-new-task"]');
         await submitTaskName('UI验收任务');
-        assert(qa('[data-testid="release-task-row"]').length === 1, '新建任务失败。');
+        await waitForTaskRowCount(1, '新建任务失败。');
 
         q('[data-testid="release-task-row"] .task-main').dispatchEvent(
           new MouseEvent('dblclick', { bubbles: true })
@@ -284,12 +294,11 @@ async function main() {
 
         await click('[data-testid="release-delete-task"]');
         await click('[data-testid="release-confirm-delete"]');
-        await wait(500);
-        assert(qa('[data-testid="release-task-row"]').length === 0, '删除任务失败。');
+        await waitForTaskRowCount(0, '删除任务失败。');
 
         await click('[data-testid="release-new-task"]');
         await submitTaskName('UI持久化任务');
-        assert(qa('[data-testid="release-task-row"]').length === 1, '删除后重新新建任务失败。');
+        await waitForTaskRowCount(1, '删除后重新新建任务失败。');
 
         return {
           ok: true,

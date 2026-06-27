@@ -42,8 +42,9 @@ describe("production workflow registry", () => {
     expect(productLines).toContain("GPT Image 2 product-presenter image workflow");
     expect(productLines).toContain("静态图不合格时不能进入 HeyGen");
     expect(mixedCutLines).toContain("混剪模式不能只产出数字人口播占位");
-    expect(dedupLines).toContain("Originality score report");
-    expect(dedupLines).toContain("不能承诺平台官方判定");
+    expect(dedupLines).toContain("Optical offset and dynamic crop dedup");
+    expect(dedupLines).toContain("镜头畸变");
+    expect(dedupLines).toContain("不能只改 MD5");
   });
 
   it("provides storyboard-specific stages for viral remix planning", () => {

@@ -1180,9 +1180,9 @@ function createBatchManifest(
 function createPublishingPackage(task: VideoTask, targetCount: number): PublishingPackage {
   return {
     title: task.coverStyle.title.trim() || task.title,
-    description: "批量混剪视频已生成。需要进一步原创度处理时，请进入“视频去重处理”模式。",
+    description: "批量混剪视频已生成。需要进一步保真二次处理时，请进入“视频去重处理”模式。",
     tags: ["混剪视频", "短视频", "素材重组"],
-    notes: `本批次按素材组合与重复率自动生成 ${targetCount} 条；原创度评分请在视频去重处理模式中运行。`
+    notes: `本批次按素材组合与重复率自动生成 ${targetCount} 条；视频去重处理会在成片基础上做光学偏移、动态裁切、帧重采样和音频轻扰动。`
   };
 }
 
@@ -1258,7 +1258,7 @@ function createBatchWarnings(plan: GroupedMixedCutBatchPlan, targetCount: number
     warnings.push("素材少于 3 个，批量混剪容易出现同质化。建议补充更多素材。");
   }
   if (targetCount >= plan.combinationCount && plan.combinationCount < 10_000) {
-    warnings.push("生成数量明显高于素材数量，建议后续进入视频去重处理模式做原创度评分。");
+    warnings.push("生成数量明显高于素材数量，建议后续进入视频去重处理模式做保真二次处理。");
   }
   for (const warning of plan.warnings) {
     warnings.push(warning);
