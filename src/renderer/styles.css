@@ -1741,6 +1741,49 @@ label {
   font-size: 11px;
 }
 
+.dedup-strategy-control {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.dedup-strategy-control button {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 3px;
+  min-height: 58px;
+  padding: 8px 10px;
+  border-color: #d3dbd4;
+  background: #fffdf8;
+  color: #4d5d56;
+  text-align: left;
+}
+
+.dedup-strategy-control button.active {
+  border-color: rgba(73, 109, 102, 0.72);
+  background: var(--studio-accent-soft, #dce8e3);
+  box-shadow: inset 3px 0 0 var(--studio-accent, #496d66);
+  color: var(--studio-accent-ink, #233d39);
+}
+
+.dedup-strategy-control strong,
+.dedup-strategy-control span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dedup-strategy-control strong {
+  font-size: 13px;
+}
+
+.dedup-strategy-control span {
+  color: var(--studio-muted, #5f6c6a);
+  font-size: 11px;
+  line-height: 1.32;
+}
+
 .range-field div {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;

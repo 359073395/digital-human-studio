@@ -6,7 +6,6 @@ import os from "node:os";
 import path from "node:path";
 import ffmpegStaticPath from "ffmpeg-static";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { OriginalityScoreReport } from "../../shared/domain";
 import { createAppPaths, getTaskDirectory, type AppPaths } from "../storage/appPaths";
 import { openTaskDatabase, runMigrations, type TaskDatabase } from "../storage/database";
 import { TaskRepository } from "../storage/taskRepository";
@@ -31,7 +30,7 @@ afterEach(() => {
 });
 
 describe("VideoDedupWorkflowService", () => {
-  it("imports a source video, renders a processed video, and writes an originality report", () => {
+  it("imports a source video and renders a processed video without exposing score reports", () => {
     const sourcePath = path.join(tempDir, "source.mp4");
     createSampleVideo(sourcePath);
 
@@ -43,7 +42,7 @@ describe("VideoDedupWorkflowService", () => {
       taskId: task.id,
       generationMode: "video-dedup",
       finalScript: "New title, new subtitle spine, and a changed call to action.",
-      dedupTargetScore: 80,
+      dedupTargetScore: 95,
       dedupStrategy: "fidelity-strong",
       selectedOutputPresets: ["portrait-9-16"]
     });
@@ -59,22 +58,16 @@ describe("VideoDedupWorkflowService", () => {
     const processedAsset = completed.mediaAssets.find(
       (asset) => asset.kind === "dedup-processed-video"
     );
-    const reportAsset = completed.mediaAssets.find(
-      (asset) => asset.kind === "dedup-report" && asset.relativePath.endsWith(".json")
-    );
 
     expect(completed.steps.find((step) => step.id === "export")?.status).toBe("complete");
     expect(processedAsset).toBeTruthy();
-    expect(reportAsset).toBeTruthy();
-    expect(fs.existsSync(path.join(taskDirectory, processedAsset?.relativePath ?? ""))).toBe(true);
-
-    const report = JSON.parse(
-      fs.readFileSync(path.join(taskDirectory, reportAsset?.relativePath ?? ""), "utf8")
-    ) as OriginalityScoreReport;
-    expect(report.score).toBeGreaterThanOrEqual(80);
-    expect(report.passed).toBe(true);
-    expect(report.summary).toContain("内部重复风险/原创度评分");
-    expect(report.strategy).toBe("fidelity-strong");
+    const processedPath = path.join(taskDirectory, processedAsset?.relativePath ?? "");
+    expect(fs.existsSync(processedPath)).toBe(true);
+    expect(hasAudioStream(processedPath)).toBe(true);
+    expect(completed.mediaAssets.some((asset) => asset.kind === "dedup-report")).toBe(false);
+    expect(
+      fs.existsSync(path.join(taskDirectory, "exports", "dedup-package", "manifest.json"))
+    ).toBe(true);
   });
 
   it("renders the deeper pixel-remix strategy for high-risk material", () => {
@@ -96,18 +89,14 @@ describe("VideoDedupWorkflowService", () => {
     const service = new VideoDedupWorkflowService(repository, appPaths);
     service.importSourceVideo(task.id, sourcePath);
     const completed = service.runVideoDedup(task.id);
-    const reportAsset = completed.mediaAssets.find(
-      (asset) => asset.kind === "dedup-report" && asset.relativePath.endsWith(".json")
+    const processedAsset = completed.mediaAssets.find(
+      (asset) => asset.kind === "dedup-processed-video"
     );
 
-    const report = JSON.parse(
-      fs.readFileSync(
-        path.join(getTaskDirectory(appPaths, task.id), reportAsset?.relativePath ?? ""),
-        "utf8"
-      )
-    ) as OriginalityScoreReport;
-    expect(report.strategy).toBe("pixel-remix");
-    expect(report.passed).toBe(true);
+    expect(completed.steps.find((step) => step.id === "export")?.status).toBe("complete");
+    expect(processedAsset?.relativePath).toContain("dedup-processed");
+    expect(completed.publishingPackage.description).toContain("深度像素重塑");
+    expect(completed.mediaAssets.some((asset) => asset.kind === "dedup-report")).toBe(false);
   });
 });
 
@@ -124,10 +113,21 @@ function createSampleVideo(outputPath: string): void {
       "lavfi",
       "-i",
       "color=c=0x93a8a0:s=320x568:d=1.2",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=880:duration=1.2",
       "-vf",
       "format=yuv420p",
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
       "-c:v",
       "libx264",
+      "-c:a",
+      "aac",
+      "-shortest",
       "-movflags",
       "+faststart",
       outputPath
@@ -138,4 +138,17 @@ function createSampleVideo(outputPath: string): void {
   if (result.status !== 0) {
     throw new Error(result.stderr || result.stdout || "Failed to create sample video.");
   }
+}
+
+function hasAudioStream(filePath: string): boolean {
+  if (!ffmpegStaticPath) {
+    throw new Error("ffmpeg-static is not available in tests.");
+  }
+
+  const result = spawnSync(ffmpegStaticPath, ["-hide_banner", "-i", filePath], {
+    encoding: "utf8",
+    timeout: 30_000
+  });
+  const output = `${result.stderr || ""}\n${result.stdout || ""}`;
+  return /Stream\s+#\d+:\d+.*Audio:/i.test(output);
 }

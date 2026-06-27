@@ -33,6 +33,7 @@ interface DedupStrategyProfile {
   id: Exclude<DedupStrategy, "content-rewrite" | "light-polish">;
   label: string;
   filters: string[];
+  audioFilter: string;
   crf: string;
   gop: string;
   preset: string;
@@ -98,7 +99,9 @@ export class VideoDedupWorkflowService {
         const preset = requireOutputPreset(presetId);
         this.taskRepository.updateOutputVariant(taskId, preset.id, { status: "rendering" });
         const outputVideo = `post/dedup-processed-${attempt}-${preset.id}.mp4`;
-        const subtitleFile = `subtitles/dedup-subtitles-${attempt}-${preset.id}.srt`;
+        const subtitleFile = task.subtitleStyle.enabled
+          ? `subtitles/dedup-subtitles-${attempt}-${preset.id}.srt`
+          : undefined;
         const coverFile = `post/dedup-cover-${attempt}-${preset.id}.svg`;
 
         renderDedupVideo({
@@ -108,10 +111,12 @@ export class VideoDedupWorkflowService {
           performanceProfile,
           strategy: task.dedupStrategy
         });
-        writeTaskFile(this.paths, taskId, subtitleFile, createTimedTextSrt(task));
+        if (subtitleFile) {
+          writeTaskFile(this.paths, taskId, subtitleFile, createTimedTextSrt(task));
+          this.taskRepository.addMediaAsset(taskId, "subtitle-file", subtitleFile);
+        }
         writeTaskFile(this.paths, taskId, coverFile, createDedupCoverSvg(task, preset));
         this.taskRepository.addMediaAsset(taskId, "dedup-processed-video", outputVideo);
-        this.taskRepository.addMediaAsset(taskId, "subtitle-file", subtitleFile);
         this.taskRepository.addMediaAsset(taskId, "cover-image", coverFile);
         this.taskRepository.updateOutputVariant(taskId, preset.id, {
           status: "complete",
@@ -123,13 +128,6 @@ export class VideoDedupWorkflowService {
       }
 
       const report = mergeReports(reports, task.dedupTargetScore);
-      const reportJsonPath = `post/dedup-report-${attempt}.json`;
-      const reportMarkdownPath = `post/dedup-report-${attempt}.md`;
-      writeTaskFile(this.paths, taskId, reportJsonPath, JSON.stringify(report, null, 2));
-      writeTaskFile(this.paths, taskId, reportMarkdownPath, renderReportMarkdown(report));
-      this.taskRepository.addMediaAsset(taskId, "dedup-report", reportJsonPath);
-      this.taskRepository.addMediaAsset(taskId, "dedup-report", reportMarkdownPath);
-
       const manifestPath = "exports/dedup-package/manifest.json";
       writeTaskFile(
         this.paths,
@@ -143,7 +141,6 @@ export class VideoDedupWorkflowService {
         this.paths,
         taskId,
         this.requireTask(taskId),
-        report,
         this.pathSettingsReader?.getPathSettings().generatedVideoDirectory
       );
       this.taskRepository.updateTask({
@@ -151,18 +148,13 @@ export class VideoDedupWorkflowService {
         dedupAttemptCount: attempt
       });
       this.taskRepository.updatePublishingPackage(taskId, {
-        ...createPublishingPackage(report),
+        ...createPublishingPackage(this.requireTask(taskId)),
         exportDirectory: externalDirectory || "exports/dedup-package"
       });
 
       this.taskRepository.updateStepStatus(taskId, "subtitles", "complete");
       this.taskRepository.updateStepStatus(taskId, "post-production", "complete");
-      return this.taskRepository.updateStepStatus(
-        taskId,
-        "export",
-        report.passed ? "complete" : "retry-ready",
-        report.passed ? undefined : `原创度评分 ${report.score}，未达到目标 ${report.targetScore}。`
-      );
+      return this.taskRepository.updateStepStatus(taskId, "export", "complete");
     } catch (error) {
       const message = error instanceof Error ? error.message : "视频去重处理失败。";
       this.taskRepository.updateStepStatus(taskId, "subtitles", "retry-ready", message);
@@ -241,6 +233,7 @@ function renderDedupVideo(input: {
   const ffmpegPath = requireFfmpegPath();
   fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
   const profile = dedupStrategyProfile(input.strategy);
+  const hasAudio = hasAudioStream(input.sourcePath);
   const videoFilter = [
     `scale=${input.preset.width}:${input.preset.height}:force_original_aspect_ratio=increase`,
     ...profile.filters,
@@ -257,9 +250,9 @@ function renderDedupVideo(input: {
       input.sourcePath,
       "-map",
       "0:v:0",
+      ...(hasAudio ? ["-map", "0:a:0"] : []),
       "-vf",
       videoFilter,
-      "-an",
       "-c:v",
       "libx264",
       "-preset",
@@ -278,6 +271,9 @@ function renderDedupVideo(input: {
       "yuv420p",
       "-metadata",
       `comment=dedup-${profile.id}-${Date.now()}`,
+      ...(hasAudio
+        ? ["-filter:a", profile.audioFilter, "-c:a", "aac", "-b:a", "160k", "-shortest"]
+        : ["-an"]),
       "-movflags",
       "+faststart",
       input.outputPath
@@ -314,6 +310,7 @@ function dedupStrategyProfile(strategy: DedupStrategy): DedupStrategyProfile {
           "fps=30000/1001",
           "setpts=0.992*PTS"
         ],
+        audioFilter: "volume=0.985,atempo=1.008",
         crf: "21",
         gop: "53",
         preset: "veryfast",
@@ -338,6 +335,7 @@ function dedupStrategyProfile(strategy: DedupStrategy): DedupStrategyProfile {
           "fps=30",
           "setpts=0.982*PTS"
         ],
+        audioFilter: "volume=0.965,atempo=1.018",
         crf: "22",
         gop: "41",
         preset: "veryfast",
@@ -363,6 +361,7 @@ function dedupStrategyProfile(strategy: DedupStrategy): DedupStrategyProfile {
           "fps=30000/1001",
           "setpts=0.987*PTS"
         ],
+        audioFilter: "volume=0.975,atempo=1.013",
         crf: "22",
         gop: "47",
         preset: "veryfast",
@@ -389,6 +388,10 @@ function normalizeRuntimeDedupStrategy(
   }
 
   return "fidelity-strong";
+}
+
+function dedupStrategyLabel(strategy: DedupStrategy): string {
+  return dedupStrategyProfile(strategy).label;
 }
 
 function createOriginalityReport(
@@ -480,29 +483,6 @@ function mergeReports(
   };
 }
 
-function renderReportMarkdown(report: OriginalityScoreReport): string {
-  return [
-    "# 视频去重处理报告",
-    "",
-    `- 原创度评分：${report.score}`,
-    `- 目标阈值：${report.targetScore}`,
-    `- 是否通过：${report.passed ? "是" : "否"}`,
-    `- 处理策略：${report.strategy}`,
-    `- 尝试次数：${report.attempt}`,
-    "",
-    "## 评分说明",
-    report.summary,
-    "",
-    "## 指标",
-    ...Object.entries(report.metrics).map(([key, value]) => `- ${key}: ${value}`),
-    "",
-    "## 建议",
-    ...report.suggestions.map((suggestion) => `- ${suggestion}`),
-    "",
-    "说明：该分数是软件内部原创度/重复风险评分，不代表任何平台官方判定。"
-  ].join("\n");
-}
-
 function createTimedTextSrt(task: VideoTask): string {
   const text = task.finalScript.trim() || task.sourceScript.trim() || task.title;
   const chunks = chunkText(text, 34).slice(0, 6);
@@ -563,16 +543,16 @@ function createDedupManifest(task: VideoTask, report: OriginalityScoreReport) {
       selectedOutputPresets: task.selectedOutputPresets
     },
     report,
-    note: "原创度评分为软件内部可解释评分，不代表平台官方判定。"
+    note: "report 仅供内部调试，不在软件界面展示，也不作为导出成功失败判断。"
   };
 }
 
-function createPublishingPackage(report: OriginalityScoreReport): PublishingPackage {
+function createPublishingPackage(task: VideoTask): PublishingPackage {
   return {
     title: "视频去重处理结果",
-    description: `内部原创度评分 ${report.score}/${report.targetScore}。`,
-    tags: ["视频去重处理", "原创度评分", "重复风险检查"],
-    notes: report.summary
+    description: `已按 ${dedupStrategyLabel(task.dedupStrategy)} 输出处理后视频。`,
+    tags: ["视频去重处理", "保真处理", "短视频素材"],
+    notes: "去重模式只输出处理后视频和封面；内部评分不再作为用户操作步骤或发布阻塞。"
   };
 }
 
@@ -580,7 +560,6 @@ function copyDedupOutputsToExportDirectory(
   paths: AppPaths,
   taskId: string,
   task: VideoTask,
-  report: OriginalityScoreReport,
   generatedVideoDirectory?: string
 ): string | undefined {
   const selectedDirectory = task.exportDirectory?.trim() || generatedVideoDirectory?.trim();
@@ -613,11 +592,6 @@ function copyDedupOutputsToExportDirectory(
     }
   }
 
-  fs.writeFileSync(
-    path.join(targetDirectory, "dedup-report.json"),
-    JSON.stringify(report, null, 2),
-    "utf8"
-  );
   return targetDirectory;
 }
 
@@ -708,6 +682,20 @@ function escapeXml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function hasAudioStream(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) {
+    return false;
+  }
+
+  const result = spawnSync(requireFfmpegPath(), ["-hide_banner", "-i", filePath], {
+    encoding: "utf8",
+    maxBuffer: 2 * 1024 * 1024,
+    timeout: 30_000
+  });
+  const output = `${result.stderr || ""}\n${result.stdout || ""}`;
+  return /Stream\s+#\d+:\d+.*Audio:/i.test(output);
 }
 
 function requireFfmpegPath(): string {

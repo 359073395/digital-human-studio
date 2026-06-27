@@ -38,7 +38,6 @@ import {
   type MediaAsset,
   type MixedCutChapterMode,
   type MixedCutGroupSetting,
-  type OriginalityScoreReport,
   type OutputPresetId,
   type PersonalIpProfile,
   type StoryScriptPackage,
@@ -289,6 +288,28 @@ const WORKSPACE_TABS: Array<{
   ...GENERATION_MODE_TABS
 ];
 
+const DEDUP_STRATEGY_OPTIONS: Array<{
+  id: DedupStrategy;
+  label: string;
+  detail: string;
+}> = [
+  {
+    id: "fidelity-light",
+    label: "轻度",
+    detail: "画面变化小，速度最快"
+  },
+  {
+    id: "fidelity-strong",
+    label: "标准",
+    detail: "保真和变化更均衡"
+  },
+  {
+    id: "pixel-remix",
+    label: "强处理",
+    detail: "变化更明显，耗时更高"
+  }
+];
+
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appVersion, setAppVersion] = useState("跑量自媒体视频工作台 本地预览");
@@ -355,7 +376,6 @@ export function App() {
   const [storyScriptError, setStoryScriptError] = useState("");
   const [visualStoryboard, setVisualStoryboard] = useState<VisualStoryboardPackage | null>(null);
   const [visualStoryboardError, setVisualStoryboardError] = useState("");
-  const [originalityReport, setOriginalityReport] = useState<OriginalityScoreReport | null>(null);
 
   const steps = selectedTask.steps;
   const completeCount = useMemo(() => countCompleteSteps(steps), [steps]);
@@ -499,7 +519,7 @@ export function App() {
   );
   const latestMixedCutVideoAsset = [...mixedCutVideoAssets].reverse()[0];
   const dedupAssets = currentTaskMediaAssets.filter((asset) =>
-    ["dedup-source-video", "dedup-processed-video", "dedup-report"].includes(asset.kind)
+    ["dedup-source-video", "dedup-processed-video"].includes(asset.kind)
   );
   const dedupSourceAsset =
     (selectedTask.dedupSourceVideoAssetId
@@ -509,9 +529,6 @@ export function App() {
   const dedupProcessedAsset = [...dedupAssets]
     .reverse()
     .find((asset) => asset.kind === "dedup-processed-video");
-  const latestDedupReportAsset = [...currentTaskMediaAssets]
-    .reverse()
-    .find((asset) => asset.kind === "dedup-report" && asset.relativePath.endsWith(".json"));
   const knowledgeAssets = currentTaskMediaAssets.filter((asset) =>
     ["knowledge-document", "viral-copy-reference"].includes(asset.kind)
   );
@@ -568,7 +585,6 @@ export function App() {
             latestStoryScriptJsonAsset?.relativePath,
             latestStoryboardImageAsset?.relativePath,
             latestStoryboardJsonAsset?.relativePath,
-            latestDedupReportAsset?.relativePath,
             ...mixedCutOutputAssets.map((asset) => asset.relativePath),
             ...dedupAssets.map((asset) => asset.relativePath),
             ...selectedTask.outputVariants.flatMap((variant) => [
@@ -585,7 +601,6 @@ export function App() {
       latestStoryboardImageAsset?.relativePath,
       latestStoryboardJsonAsset?.relativePath,
       latestStoryScriptJsonAsset?.relativePath,
-      latestDedupReportAsset?.relativePath,
       mixedCutOutputAssets,
       dedupAssets,
       productImageAsset?.relativePath,
@@ -631,9 +646,6 @@ export function App() {
     : "";
   const visualStoryboardJsonUrl = latestStoryboardJsonAsset?.relativePath
     ? assetUrls[latestStoryboardJsonAsset.relativePath]
-    : "";
-  const dedupReportJsonUrl = latestDedupReportAsset?.relativePath
-    ? assetUrls[latestDedupReportAsset.relativePath]
     : "";
   const displayedStoryScriptPackage = storyScriptJsonUrl ? storyScriptPackage : null;
   const displayedStoryScriptError = storyScriptJsonUrl ? storyScriptError : "";
@@ -923,37 +935,6 @@ export function App() {
       ignore = true;
     };
   }, [visualStoryboardJsonUrl]);
-
-  useEffect(() => {
-    if (!dedupReportJsonUrl) {
-      return;
-    }
-
-    let ignore = false;
-
-    async function loadOriginalityReport() {
-      try {
-        const response = await fetch(dedupReportJsonUrl);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const parsed = (await response.json()) as OriginalityScoreReport;
-        if (!ignore) {
-          setOriginalityReport(parsed);
-        }
-      } catch {
-        if (!ignore) {
-          setOriginalityReport(null);
-        }
-      }
-    }
-
-    void loadOriginalityReport();
-
-    return () => {
-      ignore = true;
-    };
-  }, [dedupReportJsonUrl]);
 
   useEffect(() => {
     if (
@@ -1587,26 +1568,6 @@ export function App() {
       await refreshTaskState(task.id, task);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "待去重视频导入失败");
-    } finally {
-      setIsWorkflowRunning(false);
-    }
-  }
-
-  async function runOriginalityScore() {
-    const api = requireDesktopRuntime("原创度评分");
-    if (!api) {
-      return;
-    }
-
-    setIsWorkflowRunning(true);
-    setActionMessage("正在生成原创度评分报告...");
-
-    try {
-      const task = await api.runOriginalityScore(selectedTask.id);
-      setActionMessage("原创度评分报告已生成");
-      await refreshTaskState(task.id, task);
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : "原创度评分失败");
     } finally {
       setIsWorkflowRunning(false);
     }
@@ -3370,10 +3331,7 @@ export function App() {
                     {selectedTask.generationMode === "video-dedup" ? (
                       <div className="mode-note">
                         <strong>视频去重处理</strong>
-                        <span>
-                          对本地视频或混剪成片做保真去重处理，并输出内部重复风险/原创度评分报告，默认目标
-                          80+。
-                        </span>
+                        <span>对本地视频或混剪成片做保真处理，只输出处理后视频和封面。</span>
                       </div>
                     ) : null}
                     {modeNeedsMotionPrompt(selectedTask.generationMode) ? (
@@ -3761,45 +3719,22 @@ export function App() {
                       <div>
                         <strong>待处理视频</strong>
                         <span>
-                          导入混剪成片或本地 MP4，做保真去重处理并输出内部重复风险/原创度评分。
+                          导入混剪成片或本地 MP4，选择处理强度和输出比例后，一键生成处理后视频。
                         </span>
                       </div>
-                      <div className="mode-settings-grid">
-                        <label>
-                          目标内部评分
-                          <input
-                            min={60}
-                            max={95}
-                            type="number"
-                            value={selectedTask.dedupTargetScore}
-                            onBlur={() =>
-                              void updateCurrentTask({
-                                dedupTargetScore: selectedTask.dedupTargetScore
-                              })
-                            }
-                            onChange={(event) =>
-                              setSelectedTask((current) => ({
-                                ...current,
-                                dedupTargetScore: clampUiNumber(event.target.value, 60, 95, 80)
-                              }))
-                            }
-                          />
-                        </label>
-                        <label>
-                          处理策略
-                          <select
-                            value={selectedTask.dedupStrategy}
-                            onChange={(event) =>
-                              void updateCurrentTask({
-                                dedupStrategy: parseDedupStrategy(event.target.value)
-                              })
-                            }
+                      <div className="dedup-strategy-control" aria-label="去重处理强度">
+                        {DEDUP_STRATEGY_OPTIONS.map((option) => (
+                          <button
+                            className={selectedTask.dedupStrategy === option.id ? "active" : ""}
+                            disabled={isWorkflowRunning}
+                            key={option.id}
+                            type="button"
+                            onClick={() => void updateCurrentTask({ dedupStrategy: option.id })}
                           >
-                            <option value="fidelity-strong">保真强去重（推荐）</option>
-                            <option value="fidelity-light">保真轻去重</option>
-                            <option value="pixel-remix">深度像素重塑</option>
-                          </select>
-                        </label>
+                            <strong>{option.label}</strong>
+                            <span>{option.detail}</span>
+                          </button>
+                        ))}
                       </div>
                       <div className="source-action-row compact">
                         <button
@@ -3810,22 +3745,11 @@ export function App() {
                           <Upload size={16} />
                           导入待去重视频
                         </button>
-                        <button
-                          type="button"
-                          disabled={isWorkflowRunning}
-                          onClick={() => void runOriginalityScore()}
-                        >
-                          <FileSearch size={16} />
-                          只生成评分报告
-                        </button>
                       </div>
-                      <OriginalityReportCard
-                        report={dedupReportJsonUrl ? originalityReport : null}
-                      />
                       <AssetList
                         assets={dedupAssets}
-                        emptyLabel="还没有去重素材或报告"
-                        title="去重产物"
+                        emptyLabel="还没有导入待处理视频或生成处理后视频"
+                        title="去重视频"
                       />
                     </div>
                   ) : null}
@@ -3904,23 +3828,25 @@ export function App() {
                       <h2>输出设置</h2>
                     </div>
                     <div className="control-grid mode-settings-grid">
-                      <label>
-                        生成语言 / 语音
-                        <select
-                          value={selectedTask.contentLanguage}
-                          onChange={(event) =>
-                            void updateCurrentTask({
-                              contentLanguage: event.target.value as VideoTask["contentLanguage"]
-                            })
-                          }
-                        >
-                          {CONTENT_LANGUAGES.map((language) => (
-                            <option key={language.id} value={language.id}>
-                              {language.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      {selectedTask.generationMode !== "video-dedup" ? (
+                        <label>
+                          生成语言 / 语音
+                          <select
+                            value={selectedTask.contentLanguage}
+                            onChange={(event) =>
+                              void updateCurrentTask({
+                                contentLanguage: event.target.value as VideoTask["contentLanguage"]
+                              })
+                            }
+                          >
+                            {CONTENT_LANGUAGES.map((language) => (
+                              <option key={language.id} value={language.id}>
+                                {language.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
                       <fieldset className="preset-fieldset">
                         <legend>输出比例</legend>
                         <label className="checkbox-row compact-checkbox">
@@ -4015,7 +3941,6 @@ export function App() {
               ) : selectedTask.generationMode === "video-dedup" ? (
                 <DedupResultPreview
                   processedVideoUrl={dedupProcessedVideoUrl}
-                  report={dedupReportJsonUrl ? originalityReport : null}
                   sourceVideoUrl={dedupSourceVideoUrl}
                 />
               ) : (
@@ -5420,29 +5345,6 @@ function GenerationQuickSettings({
   );
 }
 
-function OriginalityReportCard({ report }: { report: OriginalityScoreReport | null }) {
-  return (
-    <div className="originality-report-card">
-      <div className="asset-list-heading">
-        <strong>原创度评分</strong>
-        <span>{report ? `${report.score}/${report.targetScore}` : "未生成"}</span>
-      </div>
-      {report ? (
-        <>
-          <div className={`score-meter ${report.passed ? "passed" : "warning"}`}>
-            <strong>{report.score}</strong>
-            <span>{report.passed ? "已达到阈值" : "需要继续处理"}</span>
-          </div>
-          <p>{report.summary}</p>
-          <p className="field-hint">该分数为软件内部原创度/重复风险评分，不代表平台官方判定。</p>
-        </>
-      ) : (
-        <p>导入视频并运行后会显示评分报告。</p>
-      )}
-    </div>
-  );
-}
-
 function MixedCutResultPreview({
   editDecisionCount,
   materialCount,
@@ -5495,11 +5397,9 @@ function MixedCutResultPreview({
 
 function DedupResultPreview({
   processedVideoUrl,
-  report,
   sourceVideoUrl
 }: {
   processedVideoUrl: string;
-  report: OriginalityScoreReport | null;
   sourceVideoUrl: string;
 }) {
   return (
@@ -5528,7 +5428,7 @@ function DedupResultPreview({
           )}
         </div>
       </div>
-      <OriginalityReportCard report={report} />
+      <p className="field-hint">去重模式只做本地视频处理和比例转换；处理强度在左侧选择。</p>
     </div>
   );
 }
@@ -6134,18 +6034,12 @@ function buildModeRecommendationReport({
     ),
     makeRecommendation(
       "video-dedup",
-      18 +
-        (hasDedupSource ? 42 : 0) +
-        (finishedOutputCount > 0 ? 14 : 0) +
-        (hasAsset("dedup-report") ? 14 : 0) +
-        (task.dedupTargetScore >= 80 ? 8 : 0),
-      "适合对已有成片做二次处理和内部原创度评分。",
-      [
-        hasDedupSource ? "" : "待处理视频",
-        task.dedupTargetScore >= 80 ? "" : "80+ 目标阈值",
-        hasAsset("dedup-report") ? "" : "评分报告"
-      ].filter(Boolean),
-      `${finishedOutputCount} 个可处理成片 / 目标 ${task.dedupTargetScore} 分`
+      18 + (hasDedupSource ? 48 : 0) + (finishedOutputCount > 0 ? 18 : 0),
+      "适合对已有成片做二次本地处理，输出新比例的新视频。",
+      [hasDedupSource ? "" : "待处理视频", finishedOutputCount > 0 ? "" : "可处理成片"].filter(
+        Boolean
+      ),
+      `${finishedOutputCount} 个可处理成片 / ${countAssets("dedup-processed-video")} 个处理结果`
     )
   ].sort((left, right) => right.score - left.score);
 
@@ -7055,7 +6949,7 @@ function generationDurationSummary(
   if (task.generationMode === "video-dedup") {
     return {
       title: "按导入视频长度",
-      detail: "去重处理不改核心内容时长，输出处理后视频和评分报告。"
+      detail: "去重处理保持原视频节奏和时长，只输出处理后视频。"
     };
   }
 
@@ -7094,8 +6988,8 @@ function generationAudioSummary(
 
   if (task.generationMode === "video-dedup") {
     return {
-      title: "使用原视频音轨",
-      detail: "去重处理会按策略调整音频变化，不需要单独生成配音。"
+      title: "保留原视频音轨",
+      detail: "输出时会保留音频，并按处理强度做轻微音量/速度扰动。"
     };
   }
 
@@ -7113,8 +7007,8 @@ function generationOutputSummary(task: VideoTask): { title: string; detail: stri
   const presets = task.selectedOutputPresets.map(presetLabel).join(" / ") || "未选择比例";
   if (task.generationMode === "video-dedup") {
     return {
-      title: "处理视频 + 评分报告",
-      detail: `${presets}；导出处理后 MP4、封面、原创度评分和发布资料。`
+      title: "处理后视频 + 封面",
+      detail: `${presets}；比例以这里选择为准。`
     };
   }
 
@@ -7279,7 +7173,7 @@ function assetKindLabel(kind: MediaAsset["kind"]): string {
     "mixed-cut-video": "混剪基础视频",
     "dedup-source-video": "待去重视频",
     "dedup-processed-video": "去重处理视频",
-    "dedup-report": "去重评分报告",
+    "dedup-report": "内部处理记录",
     "edit-decision-record": "剪辑记录",
     "custom-font": "字体",
     "generated-presenter-image": "人物商品图",
@@ -7360,7 +7254,6 @@ function countKnowledgeContextSources(task: VideoTask): {
     "mixed-cut-video",
     "dedup-source-video",
     "dedup-processed-video",
-    "dedup-report",
     "edit-decision-record",
     "generated-presenter-image",
     "avatar-video",
@@ -7415,14 +7308,6 @@ function clampUiNumber(value: string, min: number, max: number, fallback: number
   }
 
   return Math.min(max, Math.max(min, Math.round(numericValue)));
-}
-
-function parseDedupStrategy(value: string): DedupStrategy {
-  if (value === "fidelity-light" || value === "pixel-remix") {
-    return value;
-  }
-
-  return "fidelity-strong";
 }
 
 interface MixedCutGroupRow {
@@ -7704,11 +7589,10 @@ function buildFlowApiGuideItems(input: {
       active: true
     },
     {
-      title: "9. 去重评分",
-      providerLabel: "本地视频处理 + 内部风险评分",
+      title: "9. 去重处理",
+      providerLabel: "本地视频处理",
       modelLabel: "默认不需要模型",
-      detail:
-        "视频去重处理会输出处理后 MP4 和内部原创度/重复风险报告，阈值默认 80+，不代表平台官方判定。",
+      detail: "视频去重处理使用本地 FFmpeg 做画面和音频扰动，只输出处理后 MP4 和封面。",
       active: task.generationMode === "video-dedup"
     }
   ];
