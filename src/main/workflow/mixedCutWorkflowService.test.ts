@@ -207,6 +207,56 @@ describe("MixedCutWorkflowService", () => {
     expect(record.targetDurationSource).toBe("material");
   }, 20_000);
 
+  it("keeps fixed material mode to one selected shot per folder with natural video durations", () => {
+    const task = repository.createTask({
+      title: "Natural duration mixed cut",
+      sourceScript: ""
+    });
+    repository.updateTask({
+      taskId: task.id,
+      generationMode: "mixed-cut",
+      finalScript: "",
+      mixedCutTargetCount: 1,
+      mixedCutChapterMode: "fixed-material-count",
+      selectedOutputPresets: ["portrait-9-16"]
+    });
+
+    const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const sourceDirectory = path.join(taskDirectory, "source", "mixed-materials");
+    for (const [groupId, durationSeconds] of [
+      ["1", 1],
+      ["2", 2],
+      ["3", 3]
+    ] as const) {
+      const materialPath = path.join(sourceDirectory, groupId, `clip-${durationSeconds}.mp4`);
+      fs.mkdirSync(path.dirname(materialPath), { recursive: true });
+      createColorVideo(materialPath, durationSeconds);
+      repository.addMediaAsset(
+        task.id,
+        "mixed-cut-material",
+        `source/mixed-materials/${groupId}/clip-${durationSeconds}.mp4`
+      );
+    }
+
+    new MixedCutWorkflowService(repository, appPaths).prepareMixedCut(task.id);
+    const editDecisionPath = path.join(
+      taskDirectory,
+      "post",
+      "edit-decisions-mixed-cut-1-portrait-9-16.json"
+    );
+    const record = JSON.parse(fs.readFileSync(editDecisionPath, "utf8")) as {
+      segments: Array<{ durationSeconds: number; groupId: string }>;
+      targetDurationSeconds: number;
+      targetDurationSource: string;
+    };
+
+    expect(record.targetDurationSource).toBe("material");
+    expect(record.segments.map((segment) => segment.groupId)).toEqual(["1", "2", "3"]);
+    expect(record.segments).toHaveLength(3);
+    expect(record.targetDurationSeconds).toBeGreaterThanOrEqual(5.8);
+    expect(record.targetDurationSeconds).toBeLessThanOrEqual(6.2);
+  }, 30_000);
+
   it("uses uploaded mixed-cut audio duration as the target video duration", () => {
     const task = repository.createTask({
       title: "Audio timed mixed cut",
@@ -314,7 +364,7 @@ describe("MixedCutWorkflowService", () => {
     expect(record.segments.every((segment) => segment.durationSeconds <= 4.2)).toBe(true);
   }, 25_000);
 
-  it("fills time with additional video segments instead of looping a black first frame", () => {
+  it("fills audio mode with additional video segments instead of looping a black first frame", () => {
     const task = repository.createTask({
       title: "No black flash mixed cut",
       sourceScript: ""
@@ -324,11 +374,16 @@ describe("MixedCutWorkflowService", () => {
       generationMode: "mixed-cut",
       finalScript: "",
       mixedCutTargetCount: 1,
-      mixedCutChapterMode: "fixed-material-count",
+      mixedCutChapterMode: "fill-with-bgm",
       selectedOutputPresets: ["portrait-9-16"]
     });
 
     const taskDirectory = getTaskDirectory(appPaths, task.id);
+    const audioPath = path.join(taskDirectory, "source", "mixed-audio", "black-head-fill.wav");
+    fs.mkdirSync(path.dirname(audioPath), { recursive: true });
+    createSilentWav(audioPath, 3);
+    repository.addMediaAsset(task.id, "mixed-cut-audio", "source/mixed-audio/black-head-fill.wav");
+
     const sourceVideoPath = path.join(
       taskDirectory,
       "source",
@@ -594,6 +649,32 @@ function createBlackHeadVideo(outputPath: string): void {
       "ultrafast",
       "-crf",
       "18",
+      outputPath
+    ],
+    { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 }
+  );
+  expect(result.status).toBe(0);
+  expect(fs.existsSync(outputPath)).toBe(true);
+}
+
+function createColorVideo(outputPath: string, durationSeconds: number): void {
+  const ffmpegPath = requireTestFfmpegPath();
+  const result = spawnSync(
+    ffmpegPath,
+    [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      `color=c=blue:s=64x64:r=30:d=${durationSeconds.toFixed(2)}`,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "18",
+      "-pix_fmt",
+      "yuv420p",
       outputPath
     ],
     { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 }

@@ -232,7 +232,7 @@ export class MixedCutWorkflowService {
     const selectedShots = input.combination.shots;
     const targetTiming = resolveMixedCutTargetTiming({
       audio: mixedCutAudio,
-      selectedShotCount: selectedShots.length,
+      selectedShots,
       task: input.task
     });
     const targetDurationSeconds = targetTiming.seconds;
@@ -600,7 +600,7 @@ function selectMixedCutAudioForBatch(
 
 function resolveMixedCutTargetTiming(input: {
   task: VideoTask;
-  selectedShotCount: number;
+  selectedShots: MixedCutShot[];
   audio: MixedCutAudioAsset | null;
 }): { seconds: number; source: MixedCutEditDecisionRecord["targetDurationSource"] } {
   if (input.task.mixedCutChapterMode === "fill-with-bgm") {
@@ -616,13 +616,13 @@ function resolveMixedCutTargetTiming(input: {
 
   if (input.task.mixedCutChapterMode === "fixed-material-count") {
     return {
-      seconds: clampMaterialTargetDuration(input.selectedShotCount * SEGMENT_DURATION_SECONDS),
+      seconds: clampMaterialTargetDuration(sumFixedMaterialDurationSeconds(input.selectedShots)),
       source: "material"
     };
   }
 
   return {
-    seconds: clampMaterialTargetDuration(input.selectedShotCount * SEGMENT_DURATION_SECONDS),
+    seconds: clampMaterialTargetDuration(sumFixedMaterialDurationSeconds(input.selectedShots)),
     source: "material"
   };
 }
@@ -636,6 +636,10 @@ function buildMixedCutTimelineSegments(input: {
 }): MixedCutTimelineSegment[] {
   if (input.shots.length === 0) {
     throw new Error("混剪素材为空，请先选择包含视频或图片的数字文件夹。");
+  }
+
+  if (input.task.mixedCutChapterMode === "fixed-material-count") {
+    return buildFixedMaterialTimelineSegments(input);
   }
 
   const segments: MixedCutTimelineSegment[] = [];
@@ -686,6 +690,45 @@ function buildMixedCutTimelineSegments(input: {
 
   if (accumulatedSeconds < input.targetDurationSeconds - 0.05) {
     throw new Error("音频太长或画面素材太少，无法顺畅填满音频；请增加更多镜头素材。");
+  }
+
+  return segments;
+}
+
+function buildFixedMaterialTimelineSegments(input: {
+  task: VideoTask;
+  shots: MixedCutShot[];
+  targetDurationSeconds: number;
+}): MixedCutTimelineSegment[] {
+  const mediaDurationCache = new Map<string, number>();
+  const segments: MixedCutTimelineSegment[] = [];
+  let accumulatedSeconds = 0;
+
+  for (const shot of input.shots) {
+    if (accumulatedSeconds >= input.targetDurationSeconds - 0.05) {
+      break;
+    }
+
+    const remainingSeconds = input.targetDurationSeconds - accumulatedSeconds;
+    const durationSeconds = resolveFixedMaterialSegmentDurationSeconds(
+      shot,
+      remainingSeconds,
+      mediaDurationCache
+    );
+    if (durationSeconds <= 0) {
+      continue;
+    }
+
+    segments.push({
+      shot,
+      startSeconds: 0,
+      durationSeconds
+    });
+    accumulatedSeconds += durationSeconds;
+  }
+
+  if (segments.length === 0) {
+    throw new Error("混剪素材没有可用时长，请换用可正常播放的视频或图片。");
   }
 
   return segments;
@@ -759,6 +802,30 @@ function resolveTimelineSegmentDurationSeconds(
     Math.min(MIN_VIDEO_SEGMENT_SECONDS, remainingSeconds),
     Math.min(preferredDuration, availableSeconds, remainingSeconds)
   );
+}
+
+function sumFixedMaterialDurationSeconds(shots: MixedCutShot[]): number {
+  return shots.reduce((total, shot) => total + getFixedMaterialShotDurationSeconds(shot), 0);
+}
+
+function getFixedMaterialShotDurationSeconds(shot: MixedCutShot): number {
+  if (isImageMixedCutAsset(shot.relativePath)) {
+    return SEGMENT_DURATION_SECONDS;
+  }
+
+  return Math.max(0.1, getMediaDurationSeconds(shot.absolutePath));
+}
+
+function resolveFixedMaterialSegmentDurationSeconds(
+  shot: MixedCutShot,
+  remainingSeconds: number,
+  mediaDurationCache: Map<string, number>
+): number {
+  const naturalDuration = isImageMixedCutAsset(shot.relativePath)
+    ? SEGMENT_DURATION_SECONDS
+    : Math.max(0.1, getCachedMediaDurationSeconds(shot.absolutePath, mediaDurationCache));
+
+  return Math.min(naturalDuration, remainingSeconds);
 }
 
 function resolveSegmentStartSeconds(

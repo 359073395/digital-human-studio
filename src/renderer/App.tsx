@@ -7047,8 +7047,8 @@ function generationDurationSummary(
       title: "按素材章节组合",
       detail:
         counts.mixedCutTargetCount > 0
-          ? `按数字文件夹顺序抽取镜头，预计可生成 ${counts.mixedCutTargetCount} 条唯一组合。`
-          : "选择包含 1、2、3... 文件夹的素材目录后自动估算数量。"
+          ? `按数字文件夹顺序抽取镜头，按素材真实长度成片，预计可生成 ${counts.mixedCutTargetCount} 条唯一组合。`
+          : "选择包含 1、2、3... 文件夹的素材目录后自动估算数量；固定素材模式不会补额外镜头。"
     };
   }
 
